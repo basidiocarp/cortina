@@ -1,0 +1,31 @@
+# Rust
+target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.code-workspace
+
+# macOS
+.DS_Store
+._*
+
+# Environment / secrets
+.env
+.env.*
+
+# Project tooling
+.claude/
+.serena/
+.plans/
+CLAUDE.md
+INSTALL.md
+.rhizome/
+
+
+# Added by cargo
+
+/target
