@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 mod hooks;
+mod utils;
 
 #[derive(Parser)]
 #[command(name = "cortina", version, about = "Hook runner for AI coding agents")]
