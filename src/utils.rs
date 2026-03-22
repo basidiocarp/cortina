@@ -279,11 +279,20 @@ mod tests {
     #[test]
     fn test_has_error_with_error_pattern_in_output() {
         // Pattern: \bfailed\b
-        assert!(has_error("Command failed", Some(0)), "Should detect 'failed'");
+        assert!(
+            has_error("Command failed", Some(0)),
+            "Should detect 'failed'"
+        );
         // Pattern: \bFAILED\b
-        assert!(has_error("FAILED: test suite", Some(0)), "Should detect 'FAILED'");
+        assert!(
+            has_error("FAILED: test suite", Some(0)),
+            "Should detect 'FAILED'"
+        );
         // Pattern: \bpanicked\b
-        assert!(has_error("thread panicked", Some(0)), "Should detect 'panicked'");
+        assert!(
+            has_error("thread panicked", Some(0)),
+            "Should detect 'panicked'"
+        );
     }
 
     #[test]
