@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.1] - 2026-03-22
+
+### Fixed
+
+- **Regex caching**: 41 patterns now compiled once via `OnceLock` instead of per-call. Eliminates repeated compilation in `has_error`, `is_build_command`, `is_significant_command`.
+- **Build-success logic**: Fixed operator precedence bug — `&&` was binding tighter than `||`, causing export triggers on non-build commands when exit code was absent.
+- **JSON parse errors**: All three hook handlers now log parse failures to stderr instead of silently returning with a no-op.
+- **Exit code sentinel**: Replaced `i32::MAX` fallback with `Option` via `.ok()` for out-of-range exit codes.
+- **cwd_hash dedup**: Hash computed once per event and passed to helpers, down from 4 syscalls per invocation.
+
+### Changed
+
+- **Importance enum**: Replaced stringly-typed `&str` importance parameter with typed `Importance` enum (Low, Medium, High).
+- **TranscriptSummary struct**: `parse_jsonl_transcript` returns a struct instead of taking 6 mutable reference parameters. Renamed `errors_resolved` to `errors_encountered` (correct semantics).
+- **Allow reasons**: Added `reason` attributes to all `#[allow(clippy::unnecessary_wraps)]` suppressions.
+
 ## [0.1.0] - 2026-03-20
 
 Initial release.
