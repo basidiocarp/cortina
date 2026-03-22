@@ -18,9 +18,8 @@ pub fn cwd_hash() -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
-    let cwd = env::current_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "/tmp".to_string());
+    let cwd =
+        env::current_dir().map_or_else(|_| "/tmp".to_string(), |p| p.to_string_lossy().to_string());
 
     let mut hasher = DefaultHasher::new();
     cwd.hash(&mut hasher);
@@ -36,7 +35,7 @@ pub fn get_project_name() -> Option<String> {
 
 /// Normalize a command for tracking (e.g., "cargo test --lib" -> "cargo test")
 pub fn normalize_command(cmd: &str) -> String {
-    let parts: Vec<&str> = cmd.trim().split_whitespace().collect();
+    let parts: Vec<&str> = cmd.split_whitespace().collect();
     if parts.len() >= 2 {
         format!("{} {}", parts[0], parts[1])
     } else if !parts.is_empty() {
@@ -179,13 +178,13 @@ pub fn store_in_hyphae(topic: &str, content: &str, importance: &str, project: Op
     }
 
     let mut cmd = Command::new("hyphae");
-    cmd.args(&["store", "--topic", topic])
-        .args(&["--content", content])
-        .args(&["--importance", importance])
-        .args(&["--keywords", "cortina,hook"]);
+    cmd.args(["store", "--topic", topic])
+        .args(["--content", content])
+        .args(["--importance", importance])
+        .args(["--keywords", "cortina,hook"]);
 
     if let Some(proj) = project {
-        cmd.args(&["-P", proj]);
+        cmd.args(["-P", proj]);
     }
 
     // Fire and forget — spawn without waiting

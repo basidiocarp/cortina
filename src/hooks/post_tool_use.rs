@@ -28,10 +28,11 @@ struct EditEntry {
     timestamp: u64,
 }
 
-/// Handle PostToolUse events: capture errors, corrections, code changes.
+/// Handle `PostToolUse` events: capture errors, corrections, code changes.
 ///
 /// Replaces capture-errors.js, capture-corrections.js, capture-code-changes.js.
 /// Reads the tool result, detects patterns, stores signals in Hyphae.
+#[allow(clippy::unnecessary_wraps)]
 pub fn handle(input: &str) -> Result<()> {
     let json: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
 
@@ -69,8 +70,8 @@ fn handle_bash(json: &serde_json::Value) {
     let exit_code = json
         .get("tool_output")
         .and_then(|v| v.get("exit_code"))
-        .and_then(|v| v.as_i64())
-        .map(|i| i as i32);
+        .and_then(serde_json::Value::as_i64)
+        .map(|i| i32::try_from(i).unwrap_or(i32::MAX));
 
     if command.is_empty() || !is_significant_command(command) {
         return;
@@ -149,9 +150,9 @@ fn handle_file_edits(json: &serde_json::Value) {
     }
 }
 
-/// ─────────────────────────────────────────────────────────────────────────
-/// Error tracking
-/// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Error tracking
+// ─────────────────────────────────────────────────────────────────────────
 
 fn track_error(track_file: &str, cmd_key: &str, command: &str, output: &str) {
     let mut entries: HashMap<String, ErrorEntry> = load_json_file(track_file).unwrap_or_default();
@@ -160,10 +161,13 @@ fn track_error(track_file: &str, cmd_key: &str, command: &str, output: &str) {
         ErrorEntry {
             command: command.chars().take(500).collect(),
             error: output.chars().take(500).collect(),
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
+            timestamp: u64::try_from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis(),
+            )
+            .unwrap_or(u64::MAX),
         },
     );
     let _ = save_json_file(track_file, &entries);
@@ -205,18 +209,21 @@ fn store_error_in_hyphae(command: &str, output: &str) {
     );
 }
 
-/// ─────────────────────────────────────────────────────────────────────────
-/// Edit tracking and corrections
-/// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Edit tracking and corrections
+// ─────────────────────────────────────────────────────────────────────────
 
 fn load_and_clean_edits(track_file: &str) -> Vec<EditEntry> {
     let mut edits: Vec<EditEntry> = load_json_file(track_file).unwrap_or_default();
 
-    let cutoff = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-        - CLEANUP_AGE_MS;
+    let cutoff = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX)
+    .saturating_sub(CLEANUP_AGE_MS);
 
     edits.retain(|e| e.timestamp > cutoff);
     edits
@@ -224,10 +231,13 @@ fn load_and_clean_edits(track_file: &str) -> Vec<EditEntry> {
 
 fn track_edit(track_file: &str, file_path: &str, old_str: &str, new_str: &str) {
     let mut edits = load_and_clean_edits(track_file);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    let now = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX);
 
     edits.push(EditEntry {
         file: file_path.to_string(),
@@ -241,11 +251,14 @@ fn track_edit(track_file: &str, file_path: &str, old_str: &str, new_str: &str) {
 
 fn find_correction(file_path: &str, old_str: &str, track_file: &str) -> Option<EditEntry> {
     let edits = load_and_clean_edits(track_file);
-    let cutoff = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-        - CORRECTION_WINDOW_MS;
+    let cutoff = u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX)
+    .saturating_sub(CORRECTION_WINDOW_MS);
 
     let candidates: Vec<_> = edits
         .iter()
@@ -290,9 +303,9 @@ fn store_correction_in_hyphae(
     );
 }
 
-/// ─────────────────────────────────────────────────────────────────────────
-/// Rhizome export and Hyphae ingest tracking
-/// ─────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────
+// Rhizome export and Hyphae ingest tracking
+// ─────────────────────────────────────────────────────────────────────────
 
 fn get_pending_files_path() -> String {
     let hash = cwd_hash();
@@ -312,7 +325,7 @@ fn get_pending_files() -> Vec<String> {
             content
                 .lines()
                 .filter(|line| !line.is_empty())
-                .map(|line| line.to_string())
+                .map(ToString::to_string)
                 .collect()
         })
         .unwrap_or_default()
@@ -326,7 +339,7 @@ fn get_pending_documents() -> Vec<String> {
             content
                 .lines()
                 .filter(|line| !line.is_empty())
-                .map(|line| line.to_string())
+                .map(ToString::to_string)
                 .collect()
         })
         .unwrap_or_default()
@@ -340,7 +353,7 @@ fn track_pending_file(file_path: &str) {
         .open(&path)
         .and_then(|mut f| {
             use std::io::Write;
-            writeln!(f, "{}", file_path)
+            writeln!(f, "{file_path}")
         });
 }
 
@@ -352,7 +365,7 @@ fn track_pending_document(file_path: &str) {
         .open(&path)
         .and_then(|mut f| {
             use std::io::Write;
-            writeln!(f, "{}", file_path)
+            writeln!(f, "{file_path}")
         });
 }
 

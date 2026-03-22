@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::utils::{command_exists, store_in_hyphae};
@@ -9,6 +10,7 @@ use crate::utils::{command_exists, store_in_hyphae};
 /// Replaces session-summary.sh. Parses the transcript for task description,
 /// files modified, tools used, errors resolved, and outcome.
 /// Stores the summary in Hyphae.
+#[allow(clippy::unnecessary_wraps)]
 pub fn handle(input: &str) -> Result<()> {
     let json: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
 
@@ -35,26 +37,26 @@ pub fn handle(input: &str) -> Result<()> {
         parse_transcript(transcript_path);
 
     // Build summary
-    let mut summary = format!("Session in {}: {}", project_name, task_desc);
+    let mut summary = format!("Session in {project_name}: {task_desc}");
 
     if !files_modified.is_empty() {
-        summary.push_str(&format!("\nFiles: {}", files_modified));
+        let _ = write!(summary, "\nFiles: {files_modified}");
     }
 
     if !tool_counts.is_empty() {
-        summary.push_str(&format!("\nTools: {}", tool_counts));
+        let _ = write!(summary, "\nTools: {tool_counts}");
     }
 
     if errors_resolved > 0 {
-        summary.push_str(&format!("\nErrors resolved: {}", errors_resolved));
+        let _ = write!(summary, "\nErrors resolved: {errors_resolved}");
     }
 
     if !outcome.is_empty() {
-        summary.push_str(&format!("\nOutcome: {}", outcome));
+        let _ = write!(summary, "\nOutcome: {outcome}");
     }
 
     // Store in Hyphae (fire and forget with timeout)
-    let topic = format!("session/{}", project_name);
+    let topic = format!("session/{project_name}");
     store_in_hyphae(&topic, &summary, "medium", Some(project_name));
 
     Ok(())
@@ -81,18 +83,15 @@ fn parse_transcript(transcript_path: Option<&str>) -> (String, String, String, u
     };
 
     // Try to read and parse transcript JSONL
-    match std::fs::read_to_string(path) {
-        Ok(content) => {
-            parse_jsonl_transcript(
-                &content,
-                &mut task_desc,
-                &mut files_modified,
-                &mut tool_counts,
-                &mut errors_resolved,
-                &mut outcome,
-            );
-        }
-        Err(_) => {} // File not readable, use defaults
+    if let Ok(content) = std::fs::read_to_string(path) {
+        parse_jsonl_transcript(
+            &content,
+            &mut task_desc,
+            &mut files_modified,
+            &mut tool_counts,
+            &mut errors_resolved,
+            &mut outcome,
+        );
     }
 
     (
@@ -201,7 +200,7 @@ fn parse_jsonl_transcript(
         counts.sort_by(|a, b| b.1.cmp(a.1)); // Sort by count descending
         let formatted: Vec<String> = counts
             .iter()
-            .map(|(tool, count)| format!("{}({})", tool, count))
+            .map(|(tool, count)| format!("{tool}({count})"))
             .collect();
         *tool_counts = formatted.join(", ");
     }

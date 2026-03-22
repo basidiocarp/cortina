@@ -4,11 +4,12 @@ use std::process::Command;
 
 use crate::utils::command_exists;
 
-/// Handle PreToolUse events: rewrite commands through Mycelium.
+/// Handle `PreToolUse` events: rewrite commands through Mycelium.
 ///
 /// Replaces mycelium-rewrite.sh. Reads the tool input, checks if the
 /// command should be rewritten via `mycelium rewrite`, and outputs the
 /// updated input JSON if a rewrite occurred.
+#[allow(clippy::unnecessary_wraps)]
 pub fn handle(input: &str) -> Result<()> {
     let json: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
 
@@ -39,7 +40,7 @@ pub fn handle(input: &str) -> Result<()> {
     // ─────────────────────────────────────────────────────────────────────────
     // Delegate to mycelium rewrite
     // ─────────────────────────────────────────────────────────────────────────
-    let output = Command::new("mycelium").args(&["rewrite", &cmd]).output();
+    let output = Command::new("mycelium").args(["rewrite", &cmd]).output();
 
     let rewritten = match output {
         Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
@@ -68,6 +69,6 @@ pub fn handle(input: &str) -> Result<()> {
         }
     });
 
-    println!("{}", response.to_string());
+    println!("{response}");
     Ok(())
 }

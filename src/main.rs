@@ -15,10 +15,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Handle PreToolUse events (command rewriting)
+    /// Handle `PreToolUse` events (command rewriting)
     PreToolUse,
 
-    /// Handle PostToolUse events (error/correction/change capture)
+    /// Handle `PostToolUse` events (error/correction/change capture)
     PostToolUse,
 
     /// Handle Stop events (session summary)
