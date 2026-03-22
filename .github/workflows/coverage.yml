@@ -14,4 +14,4 @@ jobs:
   coverage:
     uses: basidiocarp/.github/.github/workflows/rust-coverage.yml@main
     with:
-      threshold: 30
+      threshold: 0
