@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::utils::{
-    command_exists, cwd_hash, get_project_name, has_error, is_build_command, is_document_file,
-    is_significant_command, load_json_file, normalize_command, save_json_file, spawn_async,
-    store_in_hyphae,
+    Importance, command_exists, cwd_hash, get_project_name, has_error, is_build_command,
+    is_document_file, is_significant_command, load_json_file, normalize_command, save_json_file,
+    spawn_async, store_in_hyphae,
 };
 
 const CORRECTION_WINDOW_MS: u64 = 5 * 60 * 1000; // 5 minutes
@@ -32,9 +32,18 @@ struct EditEntry {
 ///
 /// Replaces capture-errors.js, capture-corrections.js, capture-code-changes.js.
 /// Reads the tool result, detects patterns, stores signals in Hyphae.
-#[allow(clippy::unnecessary_wraps)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "Result return type required by dispatch match in main"
+)]
 pub fn handle(input: &str) -> Result<()> {
-    let json: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
+    let json: serde_json::Value = match serde_json::from_str(input) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cortina: failed to parse hook input: {e}");
+            return Ok(());
+        }
+    };
 
     let tool_name = json.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -67,11 +76,11 @@ fn handle_bash(json: &serde_json::Value) {
         .and_then(|v| v.as_str())
         .unwrap_or("");
 
-    let exit_code = json
+    let exit_code: Option<i32> = json
         .get("tool_output")
         .and_then(|v| v.get("exit_code"))
         .and_then(serde_json::Value::as_i64)
-        .map(|i| i32::try_from(i).unwrap_or(i32::MAX));
+        .and_then(|i| i32::try_from(i).ok());
 
     if command.is_empty() || !is_significant_command(command) {
         return;
@@ -92,8 +101,8 @@ fn handle_bash(json: &serde_json::Value) {
     }
 
     // Check for build success and trigger exports
-    if is_build_command(command) && exit_code == Some(0) || exit_code.is_none() {
-        check_and_trigger_exports();
+    if is_build_command(command) && exit_code.is_none_or(|c| c == 0) {
+        check_and_trigger_exports(&hash);
     }
 }
 
@@ -135,18 +144,18 @@ fn handle_file_edits(json: &serde_json::Value) {
     track_edit(&track_file, file_path, old_str, new_str);
 
     // Track file edits for rhizome export
-    track_pending_file(file_path);
+    track_pending_file(file_path, &hash);
 
     // Track document edits for hyphae ingest
     if is_document_file(file_path) {
-        track_pending_document(file_path);
+        track_pending_document(file_path, &hash);
     }
 
     // Check thresholds and trigger exports
-    let pending_docs = get_pending_documents();
+    let pending_docs = get_pending_documents(&hash);
     if pending_docs.len() >= INGEST_THRESHOLD && command_exists("hyphae") {
         trigger_hyphae_ingest(&pending_docs);
-        clear_pending_documents();
+        clear_pending_documents(&hash);
     }
 }
 
@@ -188,7 +197,7 @@ fn resolve_error(track_file: &str, cmd_key: &str, command: &str) {
             store_in_hyphae(
                 "errors/resolved",
                 &content,
-                "high",
+                Importance::High,
                 get_project_name().as_deref(),
             );
         }
@@ -204,7 +213,7 @@ fn store_error_in_hyphae(command: &str, output: &str) {
     store_in_hyphae(
         "errors/active",
         &content,
-        "medium",
+        Importance::Medium,
         get_project_name().as_deref(),
     );
 }
@@ -298,7 +307,7 @@ fn store_correction_in_hyphae(
     store_in_hyphae(
         "corrections",
         &content,
-        "high",
+        Importance::High,
         get_project_name().as_deref(),
     );
 }
@@ -307,18 +316,16 @@ fn store_correction_in_hyphae(
 // Rhizome export and Hyphae ingest tracking
 // ─────────────────────────────────────────────────────────────────────────
 
-fn get_pending_files_path() -> String {
-    let hash = cwd_hash();
+fn get_pending_files_path(hash: &str) -> String {
     format!("/tmp/cortina-pending-exports-{hash}.txt")
 }
 
-fn get_pending_documents_path() -> String {
-    let hash = cwd_hash();
+fn get_pending_documents_path(hash: &str) -> String {
     format!("/tmp/cortina-pending-ingest-{hash}.txt")
 }
 
-fn get_pending_files() -> Vec<String> {
-    let path = get_pending_files_path();
+fn get_pending_files(hash: &str) -> Vec<String> {
+    let path = get_pending_files_path(hash);
     std::fs::read_to_string(&path)
         .ok()
         .map(|content| {
@@ -331,8 +338,8 @@ fn get_pending_files() -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn get_pending_documents() -> Vec<String> {
-    let path = get_pending_documents_path();
+fn get_pending_documents(hash: &str) -> Vec<String> {
+    let path = get_pending_documents_path(hash);
     std::fs::read_to_string(&path)
         .ok()
         .map(|content| {
@@ -345,8 +352,8 @@ fn get_pending_documents() -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn track_pending_file(file_path: &str) {
-    let path = get_pending_files_path();
+fn track_pending_file(file_path: &str, hash: &str) {
+    let path = get_pending_files_path(hash);
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -357,8 +364,8 @@ fn track_pending_file(file_path: &str) {
         });
 }
 
-fn track_pending_document(file_path: &str) {
-    let path = get_pending_documents_path();
+fn track_pending_document(file_path: &str, hash: &str) {
+    let path = get_pending_documents_path(hash);
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -369,21 +376,21 @@ fn track_pending_document(file_path: &str) {
         });
 }
 
-fn clear_pending_files() {
-    let path = get_pending_files_path();
+fn clear_pending_files(hash: &str) {
+    let path = get_pending_files_path(hash);
     let _ = std::fs::remove_file(&path);
 }
 
-fn clear_pending_documents() {
-    let path = get_pending_documents_path();
+fn clear_pending_documents(hash: &str) {
+    let path = get_pending_documents_path(hash);
     let _ = std::fs::remove_file(&path);
 }
 
-fn check_and_trigger_exports() {
-    let pending_files = get_pending_files();
+fn check_and_trigger_exports(hash: &str) {
+    let pending_files = get_pending_files(hash);
     if pending_files.len() >= EXPORT_THRESHOLD && command_exists("rhizome") {
         spawn_async("rhizome", &["export"]);
-        clear_pending_files();
+        clear_pending_files(hash);
     }
 }
 

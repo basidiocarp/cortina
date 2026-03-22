@@ -9,9 +9,18 @@ use crate::utils::command_exists;
 /// Replaces mycelium-rewrite.sh. Reads the tool input, checks if the
 /// command should be rewritten via `mycelium rewrite`, and outputs the
 /// updated input JSON if a rewrite occurred.
-#[allow(clippy::unnecessary_wraps)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "Result return type required by dispatch match in main"
+)]
 pub fn handle(input: &str) -> Result<()> {
-    let json: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
+    let json: serde_json::Value = match serde_json::from_str(input) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cortina: failed to parse hook input: {e}");
+            return Ok(());
+        }
+    };
 
     // ─────────────────────────────────────────────────────────────────────────
     // Extract command from tool_input

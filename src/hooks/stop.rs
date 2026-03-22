@@ -3,16 +3,37 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::utils::{command_exists, store_in_hyphae};
+use crate::utils::{Importance, command_exists, store_in_hyphae};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Transcript summary data structure
+// ─────────────────────────────────────────────────────────────────────────
+
+struct TranscriptSummary {
+    task_desc: String,
+    files_modified: String,
+    tool_counts: String,
+    errors_encountered: usize,
+    outcome: String,
+}
 
 /// Handle Stop events: capture session summary.
 ///
 /// Replaces session-summary.sh. Parses the transcript for task description,
 /// files modified, tools used, errors resolved, and outcome.
 /// Stores the summary in Hyphae.
-#[allow(clippy::unnecessary_wraps)]
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "Result return type required by dispatch match in main"
+)]
 pub fn handle(input: &str) -> Result<()> {
-    let json: serde_json::Value = serde_json::from_str(input).unwrap_or_default();
+    let json: serde_json::Value = match serde_json::from_str(input) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("cortina: failed to parse hook input: {e}");
+            return Ok(());
+        }
+    };
 
     let transcript_path = json.get("transcript_path").and_then(|v| v.as_str());
     let cwd = json.get("cwd").and_then(|v| v.as_str());
@@ -33,87 +54,66 @@ pub fn handle(input: &str) -> Result<()> {
         .unwrap_or("unknown");
 
     // Parse transcript if available
-    let (task_desc, files_modified, tool_counts, errors_resolved, outcome) =
-        parse_transcript(transcript_path);
+    let summary = parse_transcript(transcript_path);
 
     // Build summary
-    let mut summary = format!("Session in {project_name}: {task_desc}");
+    let mut text = format!("Session in {project_name}: {}", summary.task_desc);
 
-    if !files_modified.is_empty() {
-        let _ = write!(summary, "\nFiles: {files_modified}");
+    if !summary.files_modified.is_empty() {
+        let _ = write!(text, "\nFiles: {}", summary.files_modified);
     }
 
-    if !tool_counts.is_empty() {
-        let _ = write!(summary, "\nTools: {tool_counts}");
+    if !summary.tool_counts.is_empty() {
+        let _ = write!(text, "\nTools: {}", summary.tool_counts);
     }
 
-    if errors_resolved > 0 {
-        let _ = write!(summary, "\nErrors resolved: {errors_resolved}");
+    if summary.errors_encountered > 0 {
+        let _ = write!(text, "\nErrors encountered: {}", summary.errors_encountered);
     }
 
-    if !outcome.is_empty() {
-        let _ = write!(summary, "\nOutcome: {outcome}");
+    if !summary.outcome.is_empty() {
+        let _ = write!(text, "\nOutcome: {}", summary.outcome);
     }
 
     // Store in Hyphae (fire and forget with timeout)
     let topic = format!("session/{project_name}");
-    store_in_hyphae(&topic, &summary, "medium", Some(project_name));
+    store_in_hyphae(&topic, &text, Importance::Medium, Some(project_name));
 
     Ok(())
 }
 
-fn parse_transcript(transcript_path: Option<&str>) -> (String, String, String, usize, String) {
-    let mut task_desc = "Session work".to_string();
-    let mut files_modified = String::new();
-    let mut tool_counts = String::new();
-    let mut errors_resolved = 0;
-    let mut outcome = "Work completed".to_string();
+fn parse_transcript(transcript_path: Option<&str>) -> TranscriptSummary {
+    let default = TranscriptSummary {
+        task_desc: "Session work".to_string(),
+        files_modified: String::new(),
+        tool_counts: String::new(),
+        errors_encountered: 0,
+        outcome: "Work completed".to_string(),
+    };
 
     let path = match transcript_path {
         Some(p) if !p.is_empty() => p,
-        _ => {
-            return (
-                task_desc,
-                files_modified,
-                tool_counts,
-                errors_resolved,
-                outcome,
-            );
-        }
+        _ => return default,
     };
 
     // Try to read and parse transcript JSONL
-    if let Ok(content) = std::fs::read_to_string(path) {
-        parse_jsonl_transcript(
-            &content,
-            &mut task_desc,
-            &mut files_modified,
-            &mut tool_counts,
-            &mut errors_resolved,
-            &mut outcome,
-        );
+    match std::fs::read_to_string(path) {
+        Ok(content) => parse_jsonl_transcript(&content),
+        Err(_) => default,
     }
-
-    (
-        task_desc,
-        files_modified,
-        tool_counts,
-        errors_resolved,
-        outcome,
-    )
 }
 
-fn parse_jsonl_transcript(
-    content: &str,
-    task_desc: &mut String,
-    files_modified: &mut String,
-    tool_counts: &mut String,
-    errors_resolved: &mut usize,
-    outcome: &mut String,
-) {
+fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
+    let mut summary = TranscriptSummary {
+        task_desc: "Session work".to_string(),
+        files_modified: String::new(),
+        tool_counts: String::new(),
+        errors_encountered: 0,
+        outcome: "Work completed".to_string(),
+    };
+
     let mut tool_usage: HashMap<String, usize> = HashMap::new();
     let mut first_user_message = false;
-    let mut last_assistant_message = String::new();
     let mut file_set = std::collections::HashSet::new();
 
     for line in content.lines() {
@@ -127,7 +127,7 @@ fn parse_jsonl_transcript(
             if !first_user_message {
                 if let Some("human") = entry.get("type").and_then(|v| v.as_str()) {
                     if let Some(text) = entry.get("text").and_then(|v| v.as_str()) {
-                        *task_desc = text
+                        summary.task_desc = text
                             .replace('\n', " ")
                             .chars()
                             .take(100)
@@ -158,7 +158,7 @@ fn parse_jsonl_transcript(
             // Extract key outcome from last assistant message
             if let Some("assistant") = entry.get("type").and_then(|v| v.as_str()) {
                 if let Some(text) = entry.get("text").and_then(|v| v.as_str()) {
-                    last_assistant_message = text
+                    summary.outcome = text
                         .replace('\n', " ")
                         .chars()
                         .take(150)
@@ -177,7 +177,7 @@ fn parse_jsonl_transcript(
                         || content_str.contains("FAILED")
                         || content_str.contains("panic")
                     {
-                        *errors_resolved += 1;
+                        summary.errors_encountered += 1;
                     }
                 }
             }
@@ -187,7 +187,7 @@ fn parse_jsonl_transcript(
     // Format files modified
     if !file_set.is_empty() {
         let files: Vec<&String> = file_set.iter().collect();
-        *files_modified = files
+        summary.files_modified = files
             .iter()
             .map(|f| f.as_str())
             .collect::<Vec<_>>()
@@ -202,11 +202,8 @@ fn parse_jsonl_transcript(
             .iter()
             .map(|(tool, count)| format!("{tool}({count})"))
             .collect();
-        *tool_counts = formatted.join(", ");
+        summary.tool_counts = formatted.join(", ");
     }
 
-    // Update outcome if we found an assistant message
-    if !last_assistant_message.is_empty() {
-        *outcome = last_assistant_message;
-    }
+    summary
 }

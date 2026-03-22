@@ -7,6 +7,29 @@ use regex::Regex;
 use std::env;
 use std::fs;
 use std::process::Command;
+use std::sync::OnceLock;
+
+// ─────────────────────────────────────────────────────────────────────────
+// Importance levels for stored content
+// ─────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy)]
+pub enum Importance {
+    #[allow(dead_code, reason = "Reserved for future use")]
+    Low,
+    Medium,
+    High,
+}
+
+impl Importance {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
 
 /// Check if a binary exists in PATH
 pub fn command_exists(name: &str) -> bool {
@@ -55,26 +78,33 @@ pub fn has_error(output: &str, exit_code: Option<i32>) -> bool {
     }
 
     // Check for error patterns
-    let error_patterns = [
-        r"\berror[\s:[\]]",
-        r"\bFAILED\b",
-        r"\bpanicked\b",
-        r"\bfailed\b",
-        r"\bfatal[\s:]",
-        r"\bcommand not found\b",
-        r"\bsegmentation fault\b",
-        r"\baborted\b",
-    ];
-
-    for pattern in &error_patterns {
-        if let Ok(re) = Regex::new(pattern) {
-            if re.is_match(output) {
-                return true;
-            }
+    for re in error_patterns() {
+        if re.is_match(output) {
+            return true;
         }
     }
 
     false
+}
+
+fn error_patterns() -> &'static [Regex] {
+    static ERROR_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+
+    ERROR_PATTERNS.get_or_init(|| {
+        [
+            r"\berror[\s:[\]]",
+            r"\bFAILED\b",
+            r"\bpanicked\b",
+            r"\bfailed\b",
+            r"\bfatal[\s:]",
+            r"\bcommand not found\b",
+            r"\bsegmentation fault\b",
+            r"\baborted\b",
+        ]
+        .iter()
+        .filter_map(|p| Regex::new(p).ok())
+        .collect()
+    })
 }
 
 /// Check if a file path is a document file (markdown, config, etc.)
@@ -93,68 +123,82 @@ pub fn is_document_file(path: &str) -> bool {
 
 /// Check if a command is a build command
 pub fn is_build_command(cmd: &str) -> bool {
-    let build_patterns = [
-        r"\bcargo\s+(build|check)\b",
-        r"\bnpm\s+run\s+build\b",
-        r"\byarn\s+build\b",
-        r"\bpnpm\s+build\b",
-        r"\bbun\s+build\b",
-        r"\btsc\b",
-        r"\bnext\s+build\b",
-        r"\bmake\b",
-        r"\bgo\s+build\b",
-        r"\bgradlew\s+build\b",
-        r"\bmvn\s+clean\s+package\b",
-    ];
-
-    for pattern in &build_patterns {
-        if let Ok(re) = Regex::new(pattern) {
-            if re.is_match(cmd) {
-                return true;
-            }
+    for re in build_patterns() {
+        if re.is_match(cmd) {
+            return true;
         }
     }
 
     false
 }
 
+fn build_patterns() -> &'static [Regex] {
+    static BUILD_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+
+    BUILD_PATTERNS.get_or_init(|| {
+        [
+            r"\bcargo\s+(build|check)\b",
+            r"\bnpm\s+run\s+build\b",
+            r"\byarn\s+build\b",
+            r"\bpnpm\s+build\b",
+            r"\bbun\s+build\b",
+            r"\btsc\b",
+            r"\bnext\s+build\b",
+            r"\bmake\b",
+            r"\bgo\s+build\b",
+            r"\bgradlew\s+build\b",
+            r"\bmvn\s+clean\s+package\b",
+        ]
+        .iter()
+        .filter_map(|p| Regex::new(p).ok())
+        .collect()
+    })
+}
+
 /// Check if a command is a significant (worth tracking) command
 pub fn is_significant_command(cmd: &str) -> bool {
-    let sig_patterns = [
-        r"\bcargo\b",
-        r"\bnpm\b",
-        r"\byarn\b",
-        r"\bpnpm\b",
-        r"\bbun\b",
-        r"\bgit\s+push\b",
-        r"\bdocker\b",
-        r"\bpytest\b",
-        r"\bmake\b",
-        r"\bgo\s+(build|test|run|vet)\b",
-        r"\brustc\b",
-        r"\bgcc\b",
-        r"\bg\+\+\b",
-        r"\bjavac\b",
-        r"\bmvn\b",
-        r"\bgradle\b",
-        r"\bvitest\b",
-        r"\bjest\b",
-        r"\bplaywright\b",
-        r"\btsc\b",
-        r"\bpython\b",
-        r"\bruby\b",
-        r"\bswift\b",
-    ];
-
-    for pattern in &sig_patterns {
-        if let Ok(re) = Regex::new(pattern) {
-            if re.is_match(cmd) {
-                return true;
-            }
+    for re in significant_patterns() {
+        if re.is_match(cmd) {
+            return true;
         }
     }
 
     false
+}
+
+fn significant_patterns() -> &'static [Regex] {
+    static SIG_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+
+    SIG_PATTERNS.get_or_init(|| {
+        [
+            r"\bcargo\b",
+            r"\bnpm\b",
+            r"\byarn\b",
+            r"\bpnpm\b",
+            r"\bbun\b",
+            r"\bgit\s+push\b",
+            r"\bdocker\b",
+            r"\bpytest\b",
+            r"\bmake\b",
+            r"\bgo\s+(build|test|run|vet)\b",
+            r"\brustc\b",
+            r"\bgcc\b",
+            r"\bg\+\+\b",
+            r"\bjavac\b",
+            r"\bmvn\b",
+            r"\bgradle\b",
+            r"\bvitest\b",
+            r"\bjest\b",
+            r"\bplaywright\b",
+            r"\btsc\b",
+            r"\bpython\b",
+            r"\bruby\b",
+            r"\bswift\b",
+        ]
+        .iter()
+        .filter_map(|p| Regex::new(p).ok())
+        .collect()
+    })
 }
 
 /// Load JSON from a temp file
@@ -172,7 +216,7 @@ pub fn save_json_file<T: serde::Serialize>(path: &str, data: &T) -> Result<()> {
 }
 
 /// Store content in Hyphae (fire and forget)
-pub fn store_in_hyphae(topic: &str, content: &str, importance: &str, project: Option<&str>) {
+pub fn store_in_hyphae(topic: &str, content: &str, importance: Importance, project: Option<&str>) {
     if !command_exists("hyphae") {
         return;
     }
@@ -180,7 +224,7 @@ pub fn store_in_hyphae(topic: &str, content: &str, importance: &str, project: Op
     let mut cmd = Command::new("hyphae");
     cmd.args(["store", "--topic", topic])
         .args(["--content", content])
-        .args(["--importance", importance])
+        .args(["--importance", importance.as_str()])
         .args(["--keywords", "cortina,hook"]);
 
     if let Some(proj) = project {
