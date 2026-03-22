@@ -207,3 +207,87 @@ fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
 
     summary
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Transcript parsing tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_jsonl_transcript_valid() {
+        let jsonl = r#"{"type": "human", "text": "Build and test the project"}
+{"type": "tool_use", "tool_name": "Bash", "input": {"command": "cargo build"}}
+{"type": "tool_use", "tool_name": "Write", "input": {"file_path": "/path/to/file.rs"}}
+{"type": "tool_result", "content": "Build succeeded"}
+{"type": "assistant", "text": "Build completed successfully"}
+"#;
+
+        let summary = parse_jsonl_transcript(jsonl);
+
+        assert_eq!(summary.task_desc, "Build and test the project");
+        assert!(!summary.outcome.is_empty());
+        assert!(summary.outcome.contains("successfully"));
+    }
+
+    #[test]
+    fn test_parse_jsonl_transcript_counts_tools() {
+        let jsonl = r#"{"type": "human", "text": "Task description"}
+{"type": "tool_use", "tool_name": "Bash", "input": {}}
+{"type": "tool_use", "tool_name": "Bash", "input": {}}
+{"type": "tool_use", "tool_name": "Edit", "input": {"file_path": "/test.rs"}}
+{"type": "assistant", "text": "Done"}
+"#;
+
+        let summary = parse_jsonl_transcript(jsonl);
+
+        assert!(summary.tool_counts.contains("Bash"));
+        assert!(summary.tool_counts.contains("Edit"));
+    }
+
+    #[test]
+    fn test_parse_jsonl_transcript_counts_errors() {
+        let jsonl = r#"{"type": "human", "text": "Task"}
+{"type": "tool_use", "tool_name": "Bash", "input": {}}
+{"type": "tool_result", "content": "error: failed"}
+{"type": "tool_result", "content": "Error in compilation"}
+{"type": "assistant", "text": "Done"}
+"#;
+
+        let summary = parse_jsonl_transcript(jsonl);
+
+        assert_eq!(summary.errors_encountered, 2);
+    }
+
+    #[test]
+    fn test_parse_jsonl_transcript_empty_input() {
+        let empty = "";
+
+        let summary = parse_jsonl_transcript(empty);
+
+        assert_eq!(summary.task_desc, "Session work");
+        assert_eq!(summary.outcome, "Work completed");
+        assert_eq!(summary.errors_encountered, 0);
+        assert!(summary.files_modified.is_empty());
+    }
+
+    #[test]
+    fn test_parse_jsonl_transcript_extracts_files() {
+        let jsonl = r#"{"type": "human", "text": "Modify files"}
+{"type": "tool_use", "tool_name": "Write", "input": {"file_path": "/a.rs"}}
+{"type": "tool_use", "tool_name": "Edit", "input": {"file_path": "/b.rs"}}
+{"type": "assistant", "text": "Done"}
+"#;
+
+        let summary = parse_jsonl_transcript(jsonl);
+
+        assert!(summary.files_modified.contains("/a.rs"));
+        assert!(summary.files_modified.contains("/b.rs"));
+    }
+}

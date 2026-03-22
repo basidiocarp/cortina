@@ -250,3 +250,112 @@ pub fn spawn_async(cmd: &str, args: &[&str]) {
         .stderr(std::process::Stdio::null())
         .spawn();
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // has_error tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_has_error_with_non_zero_exit_code() {
+        assert!(has_error("", Some(1)));
+        assert!(has_error("anything", Some(127)));
+        assert!(has_error("", Some(-1)));
+    }
+
+    #[test]
+    fn test_has_error_with_zero_exit_code_and_no_error_patterns() {
+        assert!(!has_error("Success", Some(0)));
+        assert!(!has_error("completed successfully", Some(0)));
+    }
+
+    #[test]
+    fn test_has_error_with_error_pattern_in_output() {
+        // Pattern: \bfailed\b
+        assert!(has_error("Command failed", Some(0)), "Should detect 'failed'");
+        // Pattern: \bFAILED\b
+        assert!(has_error("FAILED: test suite", Some(0)), "Should detect 'FAILED'");
+        // Pattern: \bpanicked\b
+        assert!(has_error("thread panicked", Some(0)), "Should detect 'panicked'");
+    }
+
+    #[test]
+    fn test_has_error_with_none_exit_code_and_no_patterns() {
+        assert!(!has_error("Output without errors", None));
+    }
+
+    #[test]
+    fn test_has_error_with_none_exit_code_but_error_pattern() {
+        // Pattern: \bcommand not found\b
+        assert!(has_error("command not found", None));
+        // Pattern: \bsegmentation fault\b
+        assert!(has_error("segmentation fault in malloc", None));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // is_build_command tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_is_build_command_cargo() {
+        assert!(is_build_command("cargo build"));
+        assert!(is_build_command("cargo build --release"));
+        assert!(is_build_command("cargo check"));
+    }
+
+    #[test]
+    fn test_is_build_command_npm_and_tsc() {
+        assert!(is_build_command("npm run build"));
+        assert!(is_build_command("tsc"));
+        assert!(is_build_command("make"));
+    }
+
+    #[test]
+    fn test_is_build_command_non_build() {
+        assert!(!is_build_command("ls -la"));
+        assert!(!is_build_command("git status"));
+        assert!(!is_build_command("echo hello"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // normalize_command tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_normalize_command_multi_word() {
+        assert_eq!(normalize_command("cargo build --release"), "cargo build");
+        assert_eq!(
+            normalize_command("cargo test --lib -- --nocapture"),
+            "cargo test"
+        );
+    }
+
+    #[test]
+    fn test_normalize_command_single_word() {
+        assert_eq!(normalize_command("ls"), "ls");
+        assert_eq!(normalize_command("git"), "git");
+    }
+
+    #[test]
+    fn test_normalize_command_empty() {
+        assert_eq!(normalize_command(""), "");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Importance::as_str tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_importance_as_str() {
+        assert_eq!(Importance::Low.as_str(), "low");
+        assert_eq!(Importance::Medium.as_str(), "medium");
+        assert_eq!(Importance::High.as_str(), "high");
+    }
+}

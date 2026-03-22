@@ -399,3 +399,135 @@ fn trigger_hyphae_ingest(documents: &[String]) {
         spawn_async("hyphae", &["ingest-file", doc]);
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Bash hook event JSON parsing tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_bash_hook_event_valid() {
+        let json_str = r#"{
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "cargo test --lib"
+            },
+            "tool_output": {
+                "output": "test output",
+                "exit_code": 0
+            }
+        }"#;
+
+        let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        let tool_name = json.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+        assert_eq!(tool_name, "Bash");
+
+        let command = json
+            .get("tool_input")
+            .and_then(|v| v.get("command"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(command, "cargo test --lib");
+
+        let exit_code: Option<i32> = json
+            .get("tool_output")
+            .and_then(|v| v.get("exit_code"))
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|i| i32::try_from(i).ok());
+        assert_eq!(exit_code, Some(0));
+    }
+
+    #[test]
+    fn test_parse_bash_hook_with_error_exit_code() {
+        let json_str = r#"{
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": "cargo build"
+            },
+            "tool_output": {
+                "output": "error: failed to compile",
+                "exit_code": 101
+            }
+        }"#;
+
+        let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        let exit_code: Option<i32> = json
+            .get("tool_output")
+            .and_then(|v| v.get("exit_code"))
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|i| i32::try_from(i).ok());
+        assert_eq!(exit_code, Some(101));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Edit hook event JSON parsing tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_parse_edit_hook_event_valid() {
+        let json_str = r#"{
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": "/path/to/file.rs",
+                "old_string": "fn old() {}",
+                "new_string": "fn new() {}"
+            }
+        }"#;
+
+        let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        let tool_name = json.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+        assert_eq!(tool_name, "Edit");
+
+        let file_path = json
+            .get("tool_input")
+            .and_then(|v| v.get("file_path"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(file_path, "/path/to/file.rs");
+
+        let old_string = json
+            .get("tool_input")
+            .and_then(|v| v.get("old_string"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(old_string, "fn old() {}");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Malformed JSON handling tests
+    // ─────────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_handle_malformed_json_returns_ok() {
+        let malformed = r#"{ invalid json }"#;
+        let result = handle(malformed);
+        // Should not panic, should return Ok
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_empty_json_returns_ok() {
+        let empty = "";
+        let result = handle(empty);
+        // Should handle gracefully
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_handle_valid_json_with_unknown_tool() {
+        let json_str = r#"{
+            "tool_name": "UnknownTool",
+            "tool_input": {}
+        }"#;
+
+        let result = handle(json_str);
+        assert!(result.is_ok());
+    }
+}
