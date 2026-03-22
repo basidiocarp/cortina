@@ -1,0 +1,17 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    uses: basidiocarp/.github/.github/workflows/rust-coverage.yml@main
+    with:
+      threshold: 30
