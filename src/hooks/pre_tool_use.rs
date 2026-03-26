@@ -1,8 +1,7 @@
 use anyhow::Result;
-use serde_json::json;
 use std::process::Command;
 
-use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
+use crate::adapters::claude_code::{ClaudeCodeHookEnvelope, rewrite_response};
 use crate::utils::command_exists;
 
 /// Handle `PreToolUse` adapter events: rewrite commands through Mycelium.
@@ -63,14 +62,8 @@ pub fn handle(input: &str) -> Result<()> {
     // ─────────────────────────────────────────────────────────────────────────
     // Output rewrite instruction JSON
     // ─────────────────────────────────────────────────────────────────────────
-    let response = json!({
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "permissionDecisionReason": "Mycelium auto-rewrite",
-            "updatedInput": event.updated_input_with_command(&rewritten)
-        }
-    });
+    let updated_input = event.updated_input_with_command(&rewritten);
+    let response = rewrite_response(&updated_input);
 
     println!("{response}");
     Ok(())

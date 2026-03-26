@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::events::{
     BashToolEvent, CommandRewriteRequest, FileEditEvent, SessionStopEvent, ToolResultEvent,
@@ -96,11 +96,24 @@ impl ClaudeCodeHookEnvelope {
     }
 }
 
+pub fn rewrite_response(updated_input: &Value) -> Value {
+    json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": "Mycelium auto-rewrite",
+            "updatedInput": updated_input
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use crate::events::ToolResultEvent;
 
-    use super::ClaudeCodeHookEnvelope;
+    use super::{ClaudeCodeHookEnvelope, rewrite_response};
 
     #[test]
     fn parses_tool_fields_from_claude_code_envelope() {
@@ -162,6 +175,30 @@ mod tests {
         assert_eq!(
             stop.transcript_path.as_deref(),
             Some("/tmp/transcript.jsonl")
+        );
+    }
+
+    #[test]
+    fn builds_claude_rewrite_response() {
+        let response = rewrite_response(&json!({
+            "command": "cargo check",
+            "cwd": "/tmp/demo"
+        }));
+
+        assert_eq!(
+            response
+                .get("hookSpecificOutput")
+                .and_then(|value| value.get("hookEventName"))
+                .and_then(serde_json::Value::as_str),
+            Some("PreToolUse")
+        );
+        assert_eq!(
+            response
+                .get("hookSpecificOutput")
+                .and_then(|value| value.get("updatedInput"))
+                .and_then(|value| value.get("command"))
+                .and_then(serde_json::Value::as_str),
+            Some("cargo check")
         );
     }
 }

@@ -16,14 +16,22 @@ Claude Code                    Cortina                         Ecosystem
 PreToolUse  ──stdin JSON──►    Claude adapter          ──►     Rewrite via Mycelium
 PostToolUse ──stdin JSON──►    Claude adapter          ──►     Store to Hyphae
 Stop        ──stdin JSON──►    Claude adapter          ──►     Session summary
+```
 
-CLI compatibility remains the same today:
+Preferred adapter-oriented CLI:
+
+```bash
+cortina adapter claude-code pre-tool-use
+cortina adapter claude-code post-tool-use
+cortina adapter claude-code stop
+```
+
+Compatibility aliases still work:
 
 ```bash
 cortina pre-tool-use
 cortina post-tool-use
 cortina stop
-```
 ```
 
 PostToolUse does the heavy lifting. It watches for failed commands, self-corrections (an edit immediately after a write to the same file), test failures, and accumulated code changes. When it detects a pattern, it stores a memory in Hyphae with the right topic so future sessions can recall it.
