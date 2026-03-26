@@ -36,26 +36,26 @@ pub fn handle(input: &str) -> Result<()> {
         }
     };
 
-    let transcript_path = envelope.transcript_path();
-    let cwd = envelope.cwd();
-
-    // Need at least cwd to be useful
-    let cwd = match cwd {
-        Some(c) if !c.is_empty() => c,
+    let event = match envelope.stop_event() {
+        Some(event) => event,
         _ => return Ok(()),
     };
+
+    if event.cwd.is_empty() {
+        return Ok(());
+    }
 
     if !command_exists("hyphae") {
         return Ok(());
     }
 
-    let project_name = Path::new(cwd)
+    let project_name = Path::new(&event.cwd)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
     // Parse transcript if available
-    let summary = parse_transcript(transcript_path);
+    let summary = parse_transcript(event.transcript_path.as_deref());
 
     // Build summary
     let mut text = format!("Session in {project_name}: {}", summary.task_desc);

@@ -23,17 +23,17 @@ pub fn handle(input: &str) -> Result<()> {
         }
     };
 
-    let cmd = match envelope.tool_input_string("command") {
-        Some(command) => command.to_string(),
+    let event = match envelope.pre_tool_use_event() {
+        Some(event) => event,
         None => return Ok(()),
     };
 
-    if cmd.is_empty() {
+    if event.command.is_empty() {
         return Ok(());
     }
 
     // Skip heredocs — they contain too much complexity
-    if cmd.contains("<<") {
+    if event.command.contains("<<") {
         return Ok(());
     }
 
@@ -47,7 +47,9 @@ pub fn handle(input: &str) -> Result<()> {
     // ─────────────────────────────────────────────────────────────────────────
     // Delegate to mycelium rewrite
     // ─────────────────────────────────────────────────────────────────────────
-    let output = Command::new("mycelium").args(["rewrite", &cmd]).output();
+    let output = Command::new("mycelium")
+        .args(["rewrite", &event.command])
+        .output();
 
     let rewritten = match output {
         Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
@@ -55,7 +57,7 @@ pub fn handle(input: &str) -> Result<()> {
     };
 
     // If no change, nothing to do
-    if rewritten == cmd {
+    if rewritten == event.command {
         return Ok(());
     }
 
@@ -67,7 +69,7 @@ pub fn handle(input: &str) -> Result<()> {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
             "permissionDecisionReason": "Mycelium auto-rewrite",
-            "updatedInput": envelope.updated_input_with_command(&rewritten)
+            "updatedInput": event.updated_input_with_command(&rewritten)
         }
     });
 

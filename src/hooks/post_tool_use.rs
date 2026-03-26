@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::event_envelope::EventEnvelope;
+use crate::event_envelope::{BashToolEvent, EventEnvelope, FileEditEvent, PostToolUseEvent};
 use crate::utils::{
     Importance, command_exists, cwd_hash, get_project_name, has_error, is_build_command,
     is_document_file, is_significant_command, load_json_file, normalize_command, save_json_file,
@@ -46,14 +46,10 @@ pub fn handle(input: &str) -> Result<()> {
         }
     };
 
-    match envelope.tool_name().unwrap_or("") {
-        "Bash" => {
-            handle_bash(&envelope);
-        }
-        "Write" | "Edit" | "MultiEdit" => {
-            handle_file_edits(&envelope);
-        }
-        _ => {}
+    match envelope.post_tool_use_event() {
+        Some(PostToolUseEvent::Bash(event)) => handle_bash(&event),
+        Some(PostToolUseEvent::FileEdit(event)) => handle_file_edits(&event),
+        None => {}
     }
 
     // Pass through the original input (hooks must not modify output)
@@ -62,10 +58,10 @@ pub fn handle(input: &str) -> Result<()> {
 }
 
 /// Handle Bash tool calls: detect errors and resolutions
-fn handle_bash(envelope: &EventEnvelope) {
-    let command = envelope.tool_input_string("command").unwrap_or("");
-    let output = envelope.tool_output_string("output").unwrap_or("");
-    let exit_code = envelope.tool_output_exit_code();
+fn handle_bash(event: &BashToolEvent) {
+    let command = event.command.as_str();
+    let output = event.output.as_str();
+    let exit_code = event.exit_code;
 
     if command.is_empty() || !is_significant_command(command) {
         return;
@@ -92,10 +88,10 @@ fn handle_bash(envelope: &EventEnvelope) {
 }
 
 /// Handle Write/Edit/MultiEdit: track edits and detect corrections
-fn handle_file_edits(envelope: &EventEnvelope) {
-    let file_path = envelope.tool_input_string("file_path").unwrap_or("");
-    let old_str = envelope.tool_input_string("old_string").unwrap_or("");
-    let new_str = envelope.tool_input_string("new_string").unwrap_or("");
+fn handle_file_edits(event: &FileEditEvent) {
+    let file_path = event.file_path.as_str();
+    let old_str = event.old_string.as_str();
+    let new_str = event.new_string.as_str();
 
     if file_path.is_empty() || old_str.is_empty() {
         return;
