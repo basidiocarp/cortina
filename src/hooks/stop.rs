@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use crate::event_envelope::EventEnvelope;
 use crate::utils::{Importance, command_exists, store_in_hyphae};
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -27,16 +28,16 @@ struct TranscriptSummary {
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> Result<()> {
-    let json: serde_json::Value = match serde_json::from_str(input) {
-        Ok(v) => v,
+    let envelope = match EventEnvelope::parse(input) {
+        Ok(envelope) => envelope,
         Err(e) => {
-            eprintln!("cortina: failed to parse hook input: {e}");
+            eprintln!("cortina: failed to parse event input: {e}");
             return Ok(());
         }
     };
 
-    let transcript_path = json.get("transcript_path").and_then(|v| v.as_str());
-    let cwd = json.get("cwd").and_then(|v| v.as_str());
+    let transcript_path = envelope.transcript_path();
+    let cwd = envelope.cwd();
 
     // Need at least cwd to be useful
     let cwd = match cwd {

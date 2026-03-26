@@ -2,10 +2,11 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::event_envelope::EventEnvelope;
 use crate::utils::{
     Importance, command_exists, cwd_hash, get_project_name, has_error, is_build_command,
     is_document_file, is_significant_command, load_json_file, normalize_command, save_json_file,
-    spawn_async, store_in_hyphae,
+    spawn_async, store_in_hyphae, temp_state_path,
 };
 
 const CORRECTION_WINDOW_MS: u64 = 5 * 60 * 1000; // 5 minutes
@@ -37,22 +38,20 @@ struct EditEntry {
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> Result<()> {
-    let json: serde_json::Value = match serde_json::from_str(input) {
-        Ok(v) => v,
+    let envelope = match EventEnvelope::parse(input) {
+        Ok(envelope) => envelope,
         Err(e) => {
-            eprintln!("cortina: failed to parse hook input: {e}");
+            eprintln!("cortina: failed to parse event input: {e}");
             return Ok(());
         }
     };
 
-    let tool_name = json.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
-
-    match tool_name {
+    match envelope.tool_name().unwrap_or("") {
         "Bash" => {
-            handle_bash(&json);
+            handle_bash(&envelope);
         }
         "Write" | "Edit" | "MultiEdit" => {
-            handle_file_edits(&json);
+            handle_file_edits(&envelope);
         }
         _ => {}
     }
@@ -63,31 +62,17 @@ pub fn handle(input: &str) -> Result<()> {
 }
 
 /// Handle Bash tool calls: detect errors and resolutions
-fn handle_bash(json: &serde_json::Value) {
-    let command = json
-        .get("tool_input")
-        .and_then(|v| v.get("command"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let output = json
-        .get("tool_output")
-        .and_then(|v| v.get("output"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let exit_code: Option<i32> = json
-        .get("tool_output")
-        .and_then(|v| v.get("exit_code"))
-        .and_then(serde_json::Value::as_i64)
-        .and_then(|i| i32::try_from(i).ok());
+fn handle_bash(envelope: &EventEnvelope) {
+    let command = envelope.tool_input_string("command").unwrap_or("");
+    let output = envelope.tool_output_string("output").unwrap_or("");
+    let exit_code = envelope.tool_output_exit_code();
 
     if command.is_empty() || !is_significant_command(command) {
         return;
     }
 
     let hash = cwd_hash();
-    let track_file = format!("/tmp/cortina-errors-{hash}.json");
+    let track_file = temp_state_path("errors", &hash, "json");
     let cmd_key = normalize_command(command);
     let error_detected = has_error(output, exit_code);
 
@@ -107,31 +92,17 @@ fn handle_bash(json: &serde_json::Value) {
 }
 
 /// Handle Write/Edit/MultiEdit: track edits and detect corrections
-fn handle_file_edits(json: &serde_json::Value) {
-    let file_path = json
-        .get("tool_input")
-        .and_then(|v| v.get("file_path"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let old_str = json
-        .get("tool_input")
-        .and_then(|v| v.get("old_string"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-
-    let new_str = json
-        .get("tool_input")
-        .and_then(|v| v.get("new_string"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+fn handle_file_edits(envelope: &EventEnvelope) {
+    let file_path = envelope.tool_input_string("file_path").unwrap_or("");
+    let old_str = envelope.tool_input_string("old_string").unwrap_or("");
+    let new_str = envelope.tool_input_string("new_string").unwrap_or("");
 
     if file_path.is_empty() || old_str.is_empty() {
         return;
     }
 
     let hash = cwd_hash();
-    let track_file = format!("/tmp/cortina-edits-{hash}.json");
+    let track_file = temp_state_path("edits", &hash, "json");
 
     // Check for self-corrections
     if let Some(prev_edit) = find_correction(file_path, old_str, &track_file) {
@@ -163,7 +134,7 @@ fn handle_file_edits(json: &serde_json::Value) {
 // Error tracking
 // ─────────────────────────────────────────────────────────────────────────
 
-fn track_error(track_file: &str, cmd_key: &str, command: &str, output: &str) {
+fn track_error(track_file: &Path, cmd_key: &str, command: &str, output: &str) {
     let mut entries: HashMap<String, ErrorEntry> = load_json_file(track_file).unwrap_or_default();
     entries.insert(
         cmd_key.to_string(),
@@ -182,7 +153,7 @@ fn track_error(track_file: &str, cmd_key: &str, command: &str, output: &str) {
     let _ = save_json_file(track_file, &entries);
 }
 
-fn resolve_error(track_file: &str, cmd_key: &str, command: &str) {
+fn resolve_error(track_file: &Path, cmd_key: &str, command: &str) {
     let mut entries: HashMap<String, ErrorEntry> = load_json_file(track_file).unwrap_or_default();
 
     if let Some(prev_error) = entries.remove(cmd_key) {
@@ -222,7 +193,7 @@ fn store_error_in_hyphae(command: &str, output: &str) {
 // Edit tracking and corrections
 // ─────────────────────────────────────────────────────────────────────────
 
-fn load_and_clean_edits(track_file: &str) -> Vec<EditEntry> {
+fn load_and_clean_edits(track_file: &Path) -> Vec<EditEntry> {
     let mut edits: Vec<EditEntry> = load_json_file(track_file).unwrap_or_default();
 
     let cutoff = u64::try_from(
@@ -238,7 +209,7 @@ fn load_and_clean_edits(track_file: &str) -> Vec<EditEntry> {
     edits
 }
 
-fn track_edit(track_file: &str, file_path: &str, old_str: &str, new_str: &str) {
+fn track_edit(track_file: &Path, file_path: &str, old_str: &str, new_str: &str) {
     let mut edits = load_and_clean_edits(track_file);
     let now = u64::try_from(
         std::time::SystemTime::now()
@@ -258,7 +229,7 @@ fn track_edit(track_file: &str, file_path: &str, old_str: &str, new_str: &str) {
     let _ = save_json_file(track_file, &edits);
 }
 
-fn find_correction(file_path: &str, old_str: &str, track_file: &str) -> Option<EditEntry> {
+fn find_correction(file_path: &str, old_str: &str, track_file: &Path) -> Option<EditEntry> {
     let edits = load_and_clean_edits(track_file);
     let cutoff = u64::try_from(
         std::time::SystemTime::now()
@@ -316,12 +287,12 @@ fn store_correction_in_hyphae(
 // Rhizome export and Hyphae ingest tracking
 // ─────────────────────────────────────────────────────────────────────────
 
-fn get_pending_files_path(hash: &str) -> String {
-    format!("/tmp/cortina-pending-exports-{hash}.txt")
+fn get_pending_files_path(hash: &str) -> std::path::PathBuf {
+    temp_state_path("pending-exports", hash, "txt")
 }
 
-fn get_pending_documents_path(hash: &str) -> String {
-    format!("/tmp/cortina-pending-ingest-{hash}.txt")
+fn get_pending_documents_path(hash: &str) -> std::path::PathBuf {
+    temp_state_path("pending-ingest", hash, "txt")
 }
 
 fn get_pending_files(hash: &str) -> Vec<String> {

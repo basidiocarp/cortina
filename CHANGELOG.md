@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **Platform temp paths**: Cortina now uses the system temp directory for tracking files instead of hardcoded `/tmp` paths, which removes a Windows portability blocker for error, edit, export, and ingest state.
+
+### Changed
+
+- **Shared event envelope parsing**: `pre-tool-use`, `post-tool-use`, and `stop` now read through one normalized event-envelope layer instead of each command manually traversing raw JSON.
+
 ## [0.1.1] - 2026-03-22
 
 ### Fixed

@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde_json::json;
 use std::process::Command;
 
+use crate::event_envelope::EventEnvelope;
 use crate::utils::command_exists;
 
 /// Handle `PreToolUse` events: rewrite commands through Mycelium.
@@ -14,20 +15,17 @@ use crate::utils::command_exists;
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> Result<()> {
-    let json: serde_json::Value = match serde_json::from_str(input) {
-        Ok(v) => v,
+    let envelope = match EventEnvelope::parse(input) {
+        Ok(envelope) => envelope,
         Err(e) => {
-            eprintln!("cortina: failed to parse hook input: {e}");
+            eprintln!("cortina: failed to parse event input: {e}");
             return Ok(());
         }
     };
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Extract command from tool_input
-    // ─────────────────────────────────────────────────────────────────────────
-    let cmd = match json.get("tool_input").and_then(|v| v.get("command")) {
-        Some(serde_json::Value::String(s)) => s.clone(),
-        _ => return Ok(()),
+    let cmd = match envelope.tool_input_string("command") {
+        Some(command) => command.to_string(),
+        None => return Ok(()),
     };
 
     if cmd.is_empty() {
@@ -64,17 +62,12 @@ pub fn handle(input: &str) -> Result<()> {
     // ─────────────────────────────────────────────────────────────────────────
     // Output rewrite instruction JSON
     // ─────────────────────────────────────────────────────────────────────────
-    let mut updated_input = json.get("tool_input").cloned().unwrap_or_default();
-    if let Some(obj) = updated_input.as_object_mut() {
-        obj.insert("command".to_string(), json!(rewritten));
-    }
-
     let response = json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
             "permissionDecisionReason": "Mycelium auto-rewrite",
-            "updatedInput": updated_input
+            "updatedInput": envelope.updated_input_with_command(&rewritten)
         }
     });
 

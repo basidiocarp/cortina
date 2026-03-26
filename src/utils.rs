@@ -6,6 +6,7 @@ use anyhow::Result;
 use regex::Regex;
 use std::env;
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -41,12 +42,19 @@ pub fn cwd_hash() -> String {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
 
-    let cwd =
-        env::current_dir().map_or_else(|_| "/tmp".to_string(), |p| p.to_string_lossy().to_string());
+    let cwd = env::current_dir().map_or_else(
+        |_| env::temp_dir().to_string_lossy().to_string(),
+        |p| p.to_string_lossy().to_string(),
+    );
 
     let mut hasher = DefaultHasher::new();
     cwd.hash(&mut hasher);
     format!("{:x}", hasher.finish())
+}
+
+/// Resolve a temp state file path for Cortina tracking state.
+pub fn temp_state_path(name: &str, hash: &str, extension: &str) -> PathBuf {
+    env::temp_dir().join(format!("cortina-{name}-{hash}.{extension}"))
 }
 
 /// Get project name from current working directory
@@ -202,14 +210,14 @@ fn significant_patterns() -> &'static [Regex] {
 }
 
 /// Load JSON from a temp file
-pub fn load_json_file<T: serde::de::DeserializeOwned>(path: &str) -> Option<T> {
+pub fn load_json_file<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) -> Option<T> {
     fs::read_to_string(path)
         .ok()
         .and_then(|content| serde_json::from_str(&content).ok())
 }
 
 /// Save JSON to a temp file
-pub fn save_json_file<T: serde::Serialize>(path: &str, data: &T) -> Result<()> {
+pub fn save_json_file<T: serde::Serialize>(path: impl AsRef<Path>, data: &T) -> Result<()> {
     let json = serde_json::to_string_pretty(data)?;
     fs::write(path, json)?;
     Ok(())
@@ -366,5 +374,12 @@ mod tests {
         assert_eq!(Importance::Low.as_str(), "low");
         assert_eq!(Importance::Medium.as_str(), "medium");
         assert_eq!(Importance::High.as_str(), "high");
+    }
+
+    #[test]
+    fn test_temp_state_path_uses_system_temp_dir() {
+        let path = temp_state_path("errors", "abc123", "json");
+        assert!(path.starts_with(env::temp_dir()));
+        assert!(path.ends_with("cortina-errors-abc123.json"));
     }
 }

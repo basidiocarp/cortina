@@ -1,6 +1,6 @@
 # Cortina
 
-Hook runner for AI coding agents. Reads Claude Code hook events from stdin, detects patterns in tool results, and stores signals in Hyphae. One Rust binary replaces five JavaScript files and two shell scripts.
+Hook runner for AI coding agents. Reads the current hook-event envelope from stdin, detects patterns in tool results, and stores signals in Hyphae. Today that envelope comes from Claude Code, but Cortina’s internal event handling is normalized so the runtime logic is less tied to one host-specific parser shape. One Rust binary replaces five JavaScript files and two shell scripts.
 
 Named after the fungal cortina—a veil between the cap and stipe that intercepts what passes between them.
 
@@ -8,7 +8,7 @@ Part of the [Basidiocarp ecosystem](https://github.com/basidiocarp).
 
 ## How It Works
 
-Claude Code fires hook events at three points: before a tool runs, after it completes, and when the session ends. Cortina handles all three.
+Claude Code currently fires hook events at three points: before a tool runs, after it completes, and when the session ends. Cortina handles all three.
 
 ```
 Claude Code                    Cortina                         Ecosystem

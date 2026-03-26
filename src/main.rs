@@ -3,6 +3,7 @@ use std::io::{self, Read};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod event_envelope;
 mod hooks;
 mod utils;
 
@@ -28,7 +29,7 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Read JSON from stdin (Claude Code hook protocol)
+    // Read JSON from stdin (current hook-event envelope)
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
 
