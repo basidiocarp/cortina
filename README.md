@@ -34,6 +34,8 @@ cortina post-tool-use
 cortina stop
 ```
 
+The CLI entrypoint dispatches through the adapter layer rather than calling Claude-specific handlers directly. Adding a new host should be an adapter/module change, not a rewrite of the shared signal pipeline.
+
 PostToolUse does the heavy lifting. It watches for failed commands, self-corrections (an edit immediately after a write to the same file), test failures, and accumulated code changes. When it detects a pattern, it stores a memory in Hyphae with the right topic so future sessions can recall it.
 
 The Stop hook writes a session summary: which files changed, what errors occurred, what decisions were made.

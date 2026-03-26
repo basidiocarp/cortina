@@ -8,6 +8,8 @@ mod events;
 mod hooks;
 mod utils;
 
+use adapters::{AdapterCommand, ClaudeCodeEventCommand};
+
 #[derive(Parser)]
 #[command(
     name = "cortina",
@@ -40,31 +42,6 @@ enum Commands {
     Stop,
 }
 
-#[derive(Subcommand)]
-enum AdapterCommand {
-    /// Handle Claude Code hook adapter events
-    #[command(name = "claude-code")]
-    ClaudeCode {
-        #[command(subcommand)]
-        event: ClaudeCodeEventCommand,
-    },
-}
-
-#[derive(Subcommand)]
-enum ClaudeCodeEventCommand {
-    /// Handle `PreToolUse` adapter events (command rewriting)
-    #[command(name = "pre-tool-use")]
-    PreToolUse,
-
-    /// Handle `PostToolUse` adapter events (error/correction/change capture)
-    #[command(name = "post-tool-use")]
-    PostToolUse,
-
-    /// Handle `Stop` adapter events (session summary)
-    #[command(name = "stop")]
-    Stop,
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -73,16 +50,16 @@ fn main() -> Result<()> {
     io::stdin().read_to_string(&mut input)?;
 
     match cli.command {
-        Commands::Adapter { adapter } => match adapter {
-            AdapterCommand::ClaudeCode { event } => match event {
-                ClaudeCodeEventCommand::PreToolUse => hooks::pre_tool_use::handle(&input),
-                ClaudeCodeEventCommand::PostToolUse => hooks::post_tool_use::handle(&input),
-                ClaudeCodeEventCommand::Stop => hooks::stop::handle(&input),
-            },
-        },
-        Commands::PreToolUse => hooks::pre_tool_use::handle(&input),
-        Commands::PostToolUse => hooks::post_tool_use::handle(&input),
-        Commands::Stop => hooks::stop::handle(&input),
+        Commands::Adapter { adapter } => adapters::handle_adapter_command(&adapter, &input),
+        Commands::PreToolUse => {
+            adapters::handle_legacy_claude_command(ClaudeCodeEventCommand::PreToolUse, &input)
+        }
+        Commands::PostToolUse => {
+            adapters::handle_legacy_claude_command(ClaudeCodeEventCommand::PostToolUse, &input)
+        }
+        Commands::Stop => {
+            adapters::handle_legacy_claude_command(ClaudeCodeEventCommand::Stop, &input)
+        }
     }
 }
 

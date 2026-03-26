@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-03-26
+
 ### Fixed
 
 - **Platform temp paths**: Cortina now uses the system temp directory for tracking files instead of hardcoded `/tmp` paths, which removes a Windows portability blocker for error, edit, export, and ingest state.
@@ -11,6 +13,7 @@
 - **Shared event envelope parsing**: `pre-tool-use`, `post-tool-use`, and `stop` now read through one normalized event-envelope layer instead of each command manually traversing raw JSON.
 - **Explicit Claude adapter boundary**: Cortina now treats the current Claude Code hook envelope as an adapter input rather than the core internal event model, while keeping the existing CLI and output compatibility.
 - **Adapter-oriented CLI**: `cortina adapter claude-code ...` is now the preferred command surface, while the old flat Claude hook commands remain as hidden compatibility aliases.
+- **Shared adapter dispatch**: The binary entrypoint now routes host events through the adapter layer instead of wiring Claude-specific handlers directly in `main`.
 
 ## [0.1.1] - 2026-03-22
 
