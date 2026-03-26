@@ -2,10 +2,10 @@ use anyhow::Result;
 use serde_json::json;
 use std::process::Command;
 
-use crate::event_envelope::EventEnvelope;
+use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::utils::command_exists;
 
-/// Handle `PreToolUse` events: rewrite commands through Mycelium.
+/// Handle `PreToolUse` adapter events: rewrite commands through Mycelium.
 ///
 /// Replaces mycelium-rewrite.sh. Reads the tool input, checks if the
 /// command should be rewritten via `mycelium rewrite`, and outputs the
@@ -15,7 +15,7 @@ use crate::utils::command_exists;
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> Result<()> {
-    let envelope = match EventEnvelope::parse(input) {
+    let envelope = match ClaudeCodeHookEnvelope::parse(input) {
         Ok(envelope) => envelope,
         Err(e) => {
             eprintln!("cortina: failed to parse event input: {e}");
@@ -23,9 +23,8 @@ pub fn handle(input: &str) -> Result<()> {
         }
     };
 
-    let event = match envelope.pre_tool_use_event() {
-        Some(event) => event,
-        None => return Ok(()),
+    let Some(event) = envelope.command_rewrite_request() else {
+        return Ok(());
     };
 
     if event.command.is_empty() {

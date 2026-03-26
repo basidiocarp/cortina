@@ -3,12 +3,17 @@ use std::io::{self, Read};
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-mod event_envelope;
+mod adapters;
+mod events;
 mod hooks;
 mod utils;
 
 #[derive(Parser)]
-#[command(name = "cortina", version, about = "Hook runner for AI coding agents")]
+#[command(
+    name = "cortina",
+    version,
+    about = "Lifecycle signal runner for AI coding agents"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -16,20 +21,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Handle `PreToolUse` events (command rewriting)
+    /// Handle Claude Code `PreToolUse` adapter events (command rewriting)
     PreToolUse,
 
-    /// Handle `PostToolUse` events (error/correction/change capture)
+    /// Handle Claude Code `PostToolUse` adapter events (error/correction/change capture)
     PostToolUse,
 
-    /// Handle Stop events (session summary)
+    /// Handle Claude Code `Stop` adapter events (session summary)
     Stop,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Read JSON from stdin (current hook-event envelope)
+    // Read the current host adapter envelope from stdin.
     let mut input = String::new();
     io::stdin().read_to_string(&mut input)?;
 

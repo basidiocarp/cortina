@@ -1,6 +1,6 @@
 # Cortina
 
-Hook runner for AI coding agents. Reads the current hook-event envelope from stdin, detects patterns in tool results, and stores signals in Hyphae. Today that envelope comes from Claude Code, but Cortina’s internal event handling is normalized so the runtime logic is less tied to one host-specific parser shape. One Rust binary replaces five JavaScript files and two shell scripts.
+Lifecycle signal runner for AI coding agents. Cortina reads the current host adapter envelope from stdin, normalizes it into internal signal types, detects patterns in tool results, and stores signals in Hyphae. Today the shipped adapter surface is Claude Code hooks, but the runtime logic now sits behind an explicit adapter boundary instead of treating one host envelope as the core model. One Rust binary replaces five JavaScript files and two shell scripts.
 
 Named after the fungal cortina—a veil between the cap and stipe that intercepts what passes between them.
 
@@ -8,14 +8,22 @@ Part of the [Basidiocarp ecosystem](https://github.com/basidiocarp).
 
 ## How It Works
 
-Claude Code currently fires hook events at three points: before a tool runs, after it completes, and when the session ends. Cortina handles all three.
+Claude Code currently fires hook events at three points: before a tool runs, after it completes, and when the session ends. Cortina currently ships a Claude adapter for all three, then normalizes those inputs before running shared logic.
 
 ```
 Claude Code                    Cortina                         Ecosystem
 ───────────                    ───────                         ─────────
-PreToolUse  ──stdin JSON──►    cortina pre-tool-use    ──►     Rewrite via Mycelium
-PostToolUse ──stdin JSON──►    cortina post-tool-use   ──►     Store to Hyphae
-Stop        ──stdin JSON──►    cortina stop            ──►     Session summary
+PreToolUse  ──stdin JSON──►    Claude adapter          ──►     Rewrite via Mycelium
+PostToolUse ──stdin JSON──►    Claude adapter          ──►     Store to Hyphae
+Stop        ──stdin JSON──►    Claude adapter          ──►     Session summary
+
+CLI compatibility remains the same today:
+
+```bash
+cortina pre-tool-use
+cortina post-tool-use
+cortina stop
+```
 ```
 
 PostToolUse does the heavy lifting. It watches for failed commands, self-corrections (an edit immediately after a write to the same file), test failures, and accumulated code changes. When it detects a pattern, it stores a memory in Hyphae with the right topic so future sessions can recall it.
@@ -37,7 +45,7 @@ The Stop hook writes a session summary: which files changed, what errors occurre
 
 ## Install
 
-Stipe handles this as part of ecosystem setup:
+Stipe handles the current Claude adapter registration as part of ecosystem setup:
 
 ```bash
 stipe install cortina

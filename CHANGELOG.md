@@ -9,6 +9,7 @@
 ### Changed
 
 - **Shared event envelope parsing**: `pre-tool-use`, `post-tool-use`, and `stop` now read through one normalized event-envelope layer instead of each command manually traversing raw JSON.
+- **Explicit Claude adapter boundary**: Cortina now treats the current Claude Code hook envelope as an adapter input rather than the core internal event model, while keeping the existing CLI and output compatibility.
 
 ## [0.1.1] - 2026-03-22
 

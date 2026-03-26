@@ -2,7 +2,8 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::event_envelope::{BashToolEvent, EventEnvelope, FileEditEvent, PostToolUseEvent};
+use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
+use crate::events::{BashToolEvent, FileEditEvent, ToolResultEvent};
 use crate::utils::{
     Importance, command_exists, cwd_hash, get_project_name, has_error, is_build_command,
     is_document_file, is_significant_command, load_json_file, normalize_command, save_json_file,
@@ -29,7 +30,7 @@ struct EditEntry {
     timestamp: u64,
 }
 
-/// Handle `PostToolUse` events: capture errors, corrections, code changes.
+/// Handle `PostToolUse` adapter events: capture errors, corrections, code changes.
 ///
 /// Replaces capture-errors.js, capture-corrections.js, capture-code-changes.js.
 /// Reads the tool result, detects patterns, stores signals in Hyphae.
@@ -38,7 +39,7 @@ struct EditEntry {
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> Result<()> {
-    let envelope = match EventEnvelope::parse(input) {
+    let envelope = match ClaudeCodeHookEnvelope::parse(input) {
         Ok(envelope) => envelope,
         Err(e) => {
             eprintln!("cortina: failed to parse event input: {e}");
@@ -46,9 +47,9 @@ pub fn handle(input: &str) -> Result<()> {
         }
     };
 
-    match envelope.post_tool_use_event() {
-        Some(PostToolUseEvent::Bash(event)) => handle_bash(&event),
-        Some(PostToolUseEvent::FileEdit(event)) => handle_file_edits(&event),
+    match envelope.tool_result_event() {
+        Some(ToolResultEvent::Bash(event)) => handle_bash(&event),
+        Some(ToolResultEvent::FileEdit(event)) => handle_file_edits(&event),
         None => {}
     }
 

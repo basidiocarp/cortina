@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
-use crate::event_envelope::EventEnvelope;
+use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::utils::{Importance, command_exists, store_in_hyphae};
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ struct TranscriptSummary {
     outcome: String,
 }
 
-/// Handle Stop events: capture session summary.
+/// Handle Stop adapter events: capture session summary.
 ///
 /// Replaces session-summary.sh. Parses the transcript for task description,
 /// files modified, tools used, errors resolved, and outcome.
@@ -28,7 +28,7 @@ struct TranscriptSummary {
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> Result<()> {
-    let envelope = match EventEnvelope::parse(input) {
+    let envelope = match ClaudeCodeHookEnvelope::parse(input) {
         Ok(envelope) => envelope,
         Err(e) => {
             eprintln!("cortina: failed to parse event input: {e}");
@@ -36,9 +36,8 @@ pub fn handle(input: &str) -> Result<()> {
         }
     };
 
-    let event = match envelope.stop_event() {
-        Some(event) => event,
-        _ => return Ok(()),
+    let Some(event) = envelope.session_stop_event() else {
+        return Ok(());
     };
 
     if event.cwd.is_empty() {
