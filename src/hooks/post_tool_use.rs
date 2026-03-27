@@ -5,9 +5,10 @@ use std::path::Path;
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::events::{BashToolEvent, FileEditEvent, ToolResultEvent};
 use crate::utils::{
-    Importance, command_exists, cwd_hash, get_project_name, has_error, is_build_command,
-    is_document_file, is_significant_command, load_json_file, normalize_command, save_json_file,
-    spawn_async, store_in_hyphae, temp_state_path,
+    Importance, command_exists, cwd_hash, ensure_hyphae_session, get_project_name, has_error,
+    is_build_command, is_document_file, is_significant_command, load_json_file,
+    log_hyphae_feedback_signal, normalize_command, save_json_file, spawn_async, store_in_hyphae,
+    temp_state_path,
 };
 
 const CORRECTION_WINDOW_MS: u64 = 5 * 60 * 1000; // 5 minutes
@@ -162,12 +163,17 @@ fn resolve_error(track_file: &Path, cmd_key: &str, command: &str) {
                 &command[..command.len().min(200)],
                 &prev_error.error[..prev_error.error.len().min(300)]
             );
+            let project = get_project_name();
+            if let Some(ref project_name) = project {
+                let _ = ensure_hyphae_session(project_name, None);
+            }
             store_in_hyphae(
                 "errors/resolved",
                 &content,
                 Importance::High,
-                get_project_name().as_deref(),
+                project.as_deref(),
             );
+            log_hyphae_feedback_signal("error_resolved", 1, "cortina.post_tool_use");
         }
     }
 }
@@ -272,12 +278,18 @@ fn store_correction_in_hyphae(
         &new_new_str[..new_new_str.len().min(200)]
     );
 
+    let project = get_project_name();
+    if let Some(ref project_name) = project {
+        let _ = ensure_hyphae_session(project_name, None);
+    }
+
     store_in_hyphae(
         "corrections",
         &content,
         Importance::High,
-        get_project_name().as_deref(),
+        project.as_deref(),
     );
+    log_hyphae_feedback_signal("correction", -1, "cortina.post_tool_use");
 }
 
 // ─────────────────────────────────────────────────────────────────────────

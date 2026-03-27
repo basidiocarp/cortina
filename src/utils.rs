@@ -4,10 +4,11 @@
 
 use anyhow::Result;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
 use std::sync::OnceLock;
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -20,6 +21,12 @@ pub enum Importance {
     Low,
     Medium,
     High,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionState {
+    pub session_id: String,
+    pub project: String,
 }
 
 impl Importance {
@@ -55,6 +62,10 @@ pub fn cwd_hash() -> String {
 /// Resolve a temp state file path for Cortina tracking state.
 pub fn temp_state_path(name: &str, hash: &str, extension: &str) -> PathBuf {
     env::temp_dir().join(format!("cortina-{name}-{hash}.{extension}"))
+}
+
+fn session_state_path(hash: &str) -> PathBuf {
+    temp_state_path("session", hash, "json")
 }
 
 /// Get project name from current working directory
@@ -223,6 +234,144 @@ pub fn save_json_file<T: serde::Serialize>(path: impl AsRef<Path>, data: &T) -> 
     Ok(())
 }
 
+pub fn load_session_state(hash: &str) -> Option<SessionState> {
+    load_json_file(session_state_path(hash))
+}
+
+pub fn clear_session_state(hash: &str) {
+    let _ = fs::remove_file(session_state_path(hash));
+}
+
+pub fn ensure_hyphae_session(project: &str, task: Option<&str>) -> Option<SessionState> {
+    if !command_exists("hyphae") {
+        return None;
+    }
+
+    ensure_hyphae_session_with(project, task, Command::output)
+}
+
+fn ensure_hyphae_session_with<F>(
+    project: &str,
+    task: Option<&str>,
+    mut run_command: F,
+) -> Option<SessionState>
+where
+    F: FnMut(&mut Command) -> std::io::Result<Output>,
+{
+    let hash = cwd_hash();
+    if let Some(existing) = load_session_state(&hash) {
+        return Some(existing);
+    }
+
+    let mut cmd = Command::new("hyphae");
+    cmd.args(["session", "start", "--project", project]);
+    if let Some(task_desc) = task.filter(|value| !value.trim().is_empty()) {
+        cmd.args(["--task", task_desc]);
+    }
+
+    let output = run_command(&mut cmd).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let session_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if session_id.is_empty() {
+        return None;
+    }
+
+    let state = SessionState {
+        session_id,
+        project: project.to_string(),
+    };
+    save_json_file(session_state_path(&hash), &state).ok()?;
+    Some(state)
+}
+
+pub fn end_hyphae_session(
+    summary: Option<&str>,
+    files_modified: &[String],
+    errors_encountered: usize,
+) -> bool {
+    if !command_exists("hyphae") {
+        return false;
+    }
+
+    end_hyphae_session_with(
+        cwd_hash().as_str(),
+        summary,
+        files_modified,
+        errors_encountered,
+        Command::output,
+    )
+}
+
+fn end_hyphae_session_with<F>(
+    hash: &str,
+    summary: Option<&str>,
+    files_modified: &[String],
+    errors_encountered: usize,
+    mut run_command: F,
+) -> bool
+where
+    F: FnMut(&mut Command) -> std::io::Result<Output>,
+{
+    if hash.is_empty() {
+        return false;
+    }
+
+    let Some(state) = load_session_state(hash) else {
+        return false;
+    };
+
+    let mut cmd = Command::new("hyphae");
+    cmd.args(["session", "end", "--id", &state.session_id]);
+
+    if let Some(summary_text) = summary.filter(|value| !value.trim().is_empty()) {
+        cmd.args(["--summary", summary_text]);
+    }
+
+    for file in files_modified {
+        cmd.args(["--file", file]);
+    }
+
+    cmd.args(["--errors", &errors_encountered.to_string()]);
+
+    let Ok(output) = run_command(&mut cmd) else {
+        return false;
+    };
+
+    if output.status.success() {
+        clear_session_state(hash);
+        return true;
+    }
+
+    false
+}
+
+pub fn log_hyphae_feedback_signal(signal_type: &str, signal_value: i64, source: &str) {
+    if !command_exists("hyphae") {
+        return;
+    }
+
+    let hash = cwd_hash();
+    let Some(state) = load_session_state(&hash) else {
+        return;
+    };
+
+    let mut cmd = Command::new("hyphae");
+    cmd.args(["feedback", "signal"])
+        .args(["--session-id", &state.session_id])
+        .args(["--type", signal_type])
+        .args(["--value", &signal_value.to_string()])
+        .args(["--source", source])
+        .args(["--project", &state.project]);
+
+    let _ = cmd
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+}
+
 /// Store content in Hyphae (fire and forget)
 pub fn store_in_hyphae(topic: &str, content: &str, importance: Importance, project: Option<&str>) {
     if !command_exists("hyphae") {
@@ -266,6 +415,27 @@ pub fn spawn_async(cmd: &str, args: &[&str]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::ExitStatus;
+
+    fn output_with_status(code: i32, stdout: &str) -> Output {
+        Output {
+            status: exit_status_from_code(code),
+            stdout: stdout.as_bytes().to_vec(),
+            stderr: Vec::new(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn exit_status_from_code(code: i32) -> ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        ExitStatus::from_raw(code << 8)
+    }
+
+    #[cfg(windows)]
+    fn exit_status_from_code(code: i32) -> ExitStatus {
+        use std::os::windows::process::ExitStatusExt;
+        ExitStatus::from_raw(code as u32)
+    }
 
     // ─────────────────────────────────────────────────────────────────────
     // has_error tests
@@ -381,5 +551,86 @@ mod tests {
         let path = temp_state_path("errors", "abc123", "json");
         assert!(path.starts_with(env::temp_dir()));
         assert!(path.ends_with("cortina-errors-abc123.json"));
+    }
+
+    #[test]
+    fn test_ensure_hyphae_session_with_runner_leaves_state_empty_on_spawn_failure() {
+        let hash = "ensure-spawn-failure";
+        clear_session_state(hash);
+
+        let state = ensure_hyphae_session_with("demo-project", Some("task"), |_cmd| {
+            Err(std::io::Error::other("spawn failed"))
+        });
+
+        assert!(state.is_none());
+        assert!(load_session_state(hash).is_none());
+    }
+
+    #[test]
+    fn test_end_hyphae_session_with_missing_state_returns_false() {
+        let hash = "end-missing-state";
+        clear_session_state(hash);
+
+        let result = end_hyphae_session_with(hash, Some("summary"), &[], 0, |_cmd| {
+            Ok(output_with_status(0, ""))
+        });
+
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_end_hyphae_session_with_spawn_failure_keeps_cached_state() {
+        let hash = "end-spawn-failure";
+        clear_session_state(hash);
+        let state = SessionState {
+            session_id: "ses_demo".to_string(),
+            project: "demo-project".to_string(),
+        };
+        save_json_file(session_state_path(hash), &state).unwrap();
+
+        let result = end_hyphae_session_with(hash, Some("summary"), &[], 0, |_cmd| {
+            Err(std::io::Error::other("spawn failed"))
+        });
+
+        assert!(!result);
+        assert_eq!(load_session_state(hash).as_ref(), Some(&state));
+        clear_session_state(hash);
+    }
+
+    #[test]
+    fn test_end_hyphae_session_with_non_zero_exit_keeps_cached_state() {
+        let hash = "end-non-zero";
+        clear_session_state(hash);
+        let state = SessionState {
+            session_id: "ses_demo".to_string(),
+            project: "demo-project".to_string(),
+        };
+        save_json_file(session_state_path(hash), &state).unwrap();
+
+        let result = end_hyphae_session_with(hash, Some("summary"), &[], 0, |_cmd| {
+            Ok(output_with_status(1, "failed"))
+        });
+
+        assert!(!result);
+        assert_eq!(load_session_state(hash).as_ref(), Some(&state));
+        clear_session_state(hash);
+    }
+
+    #[test]
+    fn test_end_hyphae_session_with_success_clears_cached_state() {
+        let hash = "end-success";
+        clear_session_state(hash);
+        let state = SessionState {
+            session_id: "ses_demo".to_string(),
+            project: "demo-project".to_string(),
+        };
+        save_json_file(session_state_path(hash), &state).unwrap();
+
+        let result = end_hyphae_session_with(hash, Some("summary"), &[], 0, |_cmd| {
+            Ok(output_with_status(0, "ok"))
+        });
+
+        assert!(result);
+        assert!(load_session_state(hash).is_none());
     }
 }

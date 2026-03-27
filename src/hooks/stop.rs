@@ -4,7 +4,9 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
-use crate::utils::{Importance, command_exists, store_in_hyphae};
+use crate::utils::{
+    Importance, command_exists, cwd_hash, end_hyphae_session, load_session_state, store_in_hyphae,
+};
 
 // ─────────────────────────────────────────────────────────────────────────
 // Transcript summary data structure
@@ -12,7 +14,7 @@ use crate::utils::{Importance, command_exists, store_in_hyphae};
 
 struct TranscriptSummary {
     task_desc: String,
-    files_modified: String,
+    files_modified: Vec<String>,
     tool_counts: String,
     errors_encountered: usize,
     outcome: String,
@@ -60,7 +62,7 @@ pub fn handle(input: &str) -> Result<()> {
     let mut text = format!("Session in {project_name}: {}", summary.task_desc);
 
     if !summary.files_modified.is_empty() {
-        let _ = write!(text, "\nFiles: {}", summary.files_modified);
+        let _ = write!(text, "\nFiles: {}", summary.files_modified.join(", "));
     }
 
     if !summary.tool_counts.is_empty() {
@@ -75,9 +77,18 @@ pub fn handle(input: &str) -> Result<()> {
         let _ = write!(text, "\nOutcome: {}", summary.outcome);
     }
 
-    // Store in Hyphae (fire and forget with timeout)
-    let topic = format!("session/{project_name}");
-    store_in_hyphae(&topic, &text, Importance::Medium, Some(project_name));
+    let hash = cwd_hash();
+    let ended_structured_session = load_session_state(&hash).is_some()
+        && end_hyphae_session(
+            Some(&text),
+            &summary.files_modified,
+            summary.errors_encountered,
+        );
+
+    if !ended_structured_session {
+        let topic = format!("session/{project_name}");
+        store_in_hyphae(&topic, &text, Importance::Medium, Some(project_name));
+    }
 
     Ok(())
 }
@@ -85,7 +96,7 @@ pub fn handle(input: &str) -> Result<()> {
 fn parse_transcript(transcript_path: Option<&str>) -> TranscriptSummary {
     let default = TranscriptSummary {
         task_desc: "Session work".to_string(),
-        files_modified: String::new(),
+        files_modified: Vec::new(),
         tool_counts: String::new(),
         errors_encountered: 0,
         outcome: "Work completed".to_string(),
@@ -106,7 +117,7 @@ fn parse_transcript(transcript_path: Option<&str>) -> TranscriptSummary {
 fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
     let mut summary = TranscriptSummary {
         task_desc: "Session work".to_string(),
-        files_modified: String::new(),
+        files_modified: Vec::new(),
         tool_counts: String::new(),
         errors_encountered: 0,
         outcome: "Work completed".to_string(),
@@ -187,11 +198,7 @@ fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
     // Format files modified
     if !file_set.is_empty() {
         let files: Vec<&String> = file_set.iter().collect();
-        summary.files_modified = files
-            .iter()
-            .map(|f| f.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
+        summary.files_modified = files.into_iter().cloned().collect();
     }
 
     // Format tool counts
@@ -287,7 +294,7 @@ mod tests {
 
         let summary = parse_jsonl_transcript(jsonl);
 
-        assert!(summary.files_modified.contains("/a.rs"));
-        assert!(summary.files_modified.contains("/b.rs"));
+        assert!(summary.files_modified.iter().any(|file| file == "/a.rs"));
+        assert!(summary.files_modified.iter().any(|file| file == "/b.rs"));
     }
 }
