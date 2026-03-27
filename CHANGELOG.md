@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-03-27
+
+### Added
+
+- **Validation outcome signals**: successful build and test commands can now emit structured Hyphae `build_passed` and `test_passed` signals.
+
+### Fixed
+
+- **Scoped Hyphae sessions**: Cortina now starts Hyphae sessions with a worktree scope so parallel workers in one project do not share a single active session.
+- **Stale session cache reuse**: cached Hyphae session state is now checked against live session context before reuse.
+
 ## [0.1.3] - 2026-03-27
 
 ### Added
