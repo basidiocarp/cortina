@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-03-27
+
+### Added
+
+- **Hyphae session bridge**: Cortina can now start, reuse, and end Hyphae sessions around structured correction and recovery signals instead of only writing ad hoc session memories.
+
+### Fixed
+
+- **Failure-path session handling**: Best-effort Hyphae session cleanup now preserves cached state on spawn and non-zero exit failures, avoids phantom session endings when no state exists, and has regression coverage for those failure paths.
+
 ## [0.1.2] - 2026-03-26
 
 ### Fixed
