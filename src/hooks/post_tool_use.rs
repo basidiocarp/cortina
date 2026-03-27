@@ -8,7 +8,7 @@ use crate::utils::{
     Importance, command_exists, cwd_hash, ensure_hyphae_session, get_project_name, has_error,
     is_build_command, is_document_file, is_significant_command, load_json_file,
     log_hyphae_feedback_signal, normalize_command, save_json_file, spawn_async, store_in_hyphae,
-    temp_state_path,
+    successful_validation_feedback, temp_state_path,
 };
 
 const CORRECTION_WINDOW_MS: u64 = 5 * 60 * 1000; // 5 minutes
@@ -81,6 +81,7 @@ fn handle_bash(event: &BashToolEvent) {
         }
     } else {
         resolve_error(&track_file, &cmd_key, command);
+        log_validation_success(command, exit_code);
     }
 
     // Check for build success and trigger exports
@@ -173,7 +174,11 @@ fn resolve_error(track_file: &Path, cmd_key: &str, command: &str) {
                 Importance::High,
                 project.as_deref(),
             );
-            log_hyphae_feedback_signal("error_resolved", 1, "cortina.post_tool_use");
+            log_hyphae_feedback_signal(
+                "error_resolved",
+                1,
+                "cortina.post_tool_use.error_resolution",
+            );
         }
     }
 }
@@ -289,7 +294,22 @@ fn store_correction_in_hyphae(
         Importance::High,
         project.as_deref(),
     );
-    log_hyphae_feedback_signal("correction", -1, "cortina.post_tool_use");
+    log_hyphae_feedback_signal("correction", -1, "cortina.post_tool_use.correction");
+}
+
+fn log_validation_success(command: &str, exit_code: Option<i32>) {
+    let Some((signal_type, signal_value, source)) =
+        successful_validation_feedback(command, exit_code)
+    else {
+        return;
+    };
+
+    let project = get_project_name();
+    if let Some(ref project_name) = project {
+        let _ = ensure_hyphae_session(project_name, None);
+    }
+
+    log_hyphae_feedback_signal(signal_type, signal_value, source);
 }
 
 // ─────────────────────────────────────────────────────────────────────────

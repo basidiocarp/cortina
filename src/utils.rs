@@ -151,6 +151,17 @@ pub fn is_build_command(cmd: &str) -> bool {
     false
 }
 
+/// Check if a command is a test command.
+pub fn is_test_command(cmd: &str) -> bool {
+    for re in test_patterns() {
+        if re.is_match(cmd) {
+            return true;
+        }
+    }
+
+    false
+}
+
 fn build_patterns() -> &'static [Regex] {
     static BUILD_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
 
@@ -174,6 +185,34 @@ fn build_patterns() -> &'static [Regex] {
     })
 }
 
+fn test_patterns() -> &'static [Regex] {
+    static TEST_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+
+    TEST_PATTERNS.get_or_init(|| {
+        [
+            r"\bcargo\s+test\b",
+            r"\bnpm\s+test\b",
+            r"\bnpm\s+run\s+test\b",
+            r"\byarn\s+test\b",
+            r"\byarn\s+run\s+test\b",
+            r"\bpnpm\s+test\b",
+            r"\bpnpm\s+run\s+test\b",
+            r"\bbun\s+test\b",
+            r"\bpytest\b",
+            r"\bgo\s+test\b",
+            r"\bvitest\b",
+            r"\bjest\b",
+            r"\bplaywright\s+test\b",
+            r"\bgradlew\s+test\b",
+            r"\bmvn\s+test\b",
+            r"\bmake\s+test\b",
+        ]
+        .iter()
+        .filter_map(|p| Regex::new(p).ok())
+        .collect()
+    })
+}
+
 /// Check if a command is a significant (worth tracking) command
 pub fn is_significant_command(cmd: &str) -> bool {
     for re in significant_patterns() {
@@ -183,6 +222,24 @@ pub fn is_significant_command(cmd: &str) -> bool {
     }
 
     false
+}
+
+/// Return a positive Hyphae feedback signal for successful build/test commands.
+pub fn successful_validation_feedback(
+    cmd: &str,
+    exit_code: Option<i32>,
+) -> Option<(&'static str, i64, &'static str)> {
+    if exit_code != Some(0) {
+        return None;
+    }
+
+    if is_test_command(cmd) {
+        Some(("test_passed", 1, "cortina.post_tool_use.test"))
+    } else if is_build_command(cmd) {
+        Some(("build_passed", 1, "cortina.post_tool_use.build"))
+    } else {
+        None
+    }
 }
 
 fn significant_patterns() -> &'static [Regex] {
@@ -247,10 +304,11 @@ pub fn ensure_hyphae_session(project: &str, task: Option<&str>) -> Option<Sessio
         return None;
     }
 
-    ensure_hyphae_session_with(project, task, Command::output)
+    ensure_hyphae_session_with_hash(&cwd_hash(), project, task, Command::output)
 }
 
-fn ensure_hyphae_session_with<F>(
+fn ensure_hyphae_session_with_hash<F>(
+    hash: &str,
     project: &str,
     task: Option<&str>,
     mut run_command: F,
@@ -258,13 +316,16 @@ fn ensure_hyphae_session_with<F>(
 where
     F: FnMut(&mut Command) -> std::io::Result<Output>,
 {
-    let hash = cwd_hash();
-    if let Some(existing) = load_session_state(&hash) {
-        return Some(existing);
+    if let Some(existing) = load_session_state(hash) {
+        if is_cached_session_active(project, &existing.session_id, &mut run_command) {
+            return Some(existing);
+        }
+
+        clear_session_state(hash);
     }
 
     let mut cmd = Command::new("hyphae");
-    cmd.args(["session", "start", "--project", project]);
+    cmd.args(["session", "start", "--project", project, "--scope", hash]);
     if let Some(task_desc) = task.filter(|value| !value.trim().is_empty()) {
         cmd.args(["--task", task_desc]);
     }
@@ -283,8 +344,35 @@ where
         session_id,
         project: project.to_string(),
     };
-    save_json_file(session_state_path(&hash), &state).ok()?;
+    save_json_file(session_state_path(hash), &state).ok()?;
     Some(state)
+}
+
+fn is_cached_session_active<F>(project: &str, session_id: &str, mut run_command: F) -> bool
+where
+    F: FnMut(&mut Command) -> std::io::Result<Output>,
+{
+    let mut cmd = Command::new("hyphae");
+    cmd.args(["session", "context", "--project", project, "--limit", "1"]);
+
+    let Ok(output) = run_command(&mut cmd) else {
+        return false;
+    };
+
+    if !output.status.success() {
+        return false;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.lines().any(|line| {
+        let line = line.trim();
+        if !line.starts_with(session_id) {
+            return false;
+        }
+
+        let remainder = line[session_id.len()..].trim_start();
+        remainder.starts_with("[active]")
+    })
 }
 
 pub fn end_hyphae_session(
@@ -511,6 +599,28 @@ mod tests {
         assert!(!is_build_command("echo hello"));
     }
 
+    #[test]
+    fn test_is_test_command() {
+        assert!(is_test_command("cargo test"));
+        assert!(is_test_command("npm run test"));
+        assert!(is_test_command("make test"));
+        assert!(!is_test_command("cargo build"));
+    }
+
+    #[test]
+    fn test_successful_validation_feedback_prefers_test_commands() {
+        assert_eq!(
+            successful_validation_feedback("make test", Some(0)),
+            Some(("test_passed", 1, "cortina.post_tool_use.test"))
+        );
+        assert_eq!(
+            successful_validation_feedback("cargo build", Some(0)),
+            Some(("build_passed", 1, "cortina.post_tool_use.build"))
+        );
+        assert_eq!(successful_validation_feedback("cargo test", Some(1)), None);
+        assert_eq!(successful_validation_feedback("git status", Some(0)), None);
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // normalize_command tests
     // ─────────────────────────────────────────────────────────────────────
@@ -558,12 +668,136 @@ mod tests {
         let hash = "ensure-spawn-failure";
         clear_session_state(hash);
 
-        let state = ensure_hyphae_session_with("demo-project", Some("task"), |_cmd| {
+        let state = ensure_hyphae_session_with_hash(hash, "demo-project", Some("task"), |_cmd| {
             Err(std::io::Error::other("spawn failed"))
         });
 
         assert!(state.is_none());
         assert!(load_session_state(hash).is_none());
+    }
+
+    #[test]
+    fn test_ensure_hyphae_session_with_runner_reuses_active_cached_state() {
+        let hash = "ensure-active-state";
+        clear_session_state(hash);
+        let state = SessionState {
+            session_id: "ses_active".to_string(),
+            project: "demo-project".to_string(),
+        };
+        save_json_file(session_state_path(hash), &state).unwrap();
+
+        let mut context_calls = 0;
+        let mut start_calls = 0;
+        let result = ensure_hyphae_session_with_hash(hash, "demo-project", Some("task"), |cmd| {
+            let args: Vec<String> = cmd
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+            match args.as_slice() {
+                [
+                    "session",
+                    "context",
+                    "--project",
+                    "demo-project",
+                    "--limit",
+                    "1",
+                ] => {
+                    context_calls += 1;
+                    Ok(output_with_status(
+                        0,
+                        "ses_active [active] implement task -> summary",
+                    ))
+                }
+                [
+                    "session",
+                    "start",
+                    "--project",
+                    "demo-project",
+                    "--scope",
+                    "ensure-active-state",
+                    "--task",
+                    "task",
+                ] => {
+                    start_calls += 1;
+                    Ok(output_with_status(0, "ses_new"))
+                }
+                _ => panic!("unexpected hyphae command args: {args:?}"),
+            }
+        });
+
+        assert_eq!(result.as_ref(), Some(&state));
+        assert_eq!(context_calls, 1);
+        assert_eq!(start_calls, 0);
+        assert_eq!(load_session_state(hash).as_ref(), Some(&state));
+        clear_session_state(hash);
+    }
+
+    #[test]
+    fn test_ensure_hyphae_session_with_runner_discards_stale_cached_state() {
+        let hash = "ensure-stale-state";
+        clear_session_state(hash);
+        let stale = SessionState {
+            session_id: "ses_stale".to_string(),
+            project: "demo-project".to_string(),
+        };
+        save_json_file(session_state_path(hash), &stale).unwrap();
+
+        let mut context_calls = 0;
+        let mut start_calls = 0;
+        let result = ensure_hyphae_session_with_hash(hash, "demo-project", Some("task"), |cmd| {
+            let args: Vec<String> = cmd
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+            match args.as_slice() {
+                [
+                    "session",
+                    "context",
+                    "--project",
+                    "demo-project",
+                    "--limit",
+                    "1",
+                ] => {
+                    context_calls += 1;
+                    Ok(output_with_status(
+                        0,
+                        "ses_stale [completed] implement task -> summary",
+                    ))
+                }
+                [
+                    "session",
+                    "start",
+                    "--project",
+                    "demo-project",
+                    "--scope",
+                    "ensure-stale-state",
+                    "--task",
+                    "task",
+                ] => {
+                    start_calls += 1;
+                    Ok(output_with_status(0, "ses_fresh"))
+                }
+                _ => panic!("unexpected hyphae command args: {args:?}"),
+            }
+        });
+
+        assert_eq!(
+            result.as_ref().map(|session| session.session_id.as_str()),
+            Some("ses_fresh")
+        );
+        assert_eq!(context_calls, 1);
+        assert_eq!(start_calls, 1);
+        assert_eq!(
+            load_session_state(hash)
+                .as_ref()
+                .map(|session| session.session_id.as_str()),
+            Some("ses_fresh")
+        );
+        clear_session_state(hash);
     }
 
     #[test]

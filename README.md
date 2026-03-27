@@ -36,7 +36,7 @@ cortina stop
 
 The CLI entrypoint dispatches through the adapter layer rather than calling Claude-specific handlers directly. Adding a new host should be an adapter/module change, not a rewrite of the shared signal pipeline.
 
-PostToolUse does the heavy lifting. It watches for failed commands, self-corrections (an edit immediately after a write to the same file), test failures, and accumulated code changes. When it detects a pattern, it stores a memory in Hyphae with the right topic so future sessions can recall it. When Cortina is about to emit a structured correction or recovery signal, it also tries to ensure a Hyphae session exists for the current worktree. Those structured writes are best-effort rather than guaranteed.
+PostToolUse does the heavy lifting. It watches for failed commands, self-corrections (an edit immediately after a write to the same file), test failures, successful build/test validation, and accumulated code changes. When it detects a pattern, it stores a memory in Hyphae with the right topic so future sessions can recall it. When Cortina is about to emit a structured correction, recovery, or validation signal, it also tries to ensure a Hyphae session exists for the current worktree. Those sessions are scoped per worktree hash so parallel workers in the same project do not collapse into one active session. Structured writes remain best-effort rather than guaranteed.
 
 If a structured Hyphae session is active, the Stop hook tries to end it with a structured summary: which files changed, what errors occurred, what tools were used, and the final outcome. If no structured session exists, or structured shutdown fails, Cortina falls back to the older direct `session/{project}` memory write.
 
@@ -47,6 +47,7 @@ If a structured Hyphae session is active, the Stop hook tries to end it with a s
 | Error | Bash exit code != 0 | `errors/active` |
 | Resolution | Same command succeeds after failure | `errors/resolved` + `hyphae feedback signal error_resolved` |
 | Self-correction | Edit after recent Write to same file | `corrections` + `hyphae feedback signal correction` |
+| Validation pass | Build or test command succeeds | `hyphae feedback signal build_passed` / `test_passed` |
 | Test failure | Test runner with failures | `tests/failed` |
 | Test fix | Test passes after failure | `tests/resolved` |
 | Code changes | 5+ edits + successful build | Triggers `rhizome export` |
