@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-03-27
+
+### Fixed
+
+- **Structured Hyphae session liveness**: Cortina now validates cached Hyphae sessions through `hyphae session status --id ...` instead of parsing human-readable session listings.
+- **Scoped session cache checks**: cached worktree-scoped sessions now reject mismatched scope data and restart cleanly when another active session exists in the same project.
+
 ## [0.1.5] - 2026-03-27
 
 ### Added
