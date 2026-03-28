@@ -5,6 +5,7 @@
 use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -317,7 +318,7 @@ where
     F: FnMut(&mut Command) -> std::io::Result<Output>,
 {
     if let Some(existing) = load_session_state(hash) {
-        if is_cached_session_active(project, &existing.session_id, &mut run_command) {
+        if is_cached_session_active(hash, project, &existing.session_id, &mut run_command) {
             return Some(existing);
         }
 
@@ -348,12 +349,17 @@ where
     Some(state)
 }
 
-fn is_cached_session_active<F>(project: &str, session_id: &str, mut run_command: F) -> bool
+fn is_cached_session_active<F>(
+    hash: &str,
+    project: &str,
+    session_id: &str,
+    mut run_command: F,
+) -> bool
 where
     F: FnMut(&mut Command) -> std::io::Result<Output>,
 {
     let mut cmd = Command::new("hyphae");
-    cmd.args(["session", "context", "--project", project, "--limit", "1"]);
+    cmd.args(["session", "status", "--id", session_id]);
 
     let Ok(output) = run_command(&mut cmd) else {
         return false;
@@ -363,16 +369,26 @@ where
         return false;
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    stdout.lines().any(|line| {
-        let line = line.trim();
-        if !line.starts_with(session_id) {
-            return false;
-        }
+    let Ok(parsed) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return false;
+    };
 
-        let remainder = line[session_id.len()..].trim_start();
-        remainder.starts_with("[active]")
-    })
+    parsed
+        .get("session_id")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value == session_id)
+        && parsed
+            .get("project")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value == project)
+        && parsed
+            .get("scope")
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| value == hash)
+        && parsed
+            .get("active")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 pub fn end_hyphae_session(
@@ -686,7 +702,7 @@ mod tests {
         };
         save_json_file(session_state_path(hash), &state).unwrap();
 
-        let mut context_calls = 0;
+        let mut status_calls = 0;
         let mut start_calls = 0;
         let result = ensure_hyphae_session_with_hash(hash, "demo-project", Some("task"), |cmd| {
             let args: Vec<String> = cmd
@@ -696,18 +712,11 @@ mod tests {
             let args = args.iter().map(String::as_str).collect::<Vec<_>>();
 
             match args.as_slice() {
-                [
-                    "session",
-                    "context",
-                    "--project",
-                    "demo-project",
-                    "--limit",
-                    "1",
-                ] => {
-                    context_calls += 1;
+                ["session", "status", "--id", "ses_active"] => {
+                    status_calls += 1;
                     Ok(output_with_status(
                         0,
-                        "ses_active [active] implement task -> summary",
+                        r#"{"session_id":"ses_active","project":"demo-project","scope":"ensure-active-state","status":"active","active":true}"#,
                     ))
                 }
                 [
@@ -728,7 +737,7 @@ mod tests {
         });
 
         assert_eq!(result.as_ref(), Some(&state));
-        assert_eq!(context_calls, 1);
+        assert_eq!(status_calls, 1);
         assert_eq!(start_calls, 0);
         assert_eq!(load_session_state(hash).as_ref(), Some(&state));
         clear_session_state(hash);
@@ -744,7 +753,7 @@ mod tests {
         };
         save_json_file(session_state_path(hash), &stale).unwrap();
 
-        let mut context_calls = 0;
+        let mut status_calls = 0;
         let mut start_calls = 0;
         let result = ensure_hyphae_session_with_hash(hash, "demo-project", Some("task"), |cmd| {
             let args: Vec<String> = cmd
@@ -754,18 +763,11 @@ mod tests {
             let args = args.iter().map(String::as_str).collect::<Vec<_>>();
 
             match args.as_slice() {
-                [
-                    "session",
-                    "context",
-                    "--project",
-                    "demo-project",
-                    "--limit",
-                    "1",
-                ] => {
-                    context_calls += 1;
+                ["session", "status", "--id", "ses_stale"] => {
+                    status_calls += 1;
                     Ok(output_with_status(
                         0,
-                        "ses_stale [completed] implement task -> summary",
+                        r#"{"session_id":"ses_stale","project":"demo-project","scope":"ensure-stale-state","status":"completed","active":false}"#,
                     ))
                 }
                 [
@@ -789,7 +791,7 @@ mod tests {
             result.as_ref().map(|session| session.session_id.as_str()),
             Some("ses_fresh")
         );
-        assert_eq!(context_calls, 1);
+        assert_eq!(status_calls, 1);
         assert_eq!(start_calls, 1);
         assert_eq!(
             load_session_state(hash)
@@ -797,6 +799,59 @@ mod tests {
                 .map(|session| session.session_id.as_str()),
             Some("ses_fresh")
         );
+        clear_session_state(hash);
+    }
+
+    #[test]
+    fn test_ensure_hyphae_session_with_runner_ignores_other_scoped_sessions() {
+        let hash = "ensure-scope-a";
+        clear_session_state(hash);
+        let cached = SessionState {
+            session_id: "ses_scope_a".to_string(),
+            project: "demo-project".to_string(),
+        };
+        save_json_file(session_state_path(hash), &cached).unwrap();
+
+        let mut status_calls = 0;
+        let mut start_calls = 0;
+        let result = ensure_hyphae_session_with_hash(hash, "demo-project", Some("task"), |cmd| {
+            let args: Vec<String> = cmd
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect();
+            let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+            match args.as_slice() {
+                ["session", "status", "--id", "ses_scope_a"] => {
+                    status_calls += 1;
+                    Ok(output_with_status(
+                        0,
+                        r#"{"session_id":"ses_scope_a","project":"demo-project","scope":"ensure-scope-b","status":"active","active":true}"#,
+                    ))
+                }
+                [
+                    "session",
+                    "start",
+                    "--project",
+                    "demo-project",
+                    "--scope",
+                    "ensure-scope-a",
+                    "--task",
+                    "task",
+                ] => {
+                    start_calls += 1;
+                    Ok(output_with_status(0, "ses_scope_a_fresh"))
+                }
+                _ => panic!("unexpected hyphae command args: {args:?}"),
+            }
+        });
+
+        assert_eq!(
+            result.as_ref().map(|session| session.session_id.as_str()),
+            Some("ses_scope_a_fresh")
+        );
+        assert_eq!(status_calls, 1);
+        assert_eq!(start_calls, 1);
         clear_session_state(hash);
     }
 
