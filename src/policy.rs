@@ -1,7 +1,7 @@
 use std::env;
 use std::sync::OnceLock;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct CapturePolicy {
     pub outcome_dedupe_window_ms: u64,
     pub correction_window_ms: u64,

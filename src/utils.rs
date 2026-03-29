@@ -21,3 +21,5 @@ pub use state::{
     current_timestamp_ms, load_json_file, remove_file_with_lock, scope_hash, temp_state_path,
     update_json_file,
 };
+#[cfg(test)]
+pub use state::save_json_file;

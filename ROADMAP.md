@@ -13,6 +13,9 @@ This page is the Cortina-specific backlog. The workspace [ROADMAP.md](../ROADMAP
 - Recall and session attribution tied to scoped Hyphae sessions instead of ad hoc local state.
 - Lifecycle persistence hardening with locked, atomic state updates for sessions, outcomes, edit tracking, and pending export or ingest queues.
 - Lifecycle module split across focused `events`, `utils`, `post_tool_use`, and `stop` submodules with extracted regression tests.
+- Capture policy controls for dedupe windows, correction windows, thresholds, attribution grace, and fallback session behavior.
+- Operator-facing policy introspection through `cortina policy` and `cortina policy --json`.
+- Operator-facing lifecycle state and health checks through `cortina status` and `cortina doctor`.
 
 ## Next
 
@@ -21,13 +24,9 @@ This page is the Cortina-specific backlog. The workspace [ROADMAP.md](../ROADMAP
 Finish moving ecosystem lifecycle and capture-hook ownership out of Lamella and into Cortina, with Cortina as the default runtime and Lamella acting as packaging, templates, and fallback glue.
 See [docs/lamella-boundary.md](docs/lamella-boundary.md) for the current move-now and move-later split.
 
-### Capture policy controls
-
-Add explicit policy around what gets captured, when it is deduped, and when noisy or low-value signals should be suppressed instead of stored.
-
 ### Session and outcome policy refinement
 
-Keep the scoped Hyphae session and outcome model boring by tightening policy around retries, partial failures, fallback behavior, and attribution windows.
+Keep the scoped Hyphae session and outcome model boring by tightening policy around retries, partial failures, and any remaining attribution edge cases beyond the current policy surface.
 
 ## Later
 
