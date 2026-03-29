@@ -79,4 +79,14 @@ impl OutcomeEvent {
         self.signal_type = Some(signal_type.into());
         self
     }
+
+    pub fn semantically_matches(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.summary == other.summary
+            && self.session_id == other.session_id
+            && self.project == other.project
+            && self.command == other.command
+            && self.file_path == other.file_path
+            && self.signal_type == other.signal_type
+    }
 }

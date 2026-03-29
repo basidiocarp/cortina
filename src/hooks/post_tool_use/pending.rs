@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::events::{OutcomeEvent, OutcomeKind};
 use crate::outcomes::record_outcome;
+use crate::policy::capture_policy;
 use crate::utils::{
     command_exists, ensure_scoped_hyphae_session, spawn_async_checked, temp_state_path,
     update_json_file,
@@ -10,9 +11,6 @@ use crate::utils::{
 use crate::utils::{load_json_file, remove_file_with_lock};
 
 use super::annotate_outcome_with_session;
-
-const EXPORT_THRESHOLD: usize = 5;
-const INGEST_THRESHOLD: usize = 3;
 
 fn pending_files_path(hash: &str) -> PathBuf {
     temp_state_path("pending-exports", hash, "json")
@@ -81,7 +79,7 @@ pub(super) fn check_and_trigger_exports(hash: &str, scope_cwd: Option<&str>) {
             )
             .with_command("rhizome export"),
         );
-        record_outcome(hash, outcome);
+        let _ = record_outcome(hash, outcome);
     }
 }
 
@@ -110,16 +108,16 @@ pub(super) fn trigger_hyphae_ingest(
         )
         .with_command("hyphae ingest-file"),
     );
-    record_outcome(hash, outcome);
+    let _ = record_outcome(hash, outcome);
     failed_docs
 }
 
 pub(super) fn take_pending_documents_batch(hash: &str) -> Vec<String> {
-    take_pending_batch(&pending_documents_path(hash), INGEST_THRESHOLD)
+    take_pending_batch(&pending_documents_path(hash), capture_policy().ingest_threshold)
 }
 
 fn take_pending_files_batch(hash: &str) -> Vec<String> {
-    take_pending_batch(&pending_files_path(hash), EXPORT_THRESHOLD)
+    take_pending_batch(&pending_files_path(hash), capture_policy().export_threshold)
 }
 
 fn take_pending_batch(path: &Path, threshold: usize) -> Vec<String> {

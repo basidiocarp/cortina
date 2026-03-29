@@ -7,6 +7,7 @@ mod adapters;
 mod events;
 mod hooks;
 mod outcomes;
+mod policy;
 mod utils;
 
 use adapters::{AdapterCommand, ClaudeCodeEventCommand};

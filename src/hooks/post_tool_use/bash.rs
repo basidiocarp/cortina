@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::events::{BashToolEvent, OutcomeEvent, OutcomeKind};
 use crate::outcomes::record_outcome;
+use crate::policy::capture_policy;
 use crate::utils::{
     Importance, command_exists, current_timestamp_ms, ensure_scoped_hyphae_session, has_error,
     is_build_command, is_significant_command, log_scoped_hyphae_feedback_signal, normalize_command,
@@ -39,25 +40,26 @@ pub(super) fn handle_bash(event: &BashToolEvent) {
     let error_detected = has_error(output, exit_code);
 
     if error_detected {
-        track_error(&track_file, &cmd_key, command, output);
-        let outcome = annotate_outcome_with_session(
-            ensure_scoped_hyphae_session(scope_cwd, Some(&truncate(command, 200))),
-            OutcomeEvent::new(
-                OutcomeKind::ErrorDetected,
-                format!("Command failed: {}", truncate(command, 200)),
-            )
-            .with_command(truncate(command, 500)),
-        );
-        record_outcome(&hash, outcome);
-        if command_exists("hyphae") {
-            store_error_in_hyphae(command, output, scope_cwd);
-            log_scoped_hyphae_feedback_signal(
-                scope_cwd,
-                "tool_error",
-                -1,
-                "cortina.post_tool_use.error_detected",
-                Some(&truncate(command, 200)),
+        if track_error(&track_file, &cmd_key, command, output) {
+            let outcome = annotate_outcome_with_session(
+                ensure_scoped_hyphae_session(scope_cwd, Some(&truncate(command, 200))),
+                OutcomeEvent::new(
+                    OutcomeKind::ErrorDetected,
+                    format!("Command failed: {}", truncate(command, 200)),
+                )
+                .with_command(truncate(command, 500)),
             );
+            let inserted = record_outcome(&hash, outcome);
+            if inserted && command_exists("hyphae") {
+                store_error_in_hyphae(command, output, scope_cwd);
+                log_scoped_hyphae_feedback_signal(
+                    scope_cwd,
+                    "tool_error",
+                    -1,
+                    "cortina.post_tool_use.error_detected",
+                    Some(&truncate(command, 200)),
+                );
+            }
         }
     } else {
         resolve_error(&track_file, &cmd_key, command, &hash, scope_cwd);
@@ -90,7 +92,9 @@ pub(super) fn log_validation_success(
         .with_command(truncate(command, 500))
         .with_signal_type(signal_type),
     );
-    record_outcome(hash, outcome);
+    if !record_outcome(hash, outcome) {
+        return;
+    }
 
     log_scoped_hyphae_feedback_signal(
         scope_cwd,
@@ -101,17 +105,31 @@ pub(super) fn log_validation_success(
     );
 }
 
-fn track_error(track_file: &Path, cmd_key: &str, command: &str, output: &str) {
-    let _ = update_json_file::<HashMap<String, ErrorEntry>, _, _>(track_file, |entries| {
+fn track_error(track_file: &Path, cmd_key: &str, command: &str, output: &str) -> bool {
+    let command = command.chars().take(500).collect::<String>();
+    let error = output.chars().take(500).collect::<String>();
+    let dedupe_window_ms = capture_policy().outcome_dedupe_window_ms;
+
+    update_json_file::<HashMap<String, ErrorEntry>, _, _>(track_file, |entries| {
+        if let Some(existing) = entries.get(cmd_key)
+            && existing.command == command
+            && existing.error == error
+            && current_timestamp_ms().saturating_sub(existing.timestamp) <= dedupe_window_ms
+        {
+            return false;
+        }
+
         entries.insert(
             cmd_key.to_string(),
             ErrorEntry {
-                command: command.chars().take(500).collect(),
-                error: output.chars().take(500).collect(),
+                command,
+                error,
                 timestamp: current_timestamp_ms(),
             },
         );
-    });
+        true
+    })
+    .unwrap_or(false)
 }
 
 fn resolve_error(
@@ -137,9 +155,9 @@ fn resolve_error(
             .with_command(truncate(command, 500))
             .with_signal_type("error_resolved"),
         );
-        record_outcome(hash, outcome);
+        let inserted = record_outcome(hash, outcome);
 
-        if command_exists("hyphae") {
+        if inserted && command_exists("hyphae") {
             let content = format!(
                 "Fixed: {}\nPrevious error: {}",
                 &command[..command.len().min(200)],

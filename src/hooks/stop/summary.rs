@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::events::{OutcomeEvent, OutcomeKind};
+use crate::policy::capture_policy;
 use crate::utils::SessionState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,6 +84,8 @@ pub(super) fn filter_outcomes_for_session(
         return outcomes.to_vec();
     };
 
+    let grace_ms = capture_policy().outcome_attribution_grace_ms;
+
     let session_scoped: Vec<OutcomeEvent> = outcomes
         .iter()
         .filter(|event| event.session_id.as_deref() == Some(session.session_id.as_str()))
@@ -94,7 +97,7 @@ pub(super) fn filter_outcomes_for_session(
         .filter(|event| {
             event.session_id.is_none()
                 && event.project.is_none()
-                && event.timestamp >= session.started_at
+                && event.timestamp.saturating_add(grace_ms) >= session.started_at
         })
         .cloned()
         .collect();
@@ -106,7 +109,7 @@ pub(super) fn filter_outcomes_for_session(
                 event.session_id.as_deref() == Some(session.session_id.as_str())
                     || (event.session_id.is_none()
                         && event.project.is_none()
-                        && event.timestamp >= session.started_at)
+                        && event.timestamp.saturating_add(grace_ms) >= session.started_at)
             })
             .cloned()
             .collect();
@@ -120,7 +123,8 @@ pub(super) fn filter_outcomes_for_session(
         .iter()
         .filter(|event| {
             event.project.as_deref() == Some(project)
-                && (session.started_at == 0 || event.timestamp >= session.started_at)
+                && (session.started_at == 0
+                    || event.timestamp.saturating_add(grace_ms) >= session.started_at)
         })
         .cloned()
         .collect();

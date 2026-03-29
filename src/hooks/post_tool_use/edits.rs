@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::events::{FileEditEvent, OutcomeEvent, OutcomeKind};
 use crate::outcomes::record_outcome;
+use crate::policy::capture_policy;
 use crate::utils::{
     Importance, command_exists, current_timestamp_ms, ensure_scoped_hyphae_session,
     is_document_file, load_json_file, log_scoped_hyphae_feedback_signal, project_name_for_cwd,
@@ -9,9 +10,6 @@ use crate::utils::{
 };
 
 use super::{annotate_outcome_with_session, pending, truncate};
-
-const CORRECTION_WINDOW_MS: u64 = 5 * 60 * 1000;
-const CLEANUP_AGE_MS: u64 = 10 * 60 * 1000;
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct EditEntry {
@@ -45,8 +43,8 @@ pub(super) fn handle_file_edits(event: &FileEditEvent) {
             )
             .with_file_path(truncate(file_path, 500)),
         );
-        record_outcome(&hash, outcome);
-        if command_exists("hyphae") {
+        let inserted = record_outcome(&hash, outcome);
+        if inserted && command_exists("hyphae") {
             store_correction_in_hyphae(file_path, &prev_edit, old_str, new_str, scope_cwd);
         }
     }
@@ -71,14 +69,14 @@ pub(super) fn handle_file_edits(event: &FileEditEvent) {
 
 fn load_and_clean_edits(track_file: &Path) -> Vec<EditEntry> {
     let mut edits: Vec<EditEntry> = load_json_file(track_file).unwrap_or_default();
-    let cutoff = current_timestamp_ms().saturating_sub(CLEANUP_AGE_MS);
+    let cutoff = current_timestamp_ms().saturating_sub(capture_policy().edit_cleanup_age_ms);
     edits.retain(|e| e.timestamp > cutoff);
     edits
 }
 
 fn track_edit(track_file: &Path, file_path: &str, old_str: &str, new_str: &str) {
     let now = current_timestamp_ms();
-    let cutoff = now.saturating_sub(CLEANUP_AGE_MS);
+    let cutoff = now.saturating_sub(capture_policy().edit_cleanup_age_ms);
 
     let _ = update_json_file::<Vec<EditEntry>, _, _>(track_file, |edits| {
         edits.retain(|e| e.timestamp > cutoff);
@@ -93,7 +91,7 @@ fn track_edit(track_file: &Path, file_path: &str, old_str: &str, new_str: &str) 
 
 fn find_correction(file_path: &str, old_str: &str, track_file: &Path) -> Option<EditEntry> {
     let edits = load_and_clean_edits(track_file);
-    let cutoff = current_timestamp_ms().saturating_sub(CORRECTION_WINDOW_MS);
+    let cutoff = current_timestamp_ms().saturating_sub(capture_policy().correction_window_ms);
 
     edits
         .iter()

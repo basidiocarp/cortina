@@ -32,9 +32,9 @@ These are active or near-active capture behaviors that already overlap with Cort
 
 | Lamella file | Current status | Cortina target | Notes |
 |---|---|---|---|
-| `scripts/hooks/capture-errors.js` | Active in `resources/hooks/hooks.json` | `src/hooks/post_tool_use.rs` | Cortina already stores `errors/active` and `errors/resolved`. |
-| `scripts/hooks/capture-corrections.js` | Active in `resources/hooks/hooks.json` | `src/hooks/post_tool_use.rs` | Cortina already detects self-corrections and stores `corrections`. |
-| `scripts/hooks/capture-test-results.js` | Active in `resources/hooks/hooks.json` | `src/hooks/post_tool_use.rs` | Cortina already tracks test failures, resolutions, and validation feedback. |
+| `scripts/hooks/capture-errors.js` | Replaced in the shipped hook catalog by `cortina adapter claude-code post-tool-use` | `src/hooks/post_tool_use.rs` | Keep only as legacy reference until Lamella deletes the old helper. |
+| `scripts/hooks/capture-corrections.js` | Replaced in the shipped hook catalog by `cortina adapter claude-code post-tool-use` | `src/hooks/post_tool_use.rs` | Keep only as legacy reference until Lamella deletes the old helper. |
+| `scripts/hooks/capture-test-results.js` | Replaced in the shipped hook catalog by `cortina adapter claude-code post-tool-use` | `src/hooks/post_tool_use.rs` | Keep only as legacy reference until Lamella deletes the old helper. |
 | `scripts/hooks/capture-code-changes.js` | Present in Lamella, not currently registered in `resources/hooks/hooks.json` | `src/hooks/post_tool_use.rs` | Cortina already tracks pending edits, triggers `rhizome export`, and runs `hyphae ingest-file`. Keep only until parity is confirmed, then remove from Lamella. |
 | `scripts/hooks/session-end.js` | Active in `resources/hooks/hooks.json` under `SessionEnd` | `src/hooks/stop.rs` or a dedicated `session_end` hook module | Cortina already owns session-end summary storage. The remaining gap is adapter surface and hook registration shape, not business logic. |
 

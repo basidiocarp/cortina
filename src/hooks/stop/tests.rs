@@ -1,6 +1,6 @@
 use crate::events::{OutcomeEvent, OutcomeKind};
 
-use super::handle;
+use super::{handle, should_store_fallback_session_memory};
 use super::summary::{
     TranscriptSummary, filter_outcomes_for_session, format_structured_outcome_attribution,
     has_unresolved_errors, merge_structured_outcomes,
@@ -152,18 +152,34 @@ fn filter_outcomes_for_session_keeps_current_unattributed_outcomes_only() {
     let session = crate::utils::SessionState {
         session_id: "ses_current".to_string(),
         project: "demo".to_string(),
-        started_at: 200,
+        started_at: 100_000,
     };
     let mut old = OutcomeEvent::new(OutcomeKind::ErrorDetected, "old unattributed");
-    old.timestamp = 150;
+    old.timestamp = 1_000;
     let mut current = OutcomeEvent::new(OutcomeKind::ValidationPassed, "current unattributed");
-    current.timestamp = 250;
+    current.timestamp = 100_100;
     let outcomes = vec![old, current];
 
     let filtered = filter_outcomes_for_session(&outcomes, Some(&session), "demo");
 
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].summary, "current unattributed");
+}
+
+#[test]
+fn filter_outcomes_for_session_allows_small_clock_skew_for_unattributed_outcomes() {
+    let session = crate::utils::SessionState {
+        session_id: "ses_current".to_string(),
+        project: "demo".to_string(),
+        started_at: 1_000,
+    };
+    let mut near_start = OutcomeEvent::new(OutcomeKind::ValidationPassed, "near start");
+    near_start.timestamp = 980;
+
+    let filtered = filter_outcomes_for_session(&[near_start], Some(&session), "demo");
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].summary, "near start");
 }
 
 #[test]
@@ -187,4 +203,11 @@ fn handle_accepts_valid_stop_envelope() {
     );
 
     assert!(handle(&json).is_ok());
+}
+
+#[test]
+fn fallback_session_memory_is_only_used_without_structured_session_by_default() {
+    assert!(should_store_fallback_session_memory(false, false));
+    assert!(!should_store_fallback_session_memory(true, false));
+    assert!(!should_store_fallback_session_memory(true, true));
 }
