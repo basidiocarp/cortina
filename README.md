@@ -54,6 +54,8 @@ cortina doctor --json
 
 `cortina doctor` checks temp-dir writability, Hyphae and Rhizome availability, and whether the scoped state files are present and valid JSON.
 
+Both commands accept `--cwd <path>` to inspect a different worktree scope than the current directory.
+
 The CLI entrypoint dispatches through the adapter layer rather than calling Claude-specific handlers directly. Adding a new host should be an adapter/module change, not a rewrite of the shared signal pipeline.
 
 PostToolUse does the heavy lifting. It watches for failed commands, self-corrections (an edit immediately after a write to the same file), test failures, successful build/test validation, and accumulated code changes. When it detects a pattern, it stores a memory in Hyphae with the right topic so future sessions can recall it. It also keeps a small structured outcome ledger per worktree so the session-end handler can attribute what happened during the session even if the transcript is sparse. When Cortina is about to emit a structured correction, recovery, or validation signal, it also tries to ensure a Hyphae session exists for the current worktree. Those sessions are scoped per worktree hash so parallel workers in the same project do not collapse into one active session, and Cortina now checks liveness through structured `hyphae session status --id <session-id>` output instead of parsing human-readable session listings. Structured writes remain best-effort rather than guaranteed.

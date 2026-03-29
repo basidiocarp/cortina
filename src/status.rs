@@ -7,7 +7,8 @@ use serde::Serialize;
 
 use crate::policy::{CapturePolicy, capture_policy};
 use crate::utils::{
-    SessionState, command_exists, load_json_file, load_session_state, scope_hash, temp_state_path,
+    SessionState, command_exists, load_json_file, load_session_state, scope_hash,
+    scoped_session_liveness, temp_state_path,
 };
 #[cfg(test)]
 use crate::utils::save_json_file;
@@ -19,6 +20,7 @@ pub struct StatusReport {
     hyphae_available: bool,
     rhizome_available: bool,
     session: Option<SessionState>,
+    session_live: Option<bool>,
     outcome_count: usize,
     pending_export_count: usize,
     pending_ingest_count: usize,
@@ -33,6 +35,7 @@ pub struct DoctorReport {
     temp_dir_writable: bool,
     hyphae_available: bool,
     rhizome_available: bool,
+    session_live: Option<bool>,
     session_state: FileHealth,
     outcomes: FileHealth,
     pending_exports: FileHealth,
@@ -65,6 +68,9 @@ pub fn print_status(json: bool, cwd: Option<&str>) -> Result<()> {
             println!("session_id={}", session.session_id);
             println!("session_project={}", session.project);
             println!("session_started_at={}", session.started_at);
+            if let Some(session_live) = report.session_live {
+                println!("session_live={session_live}");
+            }
         }
         None => println!("session_active=false"),
     }
@@ -99,6 +105,9 @@ pub fn print_doctor(json: bool, cwd: Option<&str>) -> Result<()> {
     println!("temp_dir_writable={}", report.temp_dir_writable);
     println!("hyphae_available={}", report.hyphae_available);
     println!("rhizome_available={}", report.rhizome_available);
+    if let Some(session_live) = report.session_live {
+        println!("session_live={session_live}");
+    }
     print_file_health("session_state", &report.session_state);
     print_file_health("outcomes", &report.outcomes);
     print_file_health("pending_exports", &report.pending_exports);
@@ -116,12 +125,14 @@ pub fn print_doctor(json: bool, cwd: Option<&str>) -> Result<()> {
 pub fn collect_status(cwd: Option<&str>) -> StatusReport {
     let cwd = normalized_cwd(cwd);
     let hash = scope_hash(Some(&cwd));
+    let session_live = scoped_session_liveness(Some(&cwd));
     StatusReport {
         cwd,
         scope_hash: hash.clone(),
         hyphae_available: command_exists("hyphae"),
         rhizome_available: command_exists("rhizome"),
         session: load_session_state(&hash),
+        session_live,
         outcome_count: json_vec_len(&outcomes_path(&hash)),
         pending_export_count: json_vec_len(&pending_exports_path(&hash)),
         pending_ingest_count: json_vec_len(&pending_ingest_path(&hash)),
@@ -136,6 +147,7 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
     let temp_dir_writable = temp_dir_is_writable(&temp_dir);
     let hyphae_available = command_exists("hyphae");
     let rhizome_available = command_exists("rhizome");
+    let session_live = scoped_session_liveness(Some(&cwd));
     let session_state = inspect_json_file(&session_state_path(&hash));
     let outcomes = inspect_json_file(&outcomes_path(&hash));
     let pending_exports = inspect_json_file(&pending_exports_path(&hash));
@@ -157,6 +169,12 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
     if !hyphae_available && pending_ingest.exists {
         warnings.push("hyphae is not on PATH; pending ingest state cannot flush".to_string());
     }
+    if session_state.exists && session_state.valid_json && session_live == Some(false) {
+        warnings.push(
+            "cached session state exists but Hyphae reports the session is no longer active"
+                .to_string(),
+        );
+    }
     for (label, health) in [
         ("session_state", &session_state),
         ("outcomes", &outcomes),
@@ -175,6 +193,7 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
         temp_dir_writable,
         hyphae_available,
         rhizome_available,
+        session_live,
         session_state,
         outcomes,
         pending_exports,

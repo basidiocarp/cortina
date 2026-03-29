@@ -24,6 +24,21 @@ pub fn load_session_state(hash: &str) -> Option<SessionState> {
     load_json_file(session_state_path(hash))
 }
 
+pub fn scoped_session_liveness(cwd: Option<&str>) -> Option<bool> {
+    if !command_exists("hyphae") {
+        return None;
+    }
+
+    let hash = scope_hash(cwd);
+    let state = load_session_state(&hash)?;
+    Some(is_cached_session_active(
+        &hash,
+        &state.project,
+        &state.session_id,
+        Command::output,
+    ))
+}
+
 #[cfg(test)]
 pub(super) fn clear_session_state(hash: &str) {
     let path = session_state_path(hash);

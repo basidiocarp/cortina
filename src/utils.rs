@@ -15,7 +15,7 @@ pub use hyphae_client::{Importance, command_exists, spawn_async_checked, store_i
 pub use session_scope::{
     SessionState, end_scoped_hyphae_session, ensure_scoped_hyphae_session, load_session_state,
     log_hyphae_feedback_signal_for_session, log_scoped_hyphae_feedback_signal,
-    project_name_for_cwd,
+    project_name_for_cwd, scoped_session_liveness,
 };
 pub use state::{
     current_timestamp_ms, load_json_file, remove_file_with_lock, scope_hash, temp_state_path,
