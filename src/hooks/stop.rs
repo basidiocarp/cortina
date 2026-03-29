@@ -1,9 +1,13 @@
 use anyhow::Result;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
+use crate::events::{OutcomeEvent, OutcomeKind};
+use crate::outcomes::{clear_outcomes, load_outcomes};
 use crate::utils::{
     Importance, command_exists, cwd_hash, end_hyphae_session, load_session_state, store_in_hyphae,
 };
@@ -46,7 +50,11 @@ pub fn handle(input: &str) -> Result<()> {
         return Ok(());
     }
 
+    let hash = cwd_hash();
+    let structured_outcomes = load_outcomes(&hash);
+
     if !command_exists("hyphae") {
+        clear_outcomes(&hash);
         return Ok(());
     }
 
@@ -56,7 +64,10 @@ pub fn handle(input: &str) -> Result<()> {
         .unwrap_or("unknown");
 
     // Parse transcript if available
-    let summary = parse_transcript(event.transcript_path.as_deref());
+    let summary = merge_structured_outcomes(
+        parse_transcript(event.transcript_path.as_deref()),
+        &structured_outcomes,
+    );
 
     // Build summary
     let mut text = format!("Session in {project_name}: {}", summary.task_desc);
@@ -77,7 +88,10 @@ pub fn handle(input: &str) -> Result<()> {
         let _ = write!(text, "\nOutcome: {}", summary.outcome);
     }
 
-    let hash = cwd_hash();
+    if let Some(attribution) = format_structured_outcome_attribution(&structured_outcomes) {
+        let _ = write!(text, "\nStructured outcomes: {attribution}");
+    }
+
     let ended_structured_session = load_session_state(&hash).is_some()
         && end_hyphae_session(
             Some(&text),
@@ -90,7 +104,58 @@ pub fn handle(input: &str) -> Result<()> {
         store_in_hyphae(&topic, &text, Importance::Medium, Some(project_name));
     }
 
+    clear_outcomes(&hash);
     Ok(())
+}
+
+fn merge_structured_outcomes(
+    mut summary: TranscriptSummary,
+    outcomes: &[OutcomeEvent],
+) -> TranscriptSummary {
+    if outcomes.is_empty() {
+        return summary;
+    }
+
+    let mut files: BTreeSet<String> = summary.files_modified.into_iter().collect();
+    for outcome in outcomes {
+        if let Some(file_path) = outcome.file_path.as_ref().filter(|path| !path.is_empty()) {
+            files.insert(file_path.clone());
+        }
+    }
+    summary.files_modified = files.into_iter().collect();
+
+    let structured_error_count = outcomes
+        .iter()
+        .filter(|event| matches!(event.kind, OutcomeKind::ErrorDetected))
+        .count();
+    summary.errors_encountered = summary.errors_encountered.max(structured_error_count);
+
+    if (summary.outcome.trim().is_empty() || summary.outcome == "Work completed")
+        && let Some(latest) = outcomes.last()
+    {
+        summary.outcome.clone_from(&latest.summary);
+    }
+
+    summary
+}
+
+fn format_structured_outcome_attribution(outcomes: &[OutcomeEvent]) -> Option<String> {
+    if outcomes.is_empty() {
+        return None;
+    }
+
+    let mut counts: BTreeMap<OutcomeKind, usize> = BTreeMap::new();
+    for outcome in outcomes {
+        *counts.entry(outcome.kind).or_insert(0) += 1;
+    }
+
+    Some(
+        counts
+            .into_iter()
+            .map(|(kind, count)| format!("{}({count})", kind.label()))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
 }
 
 fn parse_transcript(transcript_path: Option<&str>) -> TranscriptSummary {
@@ -222,6 +287,7 @@ fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::{OutcomeEvent, OutcomeKind};
 
     // ─────────────────────────────────────────────────────────────────────
     // Transcript parsing tests
@@ -296,5 +362,45 @@ mod tests {
 
         assert!(summary.files_modified.iter().any(|file| file == "/a.rs"));
         assert!(summary.files_modified.iter().any(|file| file == "/b.rs"));
+    }
+
+    #[test]
+    fn test_merge_structured_outcomes_enriches_summary() {
+        let summary = TranscriptSummary {
+            task_desc: "Session work".to_string(),
+            files_modified: vec!["/tmp/a.rs".to_string()],
+            tool_counts: String::new(),
+            errors_encountered: 0,
+            outcome: "Work completed".to_string(),
+        };
+        let outcomes = vec![
+            OutcomeEvent::new(OutcomeKind::ErrorDetected, "Command failed: cargo test")
+                .with_command("cargo test"),
+            OutcomeEvent::new(
+                OutcomeKind::SelfCorrection,
+                "Corrected recent edit in /tmp/b.rs",
+            )
+            .with_file_path("/tmp/b.rs"),
+        ];
+
+        let merged = merge_structured_outcomes(summary, &outcomes);
+
+        assert_eq!(merged.errors_encountered, 1);
+        assert_eq!(merged.outcome, "Corrected recent edit in /tmp/b.rs");
+        assert!(merged.files_modified.iter().any(|path| path == "/tmp/a.rs"));
+        assert!(merged.files_modified.iter().any(|path| path == "/tmp/b.rs"));
+    }
+
+    #[test]
+    fn test_format_structured_outcome_attribution_counts_by_kind() {
+        let outcomes = vec![
+            OutcomeEvent::new(OutcomeKind::ErrorDetected, "first"),
+            OutcomeEvent::new(OutcomeKind::ErrorDetected, "second"),
+            OutcomeEvent::new(OutcomeKind::ValidationPassed, "cargo test passed"),
+        ];
+
+        let formatted = format_structured_outcome_attribution(&outcomes).unwrap();
+        assert!(formatted.contains("error_detected(2)"));
+        assert!(formatted.contains("validation_passed(1)"));
     }
 }

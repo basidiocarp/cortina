@@ -27,6 +27,7 @@ Keep improving the `hyphae session start` and `hyphae session end` integration p
 ### Lamella boundary cleanup
 
 Finish moving ecosystem lifecycle and capture-hook ownership out of Lamella and into Cortina.
+See [docs/lamella-boundary.md](docs/lamella-boundary.md) for the current move-now and move-later split.
 
 ## Later
 

@@ -15,6 +15,9 @@ impl ClaudeCodeHookEnvelope {
     }
 
     pub fn command_rewrite_request(&self) -> Option<CommandRewriteRequest> {
+        if self.tool_name()? != "Bash" {
+            return None;
+        }
         let command = self.tool_input_string("command")?.to_string();
         Some(CommandRewriteRequest::new(
             command,
@@ -140,6 +143,7 @@ mod tests {
     fn updates_tool_input_command_without_mutating_original_shape() {
         let envelope = ClaudeCodeHookEnvelope::parse(
             r#"{
+                "tool_name": "Bash",
                 "tool_input": {"command": "cargo test", "cwd": "/tmp/demo"}
             }"#,
         )
@@ -200,5 +204,18 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("cargo check")
         );
+    }
+
+    #[test]
+    fn ignores_non_bash_rewrite_requests() {
+        let envelope = ClaudeCodeHookEnvelope::parse(
+            r#"{
+                "tool_name": "SomeFutureTool",
+                "tool_input": {"command": "git status", "cwd": "/tmp/demo"}
+            }"#,
+        )
+        .expect("valid envelope");
+
+        assert!(envelope.command_rewrite_request().is_none());
     }
 }

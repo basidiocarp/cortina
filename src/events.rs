@@ -27,6 +27,32 @@ pub struct SessionStopEvent {
     pub transcript_path: Option<String>,
 }
 
+#[derive(
+    Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum OutcomeKind {
+    ErrorDetected,
+    ErrorResolved,
+    SelfCorrection,
+    ValidationPassed,
+    KnowledgeExported,
+    DocumentIngested,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct OutcomeEvent {
+    pub kind: OutcomeKind,
+    pub summary: String,
+    pub timestamp: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal_type: Option<String>,
+}
+
 impl CommandRewriteRequest {
     pub(crate) fn new(command: String, updated_input: Value) -> Self {
         Self {
@@ -42,4 +68,55 @@ impl CommandRewriteRequest {
         }
         updated_input
     }
+}
+
+impl OutcomeKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ErrorDetected => "error_detected",
+            Self::ErrorResolved => "error_resolved",
+            Self::SelfCorrection => "self_correction",
+            Self::ValidationPassed => "validation_passed",
+            Self::KnowledgeExported => "knowledge_exported",
+            Self::DocumentIngested => "document_ingested",
+        }
+    }
+}
+
+impl OutcomeEvent {
+    pub fn new(kind: OutcomeKind, summary: impl Into<String>) -> Self {
+        Self {
+            kind,
+            summary: summary.into(),
+            timestamp: current_timestamp_ms(),
+            command: None,
+            file_path: None,
+            signal_type: None,
+        }
+    }
+
+    pub fn with_command(mut self, command: impl Into<String>) -> Self {
+        self.command = Some(command.into());
+        self
+    }
+
+    pub fn with_file_path(mut self, file_path: impl Into<String>) -> Self {
+        self.file_path = Some(file_path.into());
+        self
+    }
+
+    pub fn with_signal_type(mut self, signal_type: impl Into<String>) -> Self {
+        self.signal_type = Some(signal_type.into());
+        self
+    }
+}
+
+fn current_timestamp_ms() -> u64 {
+    u64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis(),
+    )
+    .unwrap_or(u64::MAX)
 }

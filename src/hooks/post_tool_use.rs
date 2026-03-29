@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
-use crate::events::{BashToolEvent, FileEditEvent, ToolResultEvent};
+use crate::events::{BashToolEvent, FileEditEvent, OutcomeEvent, OutcomeKind, ToolResultEvent};
+use crate::outcomes::record_outcome;
 use crate::utils::{
     Importance, command_exists, cwd_hash, ensure_hyphae_session, get_project_name, has_error,
     is_build_command, is_document_file, is_significant_command, load_json_file,
@@ -76,12 +77,20 @@ fn handle_bash(event: &BashToolEvent) {
 
     if error_detected {
         track_error(&track_file, &cmd_key, command, output);
+        record_outcome(
+            &hash,
+            OutcomeEvent::new(
+                OutcomeKind::ErrorDetected,
+                format!("Command failed: {}", truncate(command, 200)),
+            )
+            .with_command(truncate(command, 500)),
+        );
         if command_exists("hyphae") {
             store_error_in_hyphae(command, output);
         }
     } else {
-        resolve_error(&track_file, &cmd_key, command);
-        log_validation_success(command, exit_code);
+        resolve_error(&track_file, &cmd_key, command, &hash);
+        log_validation_success(command, exit_code, &hash);
     }
 
     // Check for build success and trigger exports
@@ -105,6 +114,14 @@ fn handle_file_edits(event: &FileEditEvent) {
 
     // Check for self-corrections
     if let Some(prev_edit) = find_correction(file_path, old_str, &track_file) {
+        record_outcome(
+            &hash,
+            OutcomeEvent::new(
+                OutcomeKind::SelfCorrection,
+                format!("Corrected recent edit in {}", truncate(file_path, 200)),
+            )
+            .with_file_path(truncate(file_path, 500)),
+        );
         if command_exists("hyphae") {
             store_correction_in_hyphae(file_path, &prev_edit, old_str, new_str);
         }
@@ -152,11 +169,20 @@ fn track_error(track_file: &Path, cmd_key: &str, command: &str, output: &str) {
     let _ = save_json_file(track_file, &entries);
 }
 
-fn resolve_error(track_file: &Path, cmd_key: &str, command: &str) {
+fn resolve_error(track_file: &Path, cmd_key: &str, command: &str, hash: &str) {
     let mut entries: HashMap<String, ErrorEntry> = load_json_file(track_file).unwrap_or_default();
 
     if let Some(prev_error) = entries.remove(cmd_key) {
         let _ = save_json_file(track_file, &entries);
+        record_outcome(
+            hash,
+            OutcomeEvent::new(
+                OutcomeKind::ErrorResolved,
+                format!("Recovered command: {}", truncate(command, 200)),
+            )
+            .with_command(truncate(command, 500))
+            .with_signal_type("error_resolved"),
+        );
 
         if command_exists("hyphae") {
             let content = format!(
@@ -297,12 +323,22 @@ fn store_correction_in_hyphae(
     log_hyphae_feedback_signal("correction", -1, "cortina.post_tool_use.correction");
 }
 
-fn log_validation_success(command: &str, exit_code: Option<i32>) {
+fn log_validation_success(command: &str, exit_code: Option<i32>, hash: &str) {
     let Some((signal_type, signal_value, source)) =
         successful_validation_feedback(command, exit_code)
     else {
         return;
     };
+
+    record_outcome(
+        hash,
+        OutcomeEvent::new(
+            OutcomeKind::ValidationPassed,
+            format!("Validation passed: {}", truncate(command, 200)),
+        )
+        .with_command(truncate(command, 500))
+        .with_signal_type(signal_type),
+    );
 
     let project = get_project_name();
     if let Some(ref project_name) = project {
@@ -390,14 +426,35 @@ fn check_and_trigger_exports(hash: &str) {
     let pending_files = get_pending_files(hash);
     if pending_files.len() >= EXPORT_THRESHOLD && command_exists("rhizome") {
         spawn_async("rhizome", &["export"]);
+        record_outcome(
+            hash,
+            OutcomeEvent::new(
+                OutcomeKind::KnowledgeExported,
+                format!("Triggered rhizome export for {} files", pending_files.len()),
+            )
+            .with_command("rhizome export"),
+        );
         clear_pending_files(hash);
     }
 }
 
 fn trigger_hyphae_ingest(documents: &[String]) {
+    let hash = cwd_hash();
     for doc in documents {
         spawn_async("hyphae", &["ingest-file", doc]);
     }
+    record_outcome(
+        &hash,
+        OutcomeEvent::new(
+            OutcomeKind::DocumentIngested,
+            format!("Triggered hyphae ingest for {} documents", documents.len()),
+        )
+        .with_command("hyphae ingest-file"),
+    );
+}
+
+fn truncate(value: &str, limit: usize) -> String {
+    value.chars().take(limit).collect()
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -506,7 +563,7 @@ mod tests {
 
     #[test]
     fn test_handle_malformed_json_returns_ok() {
-        let malformed = r#"{ invalid json }"#;
+        let malformed = r"{ invalid json }";
         let result = handle(malformed);
         // Should not panic, should return Ok
         assert!(result.is_ok());
@@ -529,5 +586,20 @@ mod tests {
 
         let result = handle(json_str);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_log_validation_success_records_structured_outcome() {
+        let hash = format!("test-validation-{}", std::process::id());
+        crate::outcomes::clear_outcomes(&hash);
+
+        log_validation_success("cargo test", Some(0), &hash);
+
+        let outcomes = crate::outcomes::load_outcomes(&hash);
+        assert_eq!(outcomes.len(), 1);
+        assert_eq!(outcomes[0].kind, OutcomeKind::ValidationPassed);
+        assert_eq!(outcomes[0].signal_type.as_deref(), Some("test_passed"));
+
+        crate::outcomes::clear_outcomes(&hash);
     }
 }
