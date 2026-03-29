@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-03-29
+
+### Added
+
+- **Structured outcome attribution**: `PostToolUse`, `Stop`, and `SessionEnd` now share a durable outcome model so corrections, recoveries, validations, exports, and ingest events can be attributed to the active scoped Hyphae session.
+
+### Fixed
+
+- **Lifecycle persistence hardening**: Cortina now uses locked, atomic temp-state updates for sessions, outcomes, error tracking, edit history, and pending export or ingest queues, which removes race conditions under overlapping hook execution.
+
+### Changed
+
+- **Lifecycle module boundaries**: the hook runtime is now split into focused `events`, `utils`, `post_tool_use`, and `stop` submodules with extracted regression tests, making the lifecycle code easier to audit and maintain.
+
 ## [0.1.6] - 2026-03-27
 
 ### Fixed
