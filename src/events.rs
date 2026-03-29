@@ -14,12 +14,14 @@ pub struct BashToolEvent {
     pub command: String,
     pub output: String,
     pub exit_code: Option<i32>,
+    pub cwd: Option<String>,
 }
 
 pub struct FileEditEvent {
     pub file_path: String,
     pub old_string: String,
     pub new_string: String,
+    pub cwd: Option<String>,
 }
 
 pub struct SessionStopEvent {
@@ -45,6 +47,10 @@ pub struct OutcomeEvent {
     pub kind: OutcomeKind,
     pub summary: String,
     pub timestamp: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,11 +94,23 @@ impl OutcomeEvent {
         Self {
             kind,
             summary: summary.into(),
-            timestamp: current_timestamp_ms(),
+            timestamp: crate::utils::current_timestamp_ms(),
+            session_id: None,
+            project: None,
             command: None,
             file_path: None,
             signal_type: None,
         }
+    }
+
+    pub fn with_session(
+        mut self,
+        session_id: impl Into<String>,
+        project: impl Into<String>,
+    ) -> Self {
+        self.session_id = Some(session_id.into());
+        self.project = Some(project.into());
+        self
     }
 
     pub fn with_command(mut self, command: impl Into<String>) -> Self {
@@ -109,14 +127,4 @@ impl OutcomeEvent {
         self.signal_type = Some(signal_type.into());
         self
     }
-}
-
-fn current_timestamp_ms() -> u64 {
-    u64::try_from(
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis(),
-    )
-    .unwrap_or(u64::MAX)
 }

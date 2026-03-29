@@ -9,7 +9,9 @@ use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::events::{OutcomeEvent, OutcomeKind};
 use crate::outcomes::{clear_outcomes, load_outcomes};
 use crate::utils::{
-    Importance, command_exists, cwd_hash, end_hyphae_session, load_session_state, store_in_hyphae,
+    Importance, command_exists, end_scoped_hyphae_session, has_error, load_session_state,
+    log_hyphae_feedback_signal_for_session, project_name_for_cwd, scope_hash,
+    session_outcome_feedback, store_in_hyphae,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -50,18 +52,27 @@ pub fn handle(input: &str) -> Result<()> {
         return Ok(());
     }
 
-    let hash = cwd_hash();
-    let structured_outcomes = load_outcomes(&hash);
+    let hash = scope_hash(Some(&event.cwd));
+    let cached_session = load_session_state(&hash);
+    let had_cached_session = cached_session.is_some();
 
     if !command_exists("hyphae") {
         clear_outcomes(&hash);
         return Ok(());
     }
 
-    let project_name = Path::new(&event.cwd)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
+    let project_name = project_name_for_cwd(Some(&event.cwd)).unwrap_or_else(|| {
+        Path::new(&event.cwd)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string()
+    });
+    let structured_outcomes = filter_outcomes_for_session(
+        &load_outcomes(&hash),
+        cached_session.as_ref(),
+        &project_name,
+    );
 
     // Parse transcript if available
     let summary = merge_structured_outcomes(
@@ -92,19 +103,34 @@ pub fn handle(input: &str) -> Result<()> {
         let _ = write!(text, "\nStructured outcomes: {attribution}");
     }
 
-    let ended_structured_session = load_session_state(&hash).is_some()
-        && end_hyphae_session(
-            Some(&text),
-            &summary.files_modified,
-            summary.errors_encountered,
-        );
+    let session_feedback = session_outcome_feedback(
+        &summary.outcome,
+        has_unresolved_errors(&structured_outcomes),
+    );
 
-    if !ended_structured_session {
-        let topic = format!("session/{project_name}");
-        store_in_hyphae(&topic, &text, Importance::Medium, Some(project_name));
+    let ended_structured_session = end_scoped_hyphae_session(
+        Some(&event.cwd),
+        Some(&text),
+        &summary.files_modified,
+        summary.errors_encountered,
+    );
+
+    if let Some(ref state) = ended_structured_session {
+        log_hyphae_feedback_signal_for_session(
+            state,
+            session_feedback.0,
+            session_feedback.1,
+            session_feedback.2,
+        );
+        clear_outcomes(&hash);
+    } else if !had_cached_session {
+        clear_outcomes(&hash);
     }
 
-    clear_outcomes(&hash);
+    if ended_structured_session.is_none() {
+        let topic = format!("session/{project_name}");
+        store_in_hyphae(&topic, &text, Importance::Medium, Some(&project_name));
+    }
     Ok(())
 }
 
@@ -156,6 +182,76 @@ fn format_structured_outcome_attribution(outcomes: &[OutcomeEvent]) -> Option<St
             .collect::<Vec<_>>()
             .join(", "),
     )
+}
+
+fn filter_outcomes_for_session(
+    outcomes: &[OutcomeEvent],
+    session: Option<&crate::utils::SessionState>,
+    project: &str,
+) -> Vec<OutcomeEvent> {
+    let Some(session) = session else {
+        return outcomes.to_vec();
+    };
+
+    let session_scoped: Vec<OutcomeEvent> = outcomes
+        .iter()
+        .filter(|event| event.session_id.as_deref() == Some(session.session_id.as_str()))
+        .cloned()
+        .collect();
+
+    let unattributed_current_session: Vec<OutcomeEvent> = outcomes
+        .iter()
+        .filter(|event| {
+            event.session_id.is_none()
+                && event.project.is_none()
+                && event.timestamp >= session.started_at
+        })
+        .cloned()
+        .collect();
+
+    if !session_scoped.is_empty() || !unattributed_current_session.is_empty() {
+        return outcomes
+            .iter()
+            .filter(|event| {
+                event.session_id.as_deref() == Some(session.session_id.as_str())
+                    || (event.session_id.is_none()
+                        && event.project.is_none()
+                        && event.timestamp >= session.started_at)
+            })
+            .cloned()
+            .collect();
+    }
+
+    if outcomes.iter().any(|event| event.session_id.is_some()) {
+        return Vec::new();
+    }
+
+    let project_scoped: Vec<OutcomeEvent> = outcomes
+        .iter()
+        .filter(|event| {
+            event.project.as_deref() == Some(project)
+                && (session.started_at == 0 || event.timestamp >= session.started_at)
+        })
+        .cloned()
+        .collect();
+    if !project_scoped.is_empty() {
+        return project_scoped;
+    }
+
+    outcomes.to_vec()
+}
+
+fn has_unresolved_errors(outcomes: &[OutcomeEvent]) -> bool {
+    let detected = outcomes
+        .iter()
+        .filter(|event| matches!(event.kind, OutcomeKind::ErrorDetected))
+        .count();
+    let resolved = outcomes
+        .iter()
+        .filter(|event| matches!(event.kind, OutcomeKind::ErrorResolved))
+        .count();
+
+    detected > resolved
 }
 
 fn parse_transcript(transcript_path: Option<&str>) -> TranscriptSummary {
@@ -244,17 +340,8 @@ fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
 
             // Count errors in tool results
             if let Some("tool_result") = entry.get("type").and_then(|v| v.as_str()) {
-                if let Some(content_str) = entry.get("content").and_then(|v| v.as_str()) {
-                    if content_str.contains("error")
-                        || content_str.contains("Error")
-                        || content_str.contains("ERROR")
-                        || content_str.contains("failed")
-                        || content_str.contains("Failed")
-                        || content_str.contains("FAILED")
-                        || content_str.contains("panic")
-                    {
-                        summary.errors_encountered += 1;
-                    }
+                if transcript_tool_result_has_error(&entry) {
+                    summary.errors_encountered += 1;
                 }
             }
         }
@@ -278,6 +365,29 @@ fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
     }
 
     summary
+}
+
+fn transcript_tool_result_has_error(entry: &serde_json::Value) -> bool {
+    let exit_code = entry
+        .get("exit_code")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok());
+    let content = entry.get("content").and_then(|value| value.as_str()).unwrap_or("");
+
+    if let Some(code) = exit_code {
+        return has_error(content, Some(code));
+    }
+
+    let normalized = content.trim();
+    normalized.contains("error:")
+        || normalized.contains("Error:")
+        || normalized.contains("ERROR:")
+        || normalized.contains("failed")
+        || normalized.contains("Failed")
+        || normalized.contains("FAILED")
+        || normalized.contains("panic")
+        || normalized.contains("Panic")
+        || normalized.contains("PANIC")
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -329,13 +439,25 @@ mod tests {
         let jsonl = r#"{"type": "human", "text": "Task"}
 {"type": "tool_use", "tool_name": "Bash", "input": {}}
 {"type": "tool_result", "content": "error: failed"}
-{"type": "tool_result", "content": "Error in compilation"}
+{"type": "tool_result", "content": "FAILED: compilation"}
 {"type": "assistant", "text": "Done"}
 "#;
 
         let summary = parse_jsonl_transcript(jsonl);
 
         assert_eq!(summary.errors_encountered, 2);
+    }
+
+    #[test]
+    fn test_parse_jsonl_transcript_ignores_error_handling_prose() {
+        let jsonl = r#"{"type": "human", "text": "Task"}
+{"type": "tool_result", "content": "Improved error handling and validation flow"}
+{"type": "assistant", "text": "Done"}
+"#;
+
+        let summary = parse_jsonl_transcript(jsonl);
+
+        assert_eq!(summary.errors_encountered, 0);
     }
 
     #[test]
@@ -402,5 +524,53 @@ mod tests {
         let formatted = format_structured_outcome_attribution(&outcomes).unwrap();
         assert!(formatted.contains("error_detected(2)"));
         assert!(formatted.contains("validation_passed(1)"));
+    }
+
+    #[test]
+    fn test_filter_outcomes_for_session_prefers_matching_session_id() {
+        let session = crate::utils::SessionState {
+            session_id: "ses_current".to_string(),
+            project: "demo".to_string(),
+            started_at: 100,
+        };
+        let outcomes = vec![
+            OutcomeEvent::new(OutcomeKind::ErrorDetected, "old").with_session("ses_old", "demo"),
+            OutcomeEvent::new(OutcomeKind::ValidationPassed, "current")
+                .with_session("ses_current", "demo"),
+        ];
+
+        let filtered = filter_outcomes_for_session(&outcomes, Some(&session), "demo");
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].summary, "current");
+    }
+
+    #[test]
+    fn test_filter_outcomes_for_session_keeps_current_unattributed_outcomes_only() {
+        let session = crate::utils::SessionState {
+            session_id: "ses_current".to_string(),
+            project: "demo".to_string(),
+            started_at: 200,
+        };
+        let mut old = OutcomeEvent::new(OutcomeKind::ErrorDetected, "old unattributed");
+        old.timestamp = 150;
+        let mut current = OutcomeEvent::new(OutcomeKind::ValidationPassed, "current unattributed");
+        current.timestamp = 250;
+        let outcomes = vec![old, current];
+
+        let filtered = filter_outcomes_for_session(&outcomes, Some(&session), "demo");
+
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].summary, "current unattributed");
+    }
+
+    #[test]
+    fn test_has_unresolved_errors_stays_true_after_non_error_outcome() {
+        let outcomes = vec![
+            OutcomeEvent::new(OutcomeKind::ErrorDetected, "command failed"),
+            OutcomeEvent::new(OutcomeKind::DocumentIngested, "docs ingested"),
+        ];
+
+        assert!(has_unresolved_errors(&outcomes));
     }
 }

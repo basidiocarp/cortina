@@ -1,8 +1,7 @@
-use std::fs;
 use std::path::PathBuf;
 
 use crate::events::OutcomeEvent;
-use crate::utils::{load_json_file, save_json_file, temp_state_path};
+use crate::utils::{load_json_file, remove_file_with_lock, temp_state_path, update_json_file};
 
 const MAX_OUTCOME_EVENTS: usize = 128;
 
@@ -15,23 +14,25 @@ pub fn load_outcomes(hash: &str) -> Vec<OutcomeEvent> {
 }
 
 pub fn record_outcome(hash: &str, event: OutcomeEvent) {
-    let mut events = load_outcomes(hash);
-    events.push(event);
+    let _ = update_json_file::<Vec<OutcomeEvent>, _, _>(outcomes_path(hash), |events| {
+        events.push(event);
 
-    if events.len() > MAX_OUTCOME_EVENTS {
-        let overflow = events.len().saturating_sub(MAX_OUTCOME_EVENTS);
-        events.drain(0..overflow);
-    }
-
-    let _ = save_json_file(outcomes_path(hash), &events);
+        if events.len() > MAX_OUTCOME_EVENTS {
+            let overflow = events.len().saturating_sub(MAX_OUTCOME_EVENTS);
+            events.drain(0..overflow);
+        }
+    });
 }
 
 pub fn clear_outcomes(hash: &str) {
-    let _ = fs::remove_file(outcomes_path(hash));
+    let _ = remove_file_with_lock(outcomes_path(hash));
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
     use super::*;
     use crate::events::{OutcomeEvent, OutcomeKind};
 
@@ -77,6 +78,45 @@ mod tests {
             outcomes.first().map(|event| event.summary.as_str()),
             Some("failure 5")
         );
+
+        clear_outcomes(&hash);
+    }
+
+    #[test]
+    fn preserves_concurrent_outcome_writes() {
+        let hash = test_hash("concurrent");
+        clear_outcomes(&hash);
+
+        let writers = 12;
+        let barrier = Arc::new(Barrier::new(writers));
+        let mut handles = Vec::new();
+
+        for idx in 0..writers {
+            let hash = hash.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                record_outcome(
+                    &hash,
+                    OutcomeEvent::new(OutcomeKind::ValidationPassed, format!("writer-{idx}")),
+                );
+            }));
+        }
+
+        for handle in handles {
+            handle.join().expect("thread should finish cleanly");
+        }
+
+        let outcomes = load_outcomes(&hash);
+        assert_eq!(outcomes.len(), writers);
+        for idx in 0..writers {
+            assert!(
+                outcomes
+                    .iter()
+                    .any(|event| event.summary == format!("writer-{idx}")),
+                "missing outcome from writer-{idx}"
+            );
+        }
 
         clear_outcomes(&hash);
     }

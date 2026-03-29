@@ -37,6 +37,7 @@ impl ClaudeCodeHookEnvelope {
                     .unwrap_or_default()
                     .to_string(),
                 exit_code: self.tool_output_exit_code(),
+                cwd: self.cwd().map(ToString::to_string),
             })),
             "Write" | "Edit" | "MultiEdit" => Some(ToolResultEvent::FileEdit(FileEditEvent {
                 file_path: self
@@ -51,6 +52,7 @@ impl ClaudeCodeHookEnvelope {
                     .tool_input_string("new_string")
                     .unwrap_or_default()
                     .to_string(),
+                cwd: self.cwd().map(ToString::to_string),
             })),
             _ => None,
         }
@@ -134,6 +136,7 @@ mod tests {
                 assert_eq!(event.command, "cargo test");
                 assert_eq!(event.output, "ok");
                 assert_eq!(event.exit_code, Some(0));
+                assert_eq!(event.cwd, None);
             }
             _ => panic!("expected bash tool event"),
         }

@@ -28,6 +28,10 @@ pub enum ClaudeCodeEventCommand {
     /// Handle `Stop` adapter events (session summary)
     #[command(name = "stop")]
     Stop,
+
+    /// Handle `SessionEnd` adapter events (session summary)
+    #[command(name = "session-end")]
+    SessionEnd,
 }
 
 pub fn handle_adapter_command(adapter: &AdapterCommand, input: &str) -> Result<()> {
@@ -44,6 +48,8 @@ fn handle_claude_code_event(event: ClaudeCodeEventCommand, input: &str) -> Resul
     match event {
         ClaudeCodeEventCommand::PreToolUse => hooks::pre_tool_use::handle(input),
         ClaudeCodeEventCommand::PostToolUse => hooks::post_tool_use::handle(input),
-        ClaudeCodeEventCommand::Stop => hooks::stop::handle(input),
+        ClaudeCodeEventCommand::Stop | ClaudeCodeEventCommand::SessionEnd => {
+            hooks::stop::handle(input)
+        }
     }
 }

@@ -15,7 +15,7 @@ Claude Code                    Cortina                         Ecosystem
 ───────────                    ───────                         ─────────
 PreToolUse  ──stdin JSON──►    Claude adapter          ──►     Rewrite via Mycelium
 PostToolUse ──stdin JSON──►    Claude adapter          ──►     Store to Hyphae
-Stop        ──stdin JSON──►    Claude adapter          ──►     Session summary
+SessionEnd  ──stdin JSON──►    Claude adapter          ──►     Session summary
 ```
 
 Preferred adapter-oriented CLI:
@@ -23,7 +23,7 @@ Preferred adapter-oriented CLI:
 ```bash
 cortina adapter claude-code pre-tool-use
 cortina adapter claude-code post-tool-use
-cortina adapter claude-code stop
+cortina adapter claude-code session-end
 ```
 
 Compatibility aliases still work:
@@ -31,14 +31,17 @@ Compatibility aliases still work:
 ```bash
 cortina pre-tool-use
 cortina post-tool-use
+cortina session-end
 cortina stop
 ```
 
+`stop` remains available as a compatibility alias for older hook templates, but `session-end` is the preferred Claude session-finish adapter name.
+
 The CLI entrypoint dispatches through the adapter layer rather than calling Claude-specific handlers directly. Adding a new host should be an adapter/module change, not a rewrite of the shared signal pipeline.
 
-PostToolUse does the heavy lifting. It watches for failed commands, self-corrections (an edit immediately after a write to the same file), test failures, successful build/test validation, and accumulated code changes. When it detects a pattern, it stores a memory in Hyphae with the right topic so future sessions can recall it. It also keeps a small structured outcome ledger per worktree so the Stop hook can attribute what happened during the session even if the transcript is sparse. When Cortina is about to emit a structured correction, recovery, or validation signal, it also tries to ensure a Hyphae session exists for the current worktree. Those sessions are scoped per worktree hash so parallel workers in the same project do not collapse into one active session, and Cortina now checks liveness through structured `hyphae session status --id <session-id>` output instead of parsing human-readable session listings. Structured writes remain best-effort rather than guaranteed.
+PostToolUse does the heavy lifting. It watches for failed commands, self-corrections (an edit immediately after a write to the same file), test failures, successful build/test validation, and accumulated code changes. When it detects a pattern, it stores a memory in Hyphae with the right topic so future sessions can recall it. It also keeps a small structured outcome ledger per worktree so the session-end handler can attribute what happened during the session even if the transcript is sparse. When Cortina is about to emit a structured correction, recovery, or validation signal, it also tries to ensure a Hyphae session exists for the current worktree. Those sessions are scoped per worktree hash so parallel workers in the same project do not collapse into one active session, and Cortina now checks liveness through structured `hyphae session status --id <session-id>` output instead of parsing human-readable session listings. Structured writes remain best-effort rather than guaranteed.
 
-If a structured Hyphae session is active, the Stop hook tries to end it with a structured summary: which files changed, what errors occurred, what tools were used, and the final outcome. If no structured session exists, or structured shutdown fails, Cortina falls back to the older direct `session/{project}` memory write.
+If a structured Hyphae session is active, the SessionEnd handler tries to end it with a structured summary: which files changed, what errors occurred, what tools were used, and the final outcome. If no structured session exists, or structured shutdown fails, Cortina falls back to the older direct `session/{project}` memory write.
 
 ## What Gets Captured
 
@@ -52,7 +55,7 @@ If a structured Hyphae session is active, the Stop hook tries to end it with a s
 | Test fix | Test passes after failure | `tests/resolved` |
 | Code changes | 5+ edits + successful build | Triggers `rhizome export` |
 | Doc changes | 3+ doc edits | Triggers `hyphae ingest-file` |
-| Session end | Stop event | `hyphae session end` with summary fallback to `session/{project}` |
+| Session end | SessionEnd or Stop event | `hyphae session end` with summary fallback to `session/{project}` |
 
 ## Install
 

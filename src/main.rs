@@ -41,6 +41,10 @@ enum Commands {
     /// Compatibility alias for `cortina adapter claude-code stop`
     #[command(name = "stop", hide = true)]
     Stop,
+
+    /// Compatibility alias for `cortina adapter claude-code session-end`
+    #[command(name = "session-end", hide = true)]
+    SessionEnd,
 }
 
 fn main() -> Result<()> {
@@ -61,6 +65,9 @@ fn main() -> Result<()> {
         Commands::Stop => {
             adapters::handle_legacy_claude_command(ClaudeCodeEventCommand::Stop, &input)
         }
+        Commands::SessionEnd => {
+            adapters::handle_legacy_claude_command(ClaudeCodeEventCommand::SessionEnd, &input)
+        }
     }
 }
 
@@ -79,12 +86,24 @@ mod tests {
     }
 
     #[test]
+    fn parses_explicit_session_end_adapter_command() {
+        let cli = Cli::try_parse_from(["cortina", "adapter", "claude-code", "session-end"])
+            .expect("expected session-end adapter command to parse");
+
+        assert!(matches!(cli.command, Commands::Adapter { .. }));
+    }
+
+    #[test]
     fn keeps_compatibility_aliases_hidden_but_valid() {
         let cli = Cli::try_parse_from(["cortina", "pre-tool-use"])
             .expect("expected compatibility alias to parse");
 
         assert!(matches!(cli.command, Commands::PreToolUse));
+        let session_end = Cli::try_parse_from(["cortina", "session-end"])
+            .expect("expected session-end alias to parse");
+        assert!(matches!(session_end.command, Commands::SessionEnd));
         let help = Cli::command().render_long_help().to_string();
         assert!(!help.contains("pre-tool-use"));
+        assert!(!help.contains("session-end"));
     }
 }
