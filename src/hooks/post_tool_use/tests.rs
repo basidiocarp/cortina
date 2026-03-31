@@ -7,7 +7,7 @@ use super::bash::log_validation_success;
 use super::edits::handle_file_edits;
 use super::pending::{
     clear_pending_documents, clear_pending_files, get_pending_documents, get_pending_files,
-    take_pending_documents_batch, track_pending_document, track_pending_file,
+    hyphae_ingest_args, take_pending_documents_batch, track_pending_document, track_pending_file,
 };
 use super::*;
 
@@ -258,4 +258,34 @@ fn take_pending_documents_batch_drains_only_when_threshold_met() {
     assert!(get_pending_documents(&hash).is_empty());
 
     clear_pending_documents(&hash);
+}
+
+#[test]
+fn hyphae_pending_ingest_uses_current_cli_subcommand() {
+    assert_eq!(
+        hyphae_ingest_args("docs/guide.md"),
+        ["ingest", "docs/guide.md"]
+    );
+}
+
+#[test]
+fn annotate_outcome_with_session_carries_exact_identity_when_available() {
+    let session = crate::utils::SessionState {
+        session_id: "ses_demo".to_string(),
+        project: "demo".to_string(),
+        project_root: Some("/tmp/demo".to_string()),
+        worktree_id: Some("git:demo".to_string()),
+        legacy_scope: None,
+        started_at: 1,
+    };
+
+    let outcome = annotate_outcome_with_session(
+        Some(session),
+        crate::events::OutcomeEvent::new(OutcomeKind::ValidationPassed, "cargo test passed"),
+    );
+
+    assert_eq!(outcome.session_id.as_deref(), Some("ses_demo"));
+    assert_eq!(outcome.project.as_deref(), Some("demo"));
+    assert_eq!(outcome.project_root.as_deref(), Some("/tmp/demo"));
+    assert_eq!(outcome.worktree_id.as_deref(), Some("git:demo"));
 }

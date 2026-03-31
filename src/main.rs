@@ -122,7 +122,10 @@ fn print_policy(json: bool) -> Result<()> {
     }
 
     println!("Cortina capture policy");
-    println!("outcome_dedupe_window_ms={}", policy.outcome_dedupe_window_ms);
+    println!(
+        "outcome_dedupe_window_ms={}",
+        policy.outcome_dedupe_window_ms
+    );
     println!("correction_window_ms={}", policy.correction_window_ms);
     println!("edit_cleanup_age_ms={}", policy.edit_cleanup_age_ms);
     println!("export_threshold={}", policy.export_threshold);
@@ -188,7 +191,13 @@ mod tests {
     #[test]
     fn parses_status_and_doctor_commands() {
         let cli = Cli::try_parse_from(["cortina", "status"]).expect("expected status command");
-        assert!(matches!(cli.command, Commands::Status { json: false, cwd: None }));
+        assert!(matches!(
+            cli.command,
+            Commands::Status {
+                json: false,
+                cwd: None
+            }
+        ));
 
         let cli = Cli::try_parse_from(["cortina", "doctor", "--json", "--cwd", "/tmp/demo"])
             .expect("expected doctor command");

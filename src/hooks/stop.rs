@@ -9,11 +9,10 @@ use std::path::Path;
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::outcomes::{clear_outcomes, load_outcomes};
-use crate::policy::capture_policy;
 use crate::utils::{
-    Importance, command_exists, end_scoped_hyphae_session, load_session_state,
+    command_exists, end_scoped_hyphae_session, load_session_state,
     log_hyphae_feedback_signal_for_session, project_name_for_cwd, scope_hash,
-    session_outcome_feedback, store_in_hyphae,
+    session_outcome_feedback,
 };
 
 use self::summary::{
@@ -115,20 +114,5 @@ pub fn handle(input: &str) -> Result<()> {
         clear_outcomes(&hash);
     }
 
-    if should_store_fallback_session_memory(had_cached_session, ended_structured_session.is_some()) {
-        let topic = format!("session/{project_name}");
-        store_in_hyphae(&topic, &text, Importance::Medium, Some(&project_name));
-    }
     Ok(())
-}
-
-fn should_store_fallback_session_memory(
-    had_cached_session: bool,
-    ended_structured_session: bool,
-) -> bool {
-    if ended_structured_session {
-        return false;
-    }
-
-    !had_cached_session || capture_policy().fallback_session_memory_on_end_failure
 }

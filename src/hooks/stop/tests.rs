@@ -1,6 +1,6 @@
 use crate::events::{OutcomeEvent, OutcomeKind};
 
-use super::{handle, should_store_fallback_session_memory};
+use super::handle;
 use super::summary::{
     TranscriptSummary, filter_outcomes_for_session, format_structured_outcome_attribution,
     has_unresolved_errors, merge_structured_outcomes,
@@ -133,12 +133,22 @@ fn filter_outcomes_for_session_prefers_matching_session_id() {
     let session = crate::utils::SessionState {
         session_id: "ses_current".to_string(),
         project: "demo".to_string(),
+        project_root: Some("/tmp/demo".to_string()),
+        worktree_id: Some("git:demo".to_string()),
+        legacy_scope: None,
         started_at: 100,
     };
+    let mut project_only = OutcomeEvent::new(OutcomeKind::ValidationPassed, "project-only");
+    project_only.project = Some("demo".to_string());
+    project_only.timestamp = 120;
+    let mut unattributed = OutcomeEvent::new(OutcomeKind::ValidationPassed, "unattributed");
+    unattributed.timestamp = 130;
     let outcomes = vec![
         OutcomeEvent::new(OutcomeKind::ErrorDetected, "old").with_session("ses_old", "demo"),
         OutcomeEvent::new(OutcomeKind::ValidationPassed, "current")
             .with_session("ses_current", "demo"),
+        project_only,
+        unattributed,
     ];
 
     let filtered = filter_outcomes_for_session(&outcomes, Some(&session), "demo");
@@ -148,10 +158,13 @@ fn filter_outcomes_for_session_prefers_matching_session_id() {
 }
 
 #[test]
-fn filter_outcomes_for_session_keeps_current_unattributed_outcomes_only() {
+fn filter_outcomes_for_session_ignores_unattributed_outcomes_for_structured_sessions() {
     let session = crate::utils::SessionState {
         session_id: "ses_current".to_string(),
         project: "demo".to_string(),
+        project_root: Some("/tmp/demo".to_string()),
+        worktree_id: Some("git:demo".to_string()),
+        legacy_scope: None,
         started_at: 100_000,
     };
     let mut old = OutcomeEvent::new(OutcomeKind::ErrorDetected, "old unattributed");
@@ -162,15 +175,39 @@ fn filter_outcomes_for_session_keeps_current_unattributed_outcomes_only() {
 
     let filtered = filter_outcomes_for_session(&outcomes, Some(&session), "demo");
 
-    assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].summary, "current unattributed");
+    assert!(filtered.is_empty());
 }
 
 #[test]
-fn filter_outcomes_for_session_allows_small_clock_skew_for_unattributed_outcomes() {
+fn filter_outcomes_for_session_accepts_exact_identity_matches_without_session_id() {
     let session = crate::utils::SessionState {
         session_id: "ses_current".to_string(),
         project: "demo".to_string(),
+        project_root: Some("/tmp/demo".to_string()),
+        worktree_id: Some("git:demo".to_string()),
+        legacy_scope: None,
+        started_at: 1_000,
+    };
+    let mut identity_scoped = OutcomeEvent::new(OutcomeKind::ValidationPassed, "identity match");
+    identity_scoped.project_root = Some("/tmp/demo".to_string());
+    identity_scoped.worktree_id = Some("git:demo".to_string());
+    identity_scoped.timestamp = 1_010;
+
+    let filtered = filter_outcomes_for_session(&[identity_scoped], Some(&session), "demo");
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].summary, "identity match");
+}
+
+#[test]
+fn filter_outcomes_for_session_ignores_clock_skewed_unattributed_outcomes_for_structured_sessions()
+{
+    let session = crate::utils::SessionState {
+        session_id: "ses_current".to_string(),
+        project: "demo".to_string(),
+        project_root: Some("/tmp/demo".to_string()),
+        worktree_id: Some("git:demo".to_string()),
+        legacy_scope: None,
         started_at: 1_000,
     };
     let mut near_start = OutcomeEvent::new(OutcomeKind::ValidationPassed, "near start");
@@ -178,8 +215,7 @@ fn filter_outcomes_for_session_allows_small_clock_skew_for_unattributed_outcomes
 
     let filtered = filter_outcomes_for_session(&[near_start], Some(&session), "demo");
 
-    assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].summary, "near start");
+    assert!(filtered.is_empty());
 }
 
 #[test]
@@ -187,6 +223,17 @@ fn has_unresolved_errors_stays_true_after_non_error_outcome() {
     let outcomes = vec![
         OutcomeEvent::new(OutcomeKind::ErrorDetected, "command failed"),
         OutcomeEvent::new(OutcomeKind::DocumentIngested, "docs ingested"),
+    ];
+
+    assert!(has_unresolved_errors(&outcomes));
+}
+
+#[test]
+fn has_unresolved_errors_uses_latest_error_state() {
+    let outcomes = vec![
+        OutcomeEvent::new(OutcomeKind::ErrorDetected, "first failure"),
+        OutcomeEvent::new(OutcomeKind::ErrorResolved, "fixed first failure"),
+        OutcomeEvent::new(OutcomeKind::ErrorDetected, "second failure"),
     ];
 
     assert!(has_unresolved_errors(&outcomes));
@@ -203,11 +250,4 @@ fn handle_accepts_valid_stop_envelope() {
     );
 
     assert!(handle(&json).is_ok());
-}
-
-#[test]
-fn fallback_session_memory_is_only_used_without_structured_session_by_default() {
-    assert!(should_store_fallback_session_memory(false, false));
-    assert!(!should_store_fallback_session_memory(true, false));
-    assert!(!should_store_fallback_session_memory(true, true));
 }

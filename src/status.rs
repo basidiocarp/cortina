@@ -6,12 +6,12 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::policy::{CapturePolicy, capture_policy};
+#[cfg(test)]
+use crate::utils::save_json_file;
 use crate::utils::{
     SessionState, command_exists, load_json_file, load_session_state, scope_hash,
     scoped_session_liveness, temp_state_path,
 };
-#[cfg(test)]
-use crate::utils::save_json_file;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct StatusReport {
@@ -19,12 +19,23 @@ pub struct StatusReport {
     scope_hash: String,
     hyphae_available: bool,
     rhizome_available: bool,
-    session: Option<SessionState>,
+    session: Option<SessionStatus>,
     session_live: Option<bool>,
     outcome_count: usize,
     pending_export_count: usize,
     pending_ingest_count: usize,
     policy: CapturePolicy,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct SessionStatus {
+    session_id: String,
+    project: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    project_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    worktree_id: Option<String>,
+    started_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -67,6 +78,12 @@ pub fn print_status(json: bool, cwd: Option<&str>) -> Result<()> {
             println!("session_active=true");
             println!("session_id={}", session.session_id);
             println!("session_project={}", session.project);
+            if let Some(project_root) = session.project_root.as_deref() {
+                println!("session_project_root={project_root}");
+            }
+            if let Some(worktree_id) = session.worktree_id.as_deref() {
+                println!("session_worktree_id={worktree_id}");
+            }
             println!("session_started_at={}", session.started_at);
             if let Some(session_live) = report.session_live {
                 println!("session_live={session_live}");
@@ -131,7 +148,7 @@ pub fn collect_status(cwd: Option<&str>) -> StatusReport {
         scope_hash: hash.clone(),
         hyphae_available: command_exists("hyphae"),
         rhizome_available: command_exists("rhizome"),
-        session: load_session_state(&hash),
+        session: load_session_state(&hash).map(SessionStatus::from),
         session_live,
         outcome_count: json_vec_len(&outcomes_path(&hash)),
         pending_export_count: json_vec_len(&pending_exports_path(&hash)),
@@ -161,7 +178,10 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
         ));
     }
     if !hyphae_available {
-        warnings.push("hyphae is not on PATH; structured capture and session persistence will be degraded".to_string());
+        warnings.push(
+            "hyphae is not on PATH; structured capture and session persistence will be degraded"
+                .to_string(),
+        );
     }
     if !rhizome_available && pending_exports.exists {
         warnings.push("rhizome is not on PATH; pending export state cannot flush".to_string());
@@ -217,6 +237,18 @@ fn normalized_cwd(cwd: Option<&str>) -> String {
                 .map(|path| path.to_string_lossy().to_string())
         })
         .unwrap_or_else(|| env::temp_dir().to_string_lossy().to_string())
+}
+
+impl From<SessionState> for SessionStatus {
+    fn from(session: SessionState) -> Self {
+        Self {
+            session_id: session.session_id,
+            project: session.project,
+            project_root: session.project_root,
+            worktree_id: session.worktree_id,
+            started_at: session.started_at,
+        }
+    }
 }
 
 fn session_state_path(hash: &str) -> PathBuf {
@@ -285,7 +317,10 @@ mod tests {
         let cwd = test_cwd("status");
         let hash = scope_hash(Some(&cwd));
         update_json_file::<Vec<OutcomeEvent>, _, _>(outcomes_path(&hash), |events| {
-            events.push(OutcomeEvent::new(OutcomeKind::ValidationPassed, "cargo test passed"));
+            events.push(OutcomeEvent::new(
+                OutcomeKind::ValidationPassed,
+                "cargo test passed",
+            ));
         })
         .expect("write outcomes");
         update_json_file::<Vec<String>, _, _>(pending_exports_path(&hash), |entries| {
@@ -301,6 +336,9 @@ mod tests {
             &SessionState {
                 session_id: "ses_demo".to_string(),
                 project: "demo".to_string(),
+                project_root: Some(cwd.clone()),
+                worktree_id: Some("git:demo".to_string()),
+                legacy_scope: None,
                 started_at: current_timestamp_ms(),
             },
         )
@@ -311,7 +349,24 @@ mod tests {
         assert_eq!(report.outcome_count, 1);
         assert_eq!(report.pending_export_count, 2);
         assert_eq!(report.pending_ingest_count, 1);
-        assert_eq!(report.session.as_ref().map(|s| s.session_id.as_str()), Some("ses_demo"));
+        assert_eq!(
+            report.session.as_ref().map(|s| s.session_id.as_str()),
+            Some("ses_demo")
+        );
+        assert_eq!(
+            report
+                .session
+                .as_ref()
+                .and_then(|session| session.project_root.as_deref()),
+            Some(cwd.as_str())
+        );
+        assert_eq!(
+            report
+                .session
+                .as_ref()
+                .and_then(|session| session.worktree_id.as_deref()),
+            Some("git:demo")
+        );
     }
 
     #[test]
@@ -323,6 +378,37 @@ mod tests {
         let report = collect_doctor(Some(&cwd));
         assert!(report.outcomes.exists);
         assert!(!report.outcomes.valid_json);
-        assert!(report.warnings.iter().any(|warning| warning.contains("outcomes file")));
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("outcomes file"))
+        );
+    }
+
+    #[test]
+    fn collect_status_json_hides_internal_legacy_scope_marker() {
+        let cwd = test_cwd("status-legacy-scope");
+        let hash = scope_hash(Some(&cwd));
+        save_json_file(
+            session_state_path(&hash),
+            &SessionState {
+                session_id: "ses_demo".to_string(),
+                project: "demo".to_string(),
+                project_root: Some(cwd.clone()),
+                worktree_id: Some("git:demo".to_string()),
+                legacy_scope: Some("legacy-scope".to_string()),
+                started_at: current_timestamp_ms(),
+            },
+        )
+        .expect("write session");
+
+        let json = serde_json::to_value(collect_status(Some(&cwd))).expect("serialize status");
+        let session = json
+            .get("session")
+            .and_then(serde_json::Value::as_object)
+            .expect("session object");
+
+        assert!(!session.contains_key("_legacy_scope"));
     }
 }

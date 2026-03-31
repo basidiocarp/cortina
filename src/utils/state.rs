@@ -6,6 +6,7 @@ use std::io::Seek as _;
 use std::io::SeekFrom;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
@@ -25,20 +26,264 @@ const LOCK_WAIT_ATTEMPTS: usize = 1_000;
 const LOCK_WAIT_MS: u64 = 10;
 const LOCK_HEARTBEAT_MS: u64 = 5_000;
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+// Offline migration helpers retained for manual repair work.
+// They are intentionally not called from `scope_hash_with`.
+#[allow(dead_code)]
+const MIGRATABLE_STATE_NAMES: &[&str] = &[
+    "session",
+    "outcomes",
+    "pending-exports",
+    "pending-ingest",
+    "errors",
+    "edits",
+];
 
 pub fn scope_hash(cwd: Option<&str>) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
+    scope_hash_with(cwd, Command::output)
+}
 
-    let scope = normalize_scope_cwd(cwd);
+pub(super) fn current_runtime_session_id() -> Option<String> {
+    env::var("CLAUDE_SESSION_ID")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
 
-    let mut hasher = DefaultHasher::new();
-    scope.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
+pub(super) fn scope_hash_with<F>(cwd: Option<&str>, mut run_command: F) -> String
+where
+    F: FnMut(&mut Command) -> std::io::Result<Output>,
+{
+    let scope_key =
+        effective_scope_key(cwd, &mut run_command).unwrap_or_else(|| normalize_scope_cwd(cwd));
+    hash_value(&scope_key)
 }
 
 pub fn temp_state_path(name: &str, hash: &str, extension: &str) -> PathBuf {
     env::temp_dir().join(format!("cortina-{name}-{hash}.{extension}"))
+}
+
+pub(super) fn canonicalize_path(path: impl AsRef<Path>) -> PathBuf {
+    let path = path.as_ref();
+    fs::canonicalize(path).unwrap_or_else(|_| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            env::current_dir()
+                .unwrap_or_else(|_| env::temp_dir())
+                .join(path)
+        }
+    })
+}
+
+pub(super) fn stable_identity_hash(value: &str) -> String {
+    const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    let mut hash = FNV_OFFSET_BASIS;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+
+    format!("{hash:016x}")
+}
+
+#[allow(dead_code)]
+pub(super) fn legacy_scope_hash(cwd: Option<&str>) -> String {
+    hash_value(&normalize_scope_cwd(cwd))
+}
+
+fn hash_value(value: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    value.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
+fn effective_scope_key<F>(cwd: Option<&str>, run_command: &mut F) -> Option<String>
+where
+    F: FnMut(&mut Command) -> std::io::Result<Output>,
+{
+    let cwd = resolved_cwd(cwd)?;
+    let project_root = cwd.to_string_lossy().to_string();
+    let project = project_name_from_root(&cwd)?;
+    let worktree_id = git_command_output(&cwd, &["rev-parse", "--absolute-git-dir"], run_command)
+        .map(PathBuf::from)
+        .map(canonicalize_path)
+        .map(|path| {
+            format!(
+                "git:{}",
+                stable_identity_hash(path.to_string_lossy().as_ref())
+            )
+        })
+        .unwrap_or_else(|| format!("path:{}", stable_identity_hash(project_root.as_str())));
+    let runtime_session_id = current_runtime_session_id();
+
+    Some(match runtime_session_id {
+        Some(runtime_session_id) => {
+            format!("{project}\n{project_root}\n{worktree_id}\n{runtime_session_id}")
+        }
+        None => format!("{project}\n{project_root}\n{worktree_id}"),
+    })
+}
+
+fn resolved_cwd(cwd: Option<&str>) -> Option<PathBuf> {
+    cwd.map(PathBuf::from)
+        .or_else(|| env::current_dir().ok())
+        .map(canonicalize_path)
+}
+
+fn project_name_from_root(root: &Path) -> Option<String> {
+    root.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .or_else(|| {
+            let text = root.to_string_lossy();
+            (!text.trim().is_empty()).then_some(text.to_string())
+        })
+}
+
+fn git_command_output<F>(cwd: &Path, args: &[&str], run_command: &mut F) -> Option<String>
+where
+    F: FnMut(&mut Command) -> std::io::Result<Output>,
+{
+    let mut cmd = Command::new("git");
+    cmd.current_dir(cwd).args(args);
+    let output = run_command(&mut cmd).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!output.is_empty()).then_some(output)
+}
+
+#[allow(dead_code)]
+fn migrate_legacy_scope_state(legacy_hash: &str, current_hash: &str) {
+    if legacy_hash.is_empty() || legacy_hash == current_hash {
+        return;
+    }
+
+    for name in MIGRATABLE_STATE_NAMES {
+        migrate_state_file(name, legacy_hash, current_hash);
+    }
+}
+
+#[allow(dead_code)]
+fn migrate_state_file(name: &str, legacy_hash: &str, current_hash: &str) {
+    let legacy_path = temp_state_path(name, legacy_hash, "json");
+    if !legacy_path.exists() {
+        return;
+    }
+
+    let current_path = temp_state_path(name, current_hash, "json");
+    if !current_path.exists() && fs::rename(&legacy_path, &current_path).is_ok() {
+        let _ = fs::remove_file(lock_path_for(&legacy_path));
+        return;
+    }
+
+    if merge_state_file(name, &legacy_path, &current_path).is_ok() {
+        let _ = fs::remove_file(&legacy_path);
+        let _ = fs::remove_file(lock_path_for(&legacy_path));
+    }
+}
+
+#[allow(dead_code)]
+fn merge_state_file(name: &str, legacy_path: &Path, current_path: &Path) -> Result<()> {
+    let legacy_value = fs::read_to_string(legacy_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+        .ok_or_else(|| anyhow::anyhow!("failed to parse legacy state"))?;
+    let current_value = fs::read_to_string(current_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+        .ok_or_else(|| anyhow::anyhow!("failed to parse current state"))?;
+
+    let merged = match name {
+        "session" => merge_session_state(legacy_value, current_value),
+        "errors" => merge_object_state(legacy_value, current_value),
+        _ => merge_array_state(legacy_value, current_value),
+    };
+
+    save_json_file(current_path, &merged)
+}
+
+#[allow(dead_code)]
+fn merge_session_state(
+    legacy: serde_json::Value,
+    mut current: serde_json::Value,
+) -> serde_json::Value {
+    let Some(current_object) = current.as_object_mut() else {
+        return current;
+    };
+    let Some(legacy_object) = legacy.as_object() else {
+        return current;
+    };
+
+    for key in ["session_id", "project", "project_root", "worktree_id"] {
+        if current_object
+            .get(key)
+            .is_none_or(serde_json::Value::is_null)
+            && let Some(value) = legacy_object.get(key)
+        {
+            current_object.insert(key.to_string(), value.clone());
+        }
+    }
+
+    if current_object
+        .get("started_at")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0)
+        == 0
+        && let Some(value) = legacy_object.get("started_at")
+    {
+        current_object.insert("started_at".to_string(), value.clone());
+    }
+
+    current
+}
+
+#[allow(dead_code)]
+fn merge_object_state(
+    legacy: serde_json::Value,
+    mut current: serde_json::Value,
+) -> serde_json::Value {
+    let Some(current_object) = current.as_object_mut() else {
+        return current;
+    };
+    let Some(legacy_object) = legacy.as_object() else {
+        return current;
+    };
+
+    for (key, value) in legacy_object {
+        current_object
+            .entry(key.clone())
+            .or_insert_with(|| value.clone());
+    }
+
+    current
+}
+
+#[allow(dead_code)]
+fn merge_array_state(
+    legacy: serde_json::Value,
+    mut current: serde_json::Value,
+) -> serde_json::Value {
+    let Some(current_array) = current.as_array_mut() else {
+        return current;
+    };
+    let Some(legacy_array) = legacy.as_array() else {
+        return current;
+    };
+
+    for value in legacy_array {
+        if !current_array.iter().any(|existing| existing == value) {
+            current_array.push(value.clone());
+        }
+    }
+
+    current
 }
 
 pub fn current_timestamp_ms() -> u64 {
@@ -139,6 +384,7 @@ fn lock_path_for(path: &Path) -> PathBuf {
     ))
 }
 
+#[allow(dead_code)]
 fn normalize_scope_cwd(cwd: Option<&str>) -> String {
     match cwd.filter(|value| !value.trim().is_empty()) {
         Some(path) => path.to_string(),

@@ -14,29 +14,38 @@ pub fn load_outcomes(hash: &str) -> Vec<OutcomeEvent> {
 
 pub fn record_outcome(hash: &str, event: OutcomeEvent) -> bool {
     let policy = capture_policy().clone();
-    update_json_file::<Vec<OutcomeEvent>, _, _>(outcomes_path(hash), move |events| {
-        let is_duplicate = events.iter().rev().any(|existing| {
-            existing.semantically_matches(&event)
-                && event
-                    .timestamp
-                    .saturating_sub(existing.timestamp)
-                    <= policy.outcome_dedupe_window_ms
-        });
+    let event_for_storage = event.clone();
+    let inserted =
+        update_json_file::<Vec<OutcomeEvent>, _, _>(outcomes_path(hash), move |events| {
+            let is_duplicate = events.iter().rev().any(|existing| {
+                existing.semantically_matches(&event_for_storage)
+                    && event_for_storage
+                        .timestamp
+                        .saturating_sub(existing.timestamp)
+                        <= policy.outcome_dedupe_window_ms
+            });
 
-        if is_duplicate {
-            return false;
-        }
+            if is_duplicate {
+                return false;
+            }
 
-        events.push(event);
+            events.push(event_for_storage.clone());
 
-        if events.len() > policy.max_outcome_events {
-            let overflow = events.len().saturating_sub(policy.max_outcome_events);
-            events.drain(0..overflow);
-        }
+            if events.len() > policy.max_outcome_events {
+                let overflow = events.len().saturating_sub(policy.max_outcome_events);
+                events.drain(0..overflow);
+            }
 
-        true
-    })
-    .unwrap_or(false)
+            true
+        })
+        .unwrap_or(false);
+
+    #[cfg(not(test))]
+    if inserted {
+        crate::utils::attach_outcome_evidence(&event);
+    }
+
+    inserted
 }
 
 pub fn clear_outcomes(hash: &str) {
@@ -89,7 +98,10 @@ mod tests {
         }
 
         let outcomes = load_outcomes(&hash);
-        assert_eq!(outcomes.len(), crate::policy::capture_policy().max_outcome_events);
+        assert_eq!(
+            outcomes.len(),
+            crate::policy::capture_policy().max_outcome_events
+        );
         assert_eq!(
             outcomes.first().map(|event| event.summary.as_str()),
             Some("failure 5")

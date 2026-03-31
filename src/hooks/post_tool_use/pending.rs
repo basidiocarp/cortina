@@ -12,6 +12,9 @@ use crate::utils::{load_json_file, remove_file_with_lock};
 
 use super::annotate_outcome_with_session;
 
+const HYPHAE_INGEST_LABEL: &str = "hyphae ingest";
+const HYPHAE_INGEST_SUBCOMMAND: &str = "ingest";
+
 fn pending_files_path(hash: &str) -> PathBuf {
     temp_state_path("pending-exports", hash, "json")
 }
@@ -28,6 +31,10 @@ pub(super) fn get_pending_files(hash: &str) -> Vec<String> {
 #[cfg(test)]
 pub(super) fn get_pending_documents(hash: &str) -> Vec<String> {
     load_json_file(pending_documents_path(hash)).unwrap_or_default()
+}
+
+pub(super) fn hyphae_ingest_args(document: &str) -> [&str; 2] {
+    [HYPHAE_INGEST_SUBCOMMAND, document]
 }
 
 pub(super) fn track_pending_file(file_path: &str, hash: &str) {
@@ -91,7 +98,7 @@ pub(super) fn trigger_hyphae_ingest(
     let mut spawned = 0usize;
     let mut failed_docs = Vec::new();
     for doc in documents {
-        if spawn_async_checked("hyphae", &["ingest-file", doc]) {
+        if spawn_async_checked("hyphae", &hyphae_ingest_args(doc)) {
             spawned += 1;
         } else {
             failed_docs.push(doc.clone());
@@ -101,19 +108,22 @@ pub(super) fn trigger_hyphae_ingest(
         return failed_docs;
     }
     let outcome = annotate_outcome_with_session(
-        ensure_scoped_hyphae_session(scope_cwd, Some("hyphae ingest-file")),
+        ensure_scoped_hyphae_session(scope_cwd, Some(HYPHAE_INGEST_LABEL)),
         OutcomeEvent::new(
             OutcomeKind::DocumentIngested,
             format!("Triggered hyphae ingest for {spawned} documents"),
         )
-        .with_command("hyphae ingest-file"),
+        .with_command(HYPHAE_INGEST_LABEL),
     );
     let _ = record_outcome(hash, outcome);
     failed_docs
 }
 
 pub(super) fn take_pending_documents_batch(hash: &str) -> Vec<String> {
-    take_pending_batch(&pending_documents_path(hash), capture_policy().ingest_threshold)
+    take_pending_batch(
+        &pending_documents_path(hash),
+        capture_policy().ingest_threshold,
+    )
 }
 
 fn take_pending_files_batch(hash: &str) -> Vec<String> {

@@ -1,8 +1,7 @@
 use anyhow::Result;
-use std::process::Command;
 
 use crate::adapters::claude_code::{ClaudeCodeHookEnvelope, rewrite_response};
-use crate::utils::command_exists;
+use crate::utils::{command_exists, resolved_command};
 
 /// Handle `PreToolUse` adapter events: rewrite commands through Mycelium.
 ///
@@ -45,9 +44,14 @@ pub fn handle(input: &str) -> Result<()> {
     // ─────────────────────────────────────────────────────────────────────────
     // Delegate to mycelium rewrite
     // ─────────────────────────────────────────────────────────────────────────
-    let output = Command::new("mycelium")
-        .args(["rewrite", &event.command])
-        .output();
+    let output = resolved_command("mycelium")
+        .map(|mut command| command.args(["rewrite", &event.command]).output())
+        .unwrap_or_else(|| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "mycelium not discoverable",
+            ))
+        });
 
     let rewritten = match output {
         Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),

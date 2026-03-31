@@ -92,6 +92,24 @@ pub(super) fn filter_outcomes_for_session(
         .cloned()
         .collect();
 
+    if let (Some(project_root), Some(worktree_id)) = (
+        session.project_root.as_deref(),
+        session.worktree_id.as_deref(),
+    ) {
+        return outcomes
+            .iter()
+            .filter(|event| {
+                event.session_id.as_deref() == Some(session.session_id.as_str())
+                    || (event.session_id.is_none()
+                        && event.project_root.as_deref() == Some(project_root)
+                        && event.worktree_id.as_deref() == Some(worktree_id)
+                        && (session.started_at == 0
+                            || event.timestamp.saturating_add(grace_ms) >= session.started_at))
+            })
+            .cloned()
+            .collect();
+    }
+
     let unattributed_current_session: Vec<OutcomeEvent> = outcomes
         .iter()
         .filter(|event| {
@@ -136,14 +154,11 @@ pub(super) fn filter_outcomes_for_session(
 }
 
 pub(super) fn has_unresolved_errors(outcomes: &[OutcomeEvent]) -> bool {
-    let detected = outcomes
+    outcomes
         .iter()
-        .filter(|event| matches!(event.kind, OutcomeKind::ErrorDetected))
-        .count();
-    let resolved = outcomes
-        .iter()
-        .filter(|event| matches!(event.kind, OutcomeKind::ErrorResolved))
-        .count();
-
-    detected > resolved
+        .fold(false, |has_unresolved_error, event| match event.kind {
+            OutcomeKind::ErrorDetected => true,
+            OutcomeKind::ErrorResolved => false,
+            _ => has_unresolved_error,
+        })
 }

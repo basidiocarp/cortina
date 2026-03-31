@@ -42,7 +42,7 @@ pub(super) fn annotate_outcome_with_session(
     outcome: OutcomeEvent,
 ) -> OutcomeEvent {
     match session {
-        Some(state) => outcome.with_session(state.session_id, state.project),
+        Some(state) => outcome.with_session_state(&state),
         None => outcome,
     }
 }

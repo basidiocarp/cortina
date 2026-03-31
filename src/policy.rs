@@ -25,8 +25,16 @@ impl CapturePolicy {
 
     fn from_reader(read_env: impl Fn(&str) -> Option<String>) -> Self {
         Self {
-            outcome_dedupe_window_ms: read_u64(&read_env, "CORTINA_OUTCOME_DEDUPE_WINDOW_MS", 30_000),
-            correction_window_ms: read_u64(&read_env, "CORTINA_CORRECTION_WINDOW_MS", 5 * 60 * 1000),
+            outcome_dedupe_window_ms: read_u64(
+                &read_env,
+                "CORTINA_OUTCOME_DEDUPE_WINDOW_MS",
+                30_000,
+            ),
+            correction_window_ms: read_u64(
+                &read_env,
+                "CORTINA_CORRECTION_WINDOW_MS",
+                5 * 60 * 1000,
+            ),
             edit_cleanup_age_ms: read_u64(&read_env, "CORTINA_EDIT_CLEANUP_AGE_MS", 10 * 60 * 1000),
             export_threshold: read_usize(&read_env, "CORTINA_EXPORT_THRESHOLD", 5),
             ingest_threshold: read_usize(&read_env, "CORTINA_INGEST_THRESHOLD", 3),
@@ -58,13 +66,12 @@ fn read_usize(read_env: &impl Fn(&str) -> Option<String>, name: &str, default: u
 }
 
 fn read_bool(read_env: &impl Fn(&str) -> Option<String>, name: &str, default: bool) -> bool {
-    read_env(name)
-        .map_or(default, |value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
-        })
+    read_env(name).map_or(default, |value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 #[cfg(test)]

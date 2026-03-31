@@ -1,4 +1,7 @@
+use std::path::PathBuf;
 use std::process::Command;
+
+use spore::{Tool, discover};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Importance {
@@ -18,16 +21,35 @@ impl Importance {
     }
 }
 
+fn spore_tool(name: &str) -> Option<Tool> {
+    match name {
+        "mycelium" => Some(Tool::Mycelium),
+        "hyphae" => Some(Tool::Hyphae),
+        "rhizome" => Some(Tool::Rhizome),
+        "cortina" => Some(Tool::Cortina),
+        "canopy" => Some(Tool::Canopy),
+        _ => None,
+    }
+}
+
+fn command_path(name: &str) -> Option<PathBuf> {
+    let tool = spore_tool(name)?;
+    discover(tool).map(|info| info.binary_path)
+}
+
+pub(crate) fn resolved_command(name: &str) -> Option<Command> {
+    let binary_path = command_path(name)?;
+    Some(Command::new(binary_path))
+}
+
 pub fn command_exists(name: &str) -> bool {
-    which::which(name).is_ok()
+    command_path(name).is_some()
 }
 
 pub fn store_in_hyphae(topic: &str, content: &str, importance: Importance, project: Option<&str>) {
-    if !command_exists("hyphae") {
+    let Some(mut cmd) = resolved_command("hyphae") else {
         return;
-    }
-
-    let mut cmd = Command::new("hyphae");
+    };
     cmd.args(["store", "--topic", topic])
         .args(["--content", content])
         .args(["--importance", importance.as_str()])
@@ -44,7 +66,9 @@ pub fn store_in_hyphae(topic: &str, content: &str, importance: Importance, proje
 }
 
 pub fn spawn_async_checked(cmd: &str, args: &[&str]) -> bool {
-    let mut command = Command::new(cmd);
+    let Some(mut command) = resolved_command(cmd) else {
+        return false;
+    };
     for arg in args {
         command.arg(arg);
     }
@@ -54,4 +78,24 @@ pub fn spawn_async_checked(cmd: &str, args: &[&str]) -> bool {
         .stderr(std::process::Stdio::null())
         .spawn()
         .is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spore_tool;
+
+    #[test]
+    fn known_tools_map_to_spore_tooling() {
+        assert_eq!(spore_tool("mycelium"), Some(spore::Tool::Mycelium));
+        assert_eq!(spore_tool("hyphae"), Some(spore::Tool::Hyphae));
+        assert_eq!(spore_tool("rhizome"), Some(spore::Tool::Rhizome));
+        assert_eq!(spore_tool("cortina"), Some(spore::Tool::Cortina));
+        assert_eq!(spore_tool("canopy"), Some(spore::Tool::Canopy));
+    }
+
+    #[test]
+    fn unknown_tools_do_not_claim_spore_support() {
+        assert_eq!(spore_tool("git"), None);
+        assert_eq!(spore_tool("python"), None);
+    }
 }

@@ -21,6 +21,10 @@ pub struct OutcomeEvent {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_path: Option<String>,
@@ -49,12 +53,18 @@ impl OutcomeEvent {
             timestamp: crate::utils::current_timestamp_ms(),
             session_id: None,
             project: None,
+            project_root: None,
+            worktree_id: None,
             command: None,
             file_path: None,
             signal_type: None,
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "Legacy session annotation helper kept for compatibility"
+    )]
     pub fn with_session(
         mut self,
         session_id: impl Into<String>,
@@ -62,6 +72,14 @@ impl OutcomeEvent {
     ) -> Self {
         self.session_id = Some(session_id.into());
         self.project = Some(project.into());
+        self
+    }
+
+    pub fn with_session_state(mut self, session: &crate::utils::SessionState) -> Self {
+        self.session_id = Some(session.session_id.clone());
+        self.project = Some(session.project.clone());
+        self.project_root = session.project_root.clone();
+        self.worktree_id = session.worktree_id.clone();
         self
     }
 
@@ -85,6 +103,8 @@ impl OutcomeEvent {
             && self.summary == other.summary
             && self.session_id == other.session_id
             && self.project == other.project
+            && self.project_root == other.project_root
+            && self.worktree_id == other.worktree_id
             && self.command == other.command
             && self.file_path == other.file_path
             && self.signal_type == other.signal_type

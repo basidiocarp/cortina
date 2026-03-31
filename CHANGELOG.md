@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-03-31
+
+### Added
+
+- **Canopy evidence bridge**: Cortina can now attach best-effort outcome evidence to the active Canopy task for the current worktree when Canopy is available.
+
+### Changed
+
+- **Strict identity-v1 runtime**: Session startup, stop handling, and Hyphae interaction now use structured project/worktree/runtime identity without falling back to the old scope-only hot path.
+- **Published Spore discovery**: Cortina now consumes released `spore v0.4.6` discovery for Hyphae, Canopy, and its own tool identity.
+
+### Fixed
+
+- **Stop-path attribution**: Outcome attribution now prefers exact session or identity matches and no longer mirrors legacy project-scoped fallback memories.
+- **Lifecycle consistency**: Runtime session propagation and outcome persistence now align with the shared Hyphae/Cap timeline contract.
+
 ## [0.1.7] - 2026-03-29
 
 ### Added
