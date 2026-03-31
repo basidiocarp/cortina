@@ -9,6 +9,7 @@ mod hooks;
 mod outcomes;
 mod policy;
 mod status;
+mod statusline;
 mod utils;
 
 use adapters::{AdapterCommand, ClaudeCodeEventCommand};
@@ -76,6 +77,13 @@ enum Commands {
         #[arg(long)]
         cwd: Option<String>,
     },
+
+    /// Output statusline for Claude Code's statusLine.command
+    Statusline {
+        /// Disable ANSI color output
+        #[arg(long)]
+        no_color: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -105,6 +113,10 @@ fn main() -> Result<()> {
         Commands::Policy { json } => print_policy(json),
         Commands::Status { json, cwd } => status::print_status(json, cwd.as_deref()),
         Commands::Doctor { json, cwd } => status::print_doctor(json, cwd.as_deref()),
+        Commands::Statusline { no_color } => {
+            let input = read_stdin()?;
+            statusline::handle(&input, no_color)
+        }
     }
 }
 
@@ -208,11 +220,19 @@ mod tests {
                 cwd: Some(_)
             }
         ));
+
+        let cli = Cli::try_parse_from(["cortina", "statusline", "--no-color"])
+            .expect("expected statusline command");
+        assert!(matches!(
+            cli.command,
+            Commands::Statusline { no_color: true }
+        ));
     }
 
     #[test]
     fn help_includes_policy_command() {
         let help = Cli::command().render_long_help().to_string();
         assert!(help.contains("policy"));
+        assert!(help.contains("statusline"));
     }
 }

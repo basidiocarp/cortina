@@ -46,6 +46,8 @@ cortina status
 cortina status --json
 cortina doctor
 cortina doctor --json
+cortina statusline
+cortina statusline --no-color
 ```
 
 `cortina policy` prints the active capture thresholds, dedupe windows, attribution grace period, and fallback session behavior after env overrides are applied.
@@ -55,6 +57,16 @@ cortina doctor --json
 `cortina doctor` checks temp-dir writability, Hyphae and Rhizome availability, and whether the scoped state files are present and valid JSON.
 
 Both commands accept `--cwd <path>` to inspect a different worktree scope than the current directory.
+
+`cortina statusline` reads Claude Code's statusline stdin payload and prints a compact one-line session summary with context usage, token counts, estimated session cost, model name, git branch, and best-effort Mycelium savings when that data is available. Point Claude Code at it with:
+
+```json
+{
+  "statusLine": {
+    "command": "cortina statusline"
+  }
+}
+```
 
 The CLI entrypoint dispatches through the adapter layer rather than calling Claude-specific handlers directly. Adding a new host should be an adapter/module change, not a rewrite of the shared signal pipeline.
 

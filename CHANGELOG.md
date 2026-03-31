@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.1] - 2026-03-31
+
+### Added
+
+- **Claude statusline command**: `cortina statusline` now reads Claude Code's stdin statusline envelope and prints a compact one-line summary with context usage, token counts, estimated session cost, model name, git branch, and best-effort Mycelium savings. `--no-color` disables ANSI styling for plain output sinks.
 
 ## [0.2.0] - 2026-03-31
 
