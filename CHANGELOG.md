@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.3] - 2026-03-31
+
+### Changed
+
+- **Statusline visual layout**: `cortina statusline` now renders a two-line session summary with clearer context, token, cost, savings, git, and workspace grouping. Model names now render in spaced form such as `sonnet 4.6`, and workspace output uses the current directory basename.
+
 ## [0.2.2] - 2026-03-31
 
 ### Fixed

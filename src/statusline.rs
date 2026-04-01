@@ -74,6 +74,7 @@ struct StatuslineView {
     cost: Option<f64>,
     model_name: String,
     branch: Option<String>,
+    workspace_name: Option<String>,
     savings: Option<SavingsStat>,
 }
 
@@ -122,11 +123,12 @@ fn statusline_view(input: StatuslineInput) -> StatuslineView {
     let cost = usage
         .zip(pricing)
         .map(|(usage, pricing)| cost_for_usage(usage, pricing));
-    let branch = input
-        .workspace
-        .and_then(|workspace| workspace.current_dir)
+    let workspace_dir = input.workspace.and_then(|workspace| workspace.current_dir);
+    let branch = workspace_dir.as_deref().and_then(git_branch_for_workspace);
+    let workspace_name = workspace_dir
         .as_deref()
-        .and_then(git_branch_for_workspace);
+        .and_then(workspace_name_for_dir)
+        .filter(|name| !name.is_empty());
     let savings = current_runtime_session_id()
         .as_deref()
         .and_then(|session_id| mycelium_session_savings(session_id).ok().flatten())
@@ -138,6 +140,7 @@ fn statusline_view(input: StatuslineInput) -> StatuslineView {
         cost,
         model_name: compact_model_name(&model_name),
         branch,
+        workspace_name,
         savings,
     }
 }
@@ -228,12 +231,12 @@ fn compact_model_name(display_name: &str) -> String {
     let normalized = display_name
         .trim()
         .to_ascii_lowercase()
-        .replace("claude ", "")
-        .replace(' ', "-");
-    if normalized.is_empty() {
+        .replace("claude ", "");
+    let compact = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    if compact.is_empty() {
         "unknown".to_string()
     } else {
-        normalized
+        compact
     }
 }
 
@@ -250,6 +253,12 @@ fn git_branch_for_workspace(cwd: &str) -> Option<String> {
 
     let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
     (!branch.is_empty() && branch != "HEAD").then_some(branch)
+}
+
+fn workspace_name_for_dir(cwd: &str) -> Option<String> {
+    let path = Path::new(cwd);
+    let name = path.file_name()?.to_str()?.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 fn current_runtime_session_id() -> Option<String> {
@@ -300,10 +309,9 @@ fn mycelium_db_path() -> Result<PathBuf> {
 }
 
 fn render_statusline(view: &StatuslineView, color: bool) -> String {
-    let mut segments = Vec::new();
     let context = match view.context_pct {
-        Some(pct) => format!("ctx:{pct}%"),
-        None => "ctx:--".to_string(),
+        Some(pct) => format!("ctx: ▲ {pct}%"),
+        None => "ctx: --".to_string(),
     };
     let context_code = match view.context_pct {
         Some(pct) if pct >= 85 => "31",
@@ -311,38 +319,45 @@ fn render_statusline(view: &StatuslineView, color: bool) -> String {
         Some(_) => "32",
         None => "2",
     };
-    segments.push(paint(&context, context_code, color));
-
     let usage = match view.usage {
         Some(usage) => format!(
-            "in:{} out:{} cache:{}",
+            "in: {} • out: {} • cache: {}",
             format_tokens(usage.input_tokens),
             format_tokens(usage.output_tokens),
             format_tokens(usage.cache_read_input_tokens + usage.cache_creation_input_tokens)
         ),
         None => "--".to_string(),
     };
-    segments.push(paint(&usage, "36", color));
-
     let cost = view
         .cost
         .map_or_else(|| "--".to_string(), |cost| format!("${cost:.2}"));
-    segments.push(paint(&cost, "35", color));
-    segments.push(paint(&view.model_name, "34", color));
+    let line_one = [
+        paint(&context, context_code, color),
+        paint(&usage, "36", color),
+        paint(&cost, "35", color),
+    ]
+    .join(" │ ");
 
-    if let Some(branch) = &view.branch {
-        segments.push(paint(branch, "2", color));
-    }
+    let mut line_two_segments = vec![paint(&view.model_name, "34", color)];
 
     if let Some(savings) = &view.savings {
-        segments.push(paint(
-            &format!("mycelium:↓{}", format_tokens(savings.saved_tokens)),
+        line_two_segments.push(paint(
+            &format!("↓{} saved", format_tokens(savings.saved_tokens)),
             "32",
             color,
         ));
     }
 
-    segments.join(" │ ")
+    if let Some(branch) = &view.branch {
+        line_two_segments.push(paint(&format!("git: {branch}"), "2", color));
+    }
+
+    if let Some(workspace_name) = &view.workspace_name {
+        line_two_segments.push(paint(&format!("ws: {workspace_name}"), "2", color));
+    }
+
+    let line_two = line_two_segments.join(" │ ");
+    format!("{line_one}\n{line_two}")
 }
 
 fn format_tokens(value: usize) -> String {
@@ -371,9 +386,18 @@ mod tests {
 
     #[test]
     fn compact_model_name_normalizes_claude_labels() {
-        assert_eq!(compact_model_name("Claude Sonnet 4.6"), "sonnet-4.6");
-        assert_eq!(compact_model_name("Claude Opus 4.6"), "opus-4.6");
+        assert_eq!(compact_model_name("Claude Sonnet 4.6"), "sonnet 4.6");
+        assert_eq!(compact_model_name("Claude Opus 4.6"), "opus 4.6");
         assert_eq!(compact_model_name(""), "unknown");
+    }
+
+    #[test]
+    fn workspace_name_for_dir_uses_path_basename() {
+        assert_eq!(
+            workspace_name_for_dir("/Users/williamnewton/projects/claude-mycelium"),
+            Some("claude-mycelium".to_string())
+        );
+        assert_eq!(workspace_name_for_dir("/"), None);
     }
 
     #[test]
@@ -445,8 +469,9 @@ mod tests {
                     cache_creation_input_tokens: 9_000,
                 }),
                 cost: Some(1.23),
-                model_name: "sonnet-4.6".to_string(),
+                model_name: "sonnet 4.6".to_string(),
                 branch: Some("main".to_string()),
+                workspace_name: Some("claude-mycelium".to_string()),
                 savings: Some(SavingsStat {
                     saved_tokens: 8_200,
                     input_tokens: 10_000,
@@ -457,7 +482,7 @@ mod tests {
 
         assert_eq!(
             line,
-            "ctx:42% │ in:45.0K out:12.0K cache:89.0K │ $1.23 │ sonnet-4.6 │ main │ mycelium:↓8.2K"
+            "ctx: ▲ 42% │ in: 45.0K • out: 12.0K • cache: 89.0K │ $1.23\nsonnet 4.6 │ ↓8.2K saved │ git: main │ ws: claude-mycelium"
         );
     }
 
@@ -470,12 +495,13 @@ mod tests {
                 cost: None,
                 model_name: "unknown".to_string(),
                 branch: None,
+                workspace_name: None,
                 savings: None,
             },
             false,
         );
 
-        assert_eq!(line, "ctx:-- │ -- │ -- │ unknown");
+        assert_eq!(line, "ctx: -- │ -- │ --\nunknown");
     }
 
     #[test]
