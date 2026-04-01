@@ -33,6 +33,10 @@ struct StatuslineWorkspace {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[allow(
+    clippy::struct_field_names,
+    reason = "These names mirror Claude transcript usage fields"
+)]
 struct TokenUsage {
     input_tokens: usize,
     output_tokens: usize,
@@ -60,6 +64,10 @@ struct TranscriptUsage {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(
+    clippy::struct_field_names,
+    reason = "These names mirror the per-million pricing fields they represent"
+)]
 struct Pricing {
     input_per_million: f64,
     output_per_million: f64,
@@ -127,11 +135,7 @@ fn statusline_view(input: StatuslineInput) -> StatuslineView {
     let context_pct = transcript_usage
         .and_then(|usage| usage.latest_assistant)
         .filter(|usage| usage.has_data())
-        .map(|usage| {
-            let pct =
-                ((usage.prompt_tokens() as f64 / DEFAULT_CONTEXT_LIMIT as f64) * 100.0).round();
-            pct.clamp(0.0, 999.0) as u8
-        });
+        .map(context_pct_for_usage);
     let cost = usage
         .zip(pricing)
         .map(|(usage, pricing)| cost_for_usage(usage, pricing));
@@ -201,6 +205,17 @@ fn is_assistant_entry(entry: &Value) -> bool {
     entry.get("type").and_then(Value::as_str) == Some("assistant")
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "Statusline percentage is presentation-only and explicitly clamped"
+)]
+fn context_pct_for_usage(usage: TokenUsage) -> u8 {
+    let pct = ((usage.prompt_tokens() as f64 / DEFAULT_CONTEXT_LIMIT as f64) * 100.0).round();
+    pct.clamp(0.0, 999.0) as u8
+}
+
 fn usage_field(usage: Option<&Value>, field: &str) -> usize {
     usage
         .and_then(|value| value.get(field))
@@ -237,6 +252,10 @@ fn pricing_for_model(display_name: &str) -> Option<Pricing> {
     }
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "Statusline cost is a coarse UI estimate derived from token counts"
+)]
 fn cost_for_usage(usage: TokenUsage, pricing: Pricing) -> f64 {
     ((usage.input_tokens as f64 * pricing.input_per_million)
         + (usage.output_tokens as f64 * pricing.output_per_million)
@@ -306,6 +325,11 @@ fn mycelium_session_savings_at_path(
              FROM commands
              WHERE session_id = ?1",
             params![session_id],
+            #[allow(
+                clippy::cast_possible_truncation,
+                clippy::cast_sign_loss,
+                reason = "Mycelium stores non-negative token counts in SQLite INTEGER columns"
+            )]
             |row| {
                 Ok(SavingsStat {
                     saved_tokens: row.get::<_, i64>(0)? as usize,
@@ -378,6 +402,10 @@ fn render_statusline(view: &StatuslineView, color: bool) -> String {
     format!("{line_one}\n{line_two}")
 }
 
+#[allow(
+    clippy::cast_precision_loss,
+    reason = "Compact token display only needs approximate decimal formatting"
+)]
 fn format_tokens(value: usize) -> String {
     if value >= 1_000_000 {
         format!("{:.1}M", value as f64 / 1_000_000.0)

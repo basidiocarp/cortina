@@ -52,9 +52,7 @@ pub(crate) fn attach_outcome_evidence(outcome: &OutcomeEvent) {
 
 #[cfg_attr(test, allow(dead_code))]
 fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
-    let Some(mut command) = resolved_command("canopy") else {
-        return None;
-    };
+    let mut command = resolved_command("canopy")?;
     let output = command.arg("agent").arg("list").output().ok()?;
     if !output.status.success() {
         return None;

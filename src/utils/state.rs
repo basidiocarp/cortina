@@ -112,13 +112,15 @@ where
     let worktree_id = git_command_output(&cwd, &["rev-parse", "--absolute-git-dir"], run_command)
         .map(PathBuf::from)
         .map(canonicalize_path)
-        .map(|path| {
-            format!(
-                "git:{}",
-                stable_identity_hash(path.to_string_lossy().as_ref())
-            )
-        })
-        .unwrap_or_else(|| format!("path:{}", stable_identity_hash(project_root.as_str())));
+        .map_or_else(
+            || format!("path:{}", stable_identity_hash(project_root.as_str())),
+            |path| {
+                format!(
+                    "git:{}",
+                    stable_identity_hash(path.to_string_lossy().as_ref())
+                )
+            },
+        );
     let runtime_session_id = current_runtime_session_id();
 
     Some(match runtime_session_id {
@@ -201,9 +203,9 @@ fn merge_state_file(name: &str, legacy_path: &Path, current_path: &Path) -> Resu
         .ok_or_else(|| anyhow::anyhow!("failed to parse current state"))?;
 
     let merged = match name {
-        "session" => merge_session_state(legacy_value, current_value),
-        "errors" => merge_object_state(legacy_value, current_value),
-        _ => merge_array_state(legacy_value, current_value),
+        "session" => merge_session_state(&legacy_value, current_value),
+        "errors" => merge_object_state(&legacy_value, current_value),
+        _ => merge_array_state(&legacy_value, current_value),
     };
 
     save_json_file(current_path, &merged)
@@ -211,7 +213,7 @@ fn merge_state_file(name: &str, legacy_path: &Path, current_path: &Path) -> Resu
 
 #[allow(dead_code)]
 fn merge_session_state(
-    legacy: serde_json::Value,
+    legacy: &serde_json::Value,
     mut current: serde_json::Value,
 ) -> serde_json::Value {
     let Some(current_object) = current.as_object_mut() else {
@@ -246,7 +248,7 @@ fn merge_session_state(
 
 #[allow(dead_code)]
 fn merge_object_state(
-    legacy: serde_json::Value,
+    legacy: &serde_json::Value,
     mut current: serde_json::Value,
 ) -> serde_json::Value {
     let Some(current_object) = current.as_object_mut() else {
@@ -267,7 +269,7 @@ fn merge_object_state(
 
 #[allow(dead_code)]
 fn merge_array_state(
-    legacy: serde_json::Value,
+    legacy: &serde_json::Value,
     mut current: serde_json::Value,
 ) -> serde_json::Value {
     let Some(current_array) = current.as_array_mut() else {

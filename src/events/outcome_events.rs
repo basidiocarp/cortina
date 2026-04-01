@@ -78,8 +78,8 @@ impl OutcomeEvent {
     pub fn with_session_state(mut self, session: &crate::utils::SessionState) -> Self {
         self.session_id = Some(session.session_id.clone());
         self.project = Some(session.project.clone());
-        self.project_root = session.project_root.clone();
-        self.worktree_id = session.worktree_id.clone();
+        self.project_root.clone_from(&session.project_root);
+        self.worktree_id.clone_from(&session.worktree_id);
         self
     }
 

@@ -115,7 +115,7 @@ where
                 match_active_session(identity, &existing.session_id, &mut run_command)
             {
                 let mut current = existing.clone();
-                current.project = identity.project.clone();
+                current.project.clone_from(&identity.project);
                 current.project_root = Some(active_session.project_root);
                 current.worktree_id = Some(active_session.worktree_id);
                 current.legacy_scope = None;
@@ -331,9 +331,7 @@ fn match_active_session<F>(
 where
     F: FnMut(&mut Command) -> std::io::Result<Output>,
 {
-    let Some(mut cmd) = resolved_command("hyphae") else {
-        return None;
-    };
+    let mut cmd = resolved_command("hyphae")?;
     cmd.args(["session", "status", "--id", session_id]);
 
     let Ok(output) = run_command(&mut cmd) else {
@@ -407,13 +405,15 @@ where
         git_command_output(&cwd, &["rev-parse", "--absolute-git-dir"], &mut run_command)
             .map(PathBuf::from)
             .map(canonicalize_path)
-            .map(|path| {
-                format!(
-                    "git:{}",
-                    stable_identity_hash(path.to_string_lossy().as_ref())
-                )
-            })
-            .unwrap_or_else(|| format!("path:{}", stable_identity_hash(project_root.as_str())));
+            .map_or_else(
+                || format!("path:{}", stable_identity_hash(project_root.as_str())),
+                |path| {
+                    format!(
+                        "git:{}",
+                        stable_identity_hash(path.to_string_lossy().as_ref())
+                    )
+                },
+            );
 
     Some(SessionIdentity {
         project: project_name_from_root(&cwd)?,

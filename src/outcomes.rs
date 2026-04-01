@@ -12,6 +12,10 @@ pub fn load_outcomes(hash: &str) -> Vec<OutcomeEvent> {
     load_json_file(outcomes_path(hash)).unwrap_or_default()
 }
 
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "The owned event is cloned into storage and may also be attached as evidence"
+)]
 pub fn record_outcome(hash: &str, event: OutcomeEvent) -> bool {
     let policy = capture_policy().clone();
     let event_for_storage = event.clone();

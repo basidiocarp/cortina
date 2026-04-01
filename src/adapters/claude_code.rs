@@ -66,11 +66,15 @@ impl ClaudeCodeHookEnvelope {
         })
     }
 
+    pub(crate) fn tool_name_is(&self, name: &str) -> bool {
+        self.tool_name() == Some(name)
+    }
+
     fn tool_name(&self) -> Option<&str> {
         self.raw.get("tool_name").and_then(Value::as_str)
     }
 
-    fn tool_input_string(&self, key: &str) -> Option<&str> {
+    pub(crate) fn tool_input_string(&self, key: &str) -> Option<&str> {
         self.raw
             .get("tool_input")
             .and_then(|value| value.get(key))
@@ -220,5 +224,19 @@ mod tests {
         .expect("valid envelope");
 
         assert!(envelope.command_rewrite_request().is_none());
+    }
+
+    #[test]
+    fn exposes_tool_name_and_input_helpers() {
+        let envelope = ClaudeCodeHookEnvelope::parse(
+            r#"{
+                "tool_name": "Read",
+                "tool_input": {"file_path": "src/main.rs"}
+            }"#,
+        )
+        .expect("valid envelope");
+
+        assert!(envelope.tool_name_is("Read"));
+        assert_eq!(envelope.tool_input_string("file_path"), Some("src/main.rs"));
     }
 }
