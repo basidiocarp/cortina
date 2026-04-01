@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.4] - 2026-03-31
+
+### Fixed
+
+- **Statusline context meter**: `cortina statusline` now computes `ctx` from the latest assistant turn's live prompt footprint instead of cumulative session usage, so long sessions no longer report impossible context percentages like `146%`.
+
 ## [0.2.3] - 2026-03-31
 
 ### Changed

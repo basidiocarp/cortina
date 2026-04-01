@@ -41,8 +41,8 @@ struct TokenUsage {
 }
 
 impl TokenUsage {
-    fn total_tokens(self) -> usize {
-        self.input_tokens + self.output_tokens
+    fn prompt_tokens(self) -> usize {
+        self.input_tokens + self.cache_read_input_tokens + self.cache_creation_input_tokens
     }
 
     fn has_data(self) -> bool {
@@ -51,6 +51,12 @@ impl TokenUsage {
             || self.cache_read_input_tokens > 0
             || self.cache_creation_input_tokens > 0
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct TranscriptUsage {
+    cumulative: TokenUsage,
+    latest_assistant: Option<TokenUsage>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -105,10 +111,12 @@ fn render_and_print(input: StatuslineInput, no_color: bool) {
 }
 
 fn statusline_view(input: StatuslineInput) -> StatuslineView {
-    let usage = input
+    let transcript_usage = input
         .transcript_path
         .as_deref()
-        .and_then(|path| read_transcript_usage(path).ok())
+        .and_then(|path| read_transcript_usage(path).ok());
+    let usage = transcript_usage
+        .map(|usage| usage.cumulative)
         .filter(|usage| usage.has_data());
     let model_name = input
         .model
@@ -116,10 +124,14 @@ fn statusline_view(input: StatuslineInput) -> StatuslineView {
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "unknown".to_string());
     let pricing = pricing_for_model(&model_name);
-    let context_pct = usage.map(|usage| {
-        let pct = ((usage.total_tokens() as f64 / DEFAULT_CONTEXT_LIMIT as f64) * 100.0).round();
-        pct.clamp(0.0, 999.0) as u8
-    });
+    let context_pct = transcript_usage
+        .and_then(|usage| usage.latest_assistant)
+        .filter(|usage| usage.has_data())
+        .map(|usage| {
+            let pct =
+                ((usage.prompt_tokens() as f64 / DEFAULT_CONTEXT_LIMIT as f64) * 100.0).round();
+            pct.clamp(0.0, 999.0) as u8
+        });
     let cost = usage
         .zip(pricing)
         .map(|(usage, pricing)| cost_for_usage(usage, pricing));
@@ -145,10 +157,10 @@ fn statusline_view(input: StatuslineInput) -> StatuslineView {
     }
 }
 
-fn read_transcript_usage(path: &str) -> Result<TokenUsage> {
+fn read_transcript_usage(path: &str) -> Result<TranscriptUsage> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
-    let mut usage = TokenUsage::default();
+    let mut usage = TranscriptUsage::default();
 
     for line in reader.lines() {
         let line = line?;
@@ -169,11 +181,17 @@ fn read_transcript_usage(path: &str) -> Result<TokenUsage> {
             .and_then(|message| message.get("usage"))
             .or_else(|| entry.get("usage"));
 
-        usage.input_tokens += usage_field(usage_value, "input_tokens");
-        usage.output_tokens += usage_field(usage_value, "output_tokens");
-        usage.cache_read_input_tokens += usage_field(usage_value, "cache_read_input_tokens");
-        usage.cache_creation_input_tokens +=
-            usage_field(usage_value, "cache_creation_input_tokens");
+        let entry_usage = TokenUsage {
+            input_tokens: usage_field(usage_value, "input_tokens"),
+            output_tokens: usage_field(usage_value, "output_tokens"),
+            cache_read_input_tokens: usage_field(usage_value, "cache_read_input_tokens"),
+            cache_creation_input_tokens: usage_field(usage_value, "cache_creation_input_tokens"),
+        };
+        usage.cumulative.input_tokens += entry_usage.input_tokens;
+        usage.cumulative.output_tokens += entry_usage.output_tokens;
+        usage.cumulative.cache_read_input_tokens += entry_usage.cache_read_input_tokens;
+        usage.cumulative.cache_creation_input_tokens += entry_usage.cache_creation_input_tokens;
+        usage.latest_assistant = Some(entry_usage);
     }
 
     Ok(usage)
@@ -446,12 +464,57 @@ mod tests {
         let usage = read_transcript_usage(transcript.to_str().unwrap()).unwrap();
         assert_eq!(
             usage,
-            TokenUsage {
-                input_tokens: 2000,
-                output_tokens: 500,
-                cache_read_input_tokens: 600,
-                cache_creation_input_tokens: 150,
+            TranscriptUsage {
+                cumulative: TokenUsage {
+                    input_tokens: 2000,
+                    output_tokens: 500,
+                    cache_read_input_tokens: 600,
+                    cache_creation_input_tokens: 150,
+                },
+                latest_assistant: Some(TokenUsage {
+                    input_tokens: 800,
+                    output_tokens: 200,
+                    cache_read_input_tokens: 100,
+                    cache_creation_input_tokens: 50,
+                }),
             }
+        );
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn statusline_view_uses_latest_turn_for_context_pct() {
+        let temp_dir = std::env::temp_dir().join("cortina-statusline-context");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).unwrap();
+        let transcript = temp_dir.join("transcript.jsonl");
+        fs::write(
+            &transcript,
+            concat!(
+                "{\"type\":\"assistant\",\"usage\":{\"input_tokens\":180000,\"output_tokens\":25000,\"cache_read_input_tokens\":50000,\"cache_creation_input_tokens\":10000}}\n",
+                "{\"type\":\"assistant\",\"usage\":{\"input_tokens\":45000,\"output_tokens\":12000,\"cache_read_input_tokens\":80000,\"cache_creation_input_tokens\":9000}}\n"
+            ),
+        )
+        .unwrap();
+
+        let view = statusline_view(StatuslineInput {
+            transcript_path: Some(transcript.to_string_lossy().to_string()),
+            model: Some(StatuslineModel {
+                display_name: Some("Claude Sonnet 4.6".to_string()),
+            }),
+            workspace: None,
+        });
+
+        assert_eq!(view.context_pct, Some(67));
+        assert_eq!(
+            view.usage,
+            Some(TokenUsage {
+                input_tokens: 225_000,
+                output_tokens: 37_000,
+                cache_read_input_tokens: 130_000,
+                cache_creation_input_tokens: 19_000,
+            })
         );
 
         let _ = fs::remove_dir_all(&temp_dir);
