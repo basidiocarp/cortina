@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.2] - 2026-03-31
+
+### Fixed
+
+- **Statusline stdin hang**: `cortina statusline` no longer blocks waiting for EOF on interactive stdin. It now treats terminal stdin as an empty Claude payload and parses a single JSON value from piped stdin, which fixes manual runs and callers that keep stdin open.
+
 ## [0.2.1] - 2026-03-31
 
 ### Added

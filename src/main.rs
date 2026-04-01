@@ -113,10 +113,7 @@ fn main() -> Result<()> {
         Commands::Policy { json } => print_policy(json),
         Commands::Status { json, cwd } => status::print_status(json, cwd.as_deref()),
         Commands::Doctor { json, cwd } => status::print_doctor(json, cwd.as_deref()),
-        Commands::Statusline { no_color } => {
-            let input = read_stdin()?;
-            statusline::handle(&input, no_color)
-        }
+        Commands::Statusline { no_color } => statusline::handle_stdin(no_color),
     }
 }
 

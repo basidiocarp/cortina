@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -77,13 +77,33 @@ struct StatuslineView {
     savings: Option<SavingsStat>,
 }
 
-pub fn handle(input: &str, no_color: bool) -> Result<()> {
-    let input = if input.trim().is_empty() {
-        StatuslineInput::default()
-    } else {
-        serde_json::from_str::<StatuslineInput>(input)?
-    };
+pub fn handle_stdin(no_color: bool) -> Result<()> {
+    let stdin = io::stdin();
+    if stdin.is_terminal() {
+        render_and_print(StatuslineInput::default(), no_color);
+        return Ok(());
+    }
 
+    let input = parse_statusline_input_from_reader(stdin.lock())?;
+    render_and_print(input, no_color);
+    Ok(())
+}
+
+fn parse_statusline_input_from_reader<R: Read>(reader: R) -> Result<StatuslineInput> {
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    match StatuslineInput::deserialize(&mut deserializer) {
+        Ok(input) => Ok(input),
+        Err(error) if error.is_eof() => Ok(StatuslineInput::default()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn render_and_print(input: StatuslineInput, no_color: bool) {
+    let view = statusline_view(input);
+    println!("{}", render_statusline(&view, !no_color));
+}
+
+fn statusline_view(input: StatuslineInput) -> StatuslineView {
     let usage = input
         .transcript_path
         .as_deref()
@@ -112,17 +132,14 @@ pub fn handle(input: &str, no_color: bool) -> Result<()> {
         .and_then(|session_id| mycelium_session_savings(session_id).ok().flatten())
         .filter(|stat| stat.saved_tokens > 0);
 
-    let view = StatuslineView {
+    StatuslineView {
         context_pct,
         usage,
         cost,
         model_name: compact_model_name(&model_name),
         branch,
         savings,
-    };
-
-    println!("{}", render_statusline(&view, !no_color));
-    Ok(())
+    }
 }
 
 fn read_transcript_usage(path: &str) -> Result<TokenUsage> {
@@ -357,6 +374,33 @@ mod tests {
         assert_eq!(compact_model_name("Claude Sonnet 4.6"), "sonnet-4.6");
         assert_eq!(compact_model_name("Claude Opus 4.6"), "opus-4.6");
         assert_eq!(compact_model_name(""), "unknown");
+    }
+
+    #[test]
+    fn parse_statusline_input_from_reader_defaults_on_empty_input() {
+        let input = parse_statusline_input_from_reader(std::io::Cursor::new(Vec::<u8>::new()))
+            .expect("empty stdin should default");
+
+        assert_eq!(input.transcript_path, None);
+        assert!(input.model.is_none());
+        assert!(input.workspace.is_none());
+    }
+
+    #[test]
+    fn parse_statusline_input_from_reader_parses_single_json_value() {
+        let input = parse_statusline_input_from_reader(std::io::Cursor::new(
+            br#"{"model":{"display_name":"Claude Sonnet 4.6"},"workspace":{"current_dir":"/tmp"}}"#,
+        ))
+        .expect("stdin json should parse");
+
+        assert_eq!(
+            input.model.and_then(|model| model.display_name),
+            Some("Claude Sonnet 4.6".to_string())
+        );
+        assert_eq!(
+            input.workspace.and_then(|workspace| workspace.current_dir),
+            Some("/tmp".to_string())
+        );
     }
 
     #[test]
