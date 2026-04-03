@@ -174,6 +174,14 @@ mod tests {
     }
 
     #[test]
+    fn parses_explicit_volva_adapter_command() {
+        let cli = Cli::try_parse_from(["cortina", "adapter", "volva", "hook-event"])
+            .expect("expected volva adapter command to parse");
+
+        assert!(matches!(cli.command, Commands::Adapter { .. }));
+    }
+
+    #[test]
     fn keeps_compatibility_aliases_hidden_but_valid() {
         let cli = Cli::try_parse_from(["cortina", "pre-tool-use"])
             .expect("expected compatibility alias to parse");

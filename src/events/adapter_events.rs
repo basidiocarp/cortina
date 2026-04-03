@@ -29,6 +29,40 @@ pub struct SessionStopEvent {
     pub transcript_path: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum VolvaHookPhase {
+    SessionStart,
+    BeforePromptSend,
+    ResponseComplete,
+    BackendFailed,
+    SessionEnd,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum VolvaBackendKind {
+    OfficialCli,
+    AnthropicApi,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct VolvaHookEvent {
+    pub phase: VolvaHookPhase,
+    pub backend_kind: VolvaBackendKind,
+    pub cwd: String,
+    pub prompt_text: String,
+    pub prompt_summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 impl CommandRewriteRequest {
     pub(crate) fn new(command: String, updated_input: Value) -> Self {
         Self {

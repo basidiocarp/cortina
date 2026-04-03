@@ -22,6 +22,7 @@ pub struct StatusReport {
     session: Option<SessionStatus>,
     session_live: Option<bool>,
     outcome_count: usize,
+    volva_hook_event_count: usize,
     pending_export_count: usize,
     pending_ingest_count: usize,
     policy: CapturePolicy,
@@ -49,6 +50,7 @@ pub struct DoctorReport {
     session_live: Option<bool>,
     session_state: FileHealth,
     outcomes: FileHealth,
+    volva_hook_events: FileHealth,
     pending_exports: FileHealth,
     pending_ingest: FileHealth,
     warnings: Vec<String>,
@@ -92,6 +94,7 @@ pub fn print_status(json: bool, cwd: Option<&str>) -> Result<()> {
         None => println!("session_active=false"),
     }
     println!("outcome_count={}", report.outcome_count);
+    println!("volva_hook_event_count={}", report.volva_hook_event_count);
     println!("pending_export_count={}", report.pending_export_count);
     println!("pending_ingest_count={}", report.pending_ingest_count);
     println!(
@@ -127,6 +130,7 @@ pub fn print_doctor(json: bool, cwd: Option<&str>) -> Result<()> {
     }
     print_file_health("session_state", &report.session_state);
     print_file_health("outcomes", &report.outcomes);
+    print_file_health("volva_hook_events", &report.volva_hook_events);
     print_file_health("pending_exports", &report.pending_exports);
     print_file_health("pending_ingest", &report.pending_ingest);
     if report.warnings.is_empty() {
@@ -151,6 +155,7 @@ pub fn collect_status(cwd: Option<&str>) -> StatusReport {
         session: load_session_state(&hash).map(SessionStatus::from),
         session_live,
         outcome_count: json_vec_len(&outcomes_path(&hash)),
+        volva_hook_event_count: json_vec_len(&volva_hook_events_path(&hash)),
         pending_export_count: json_vec_len(&pending_exports_path(&hash)),
         pending_ingest_count: json_vec_len(&pending_ingest_path(&hash)),
         policy: capture_policy().clone(),
@@ -167,6 +172,7 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
     let session_live = scoped_session_liveness(Some(&cwd));
     let session_state = inspect_json_file(&session_state_path(&hash));
     let outcomes = inspect_json_file(&outcomes_path(&hash));
+    let volva_hook_events = inspect_json_file(&volva_hook_events_path(&hash));
     let pending_exports = inspect_json_file(&pending_exports_path(&hash));
     let pending_ingest = inspect_json_file(&pending_ingest_path(&hash));
 
@@ -198,6 +204,7 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
     for (label, health) in [
         ("session_state", &session_state),
         ("outcomes", &outcomes),
+        ("volva_hook_events", &volva_hook_events),
         ("pending_exports", &pending_exports),
         ("pending_ingest", &pending_ingest),
     ] {
@@ -216,6 +223,7 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
         session_live,
         session_state,
         outcomes,
+        volva_hook_events,
         pending_exports,
         pending_ingest,
         warnings,
@@ -257,6 +265,10 @@ fn session_state_path(hash: &str) -> PathBuf {
 
 fn outcomes_path(hash: &str) -> PathBuf {
     temp_state_path("outcomes", hash, "json")
+}
+
+fn volva_hook_events_path(hash: &str) -> PathBuf {
+    temp_state_path("volva-hook-events", hash, "json")
 }
 
 fn pending_exports_path(hash: &str) -> PathBuf {
@@ -323,6 +335,16 @@ mod tests {
             ));
         })
         .expect("write outcomes");
+        update_json_file::<Vec<serde_json::Value>, _, _>(volva_hook_events_path(&hash), |events| {
+            events.push(serde_json::json!({
+                "phase": "session_start",
+                "backend_kind": "official-cli",
+                "cwd": cwd,
+                "prompt_text": "status smoke",
+                "prompt_summary": "status smoke"
+            }));
+        })
+        .expect("write volva hook events");
         update_json_file::<Vec<String>, _, _>(pending_exports_path(&hash), |entries| {
             entries.extend(["src/a.rs".to_string(), "src/b.rs".to_string()]);
         })
@@ -347,6 +369,7 @@ mod tests {
         let report = collect_status(Some(&cwd));
         assert_eq!(report.scope_hash, hash);
         assert_eq!(report.outcome_count, 1);
+        assert_eq!(report.volva_hook_event_count, 1);
         assert_eq!(report.pending_export_count, 2);
         assert_eq!(report.pending_ingest_count, 1);
         assert_eq!(
@@ -374,15 +397,24 @@ mod tests {
         let cwd = test_cwd("doctor");
         let hash = scope_hash(Some(&cwd));
         fs::write(outcomes_path(&hash), "{not-json").expect("write invalid json");
+        fs::write(volva_hook_events_path(&hash), "{not-json").expect("write invalid json");
 
         let report = collect_doctor(Some(&cwd));
         assert!(report.outcomes.exists);
         assert!(!report.outcomes.valid_json);
+        assert!(report.volva_hook_events.exists);
+        assert!(!report.volva_hook_events.valid_json);
         assert!(
             report
                 .warnings
                 .iter()
                 .any(|warning| warning.contains("outcomes file"))
+        );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("volva_hook_events file"))
         );
     }
 
