@@ -62,12 +62,14 @@ pub fn handle(input: &str) -> Result<()> {
         );
 
         let rewritten = match output {
-            Ok(out) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
-            Err(_) => return Ok(()), // mycelium rewrite failed, pass through
+            Ok(out) if out.status.success() => {
+                String::from_utf8_lossy(&out.stdout).trim().to_string()
+            }
+            _ => return Ok(()), // mycelium rewrite failed or exited non-zero, pass through
         };
 
-        // If no change, nothing to do
-        if rewritten == event.command {
+        // If no change or empty rewrite, nothing to do
+        if rewritten.is_empty() || rewritten == event.command {
             return Ok(());
         }
 
