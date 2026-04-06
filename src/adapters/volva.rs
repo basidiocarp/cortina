@@ -6,6 +6,7 @@ use crate::utils::{load_json_file, remove_file_with_lock};
 use crate::utils::{scope_hash, temp_state_path, update_json_file};
 
 const MAX_RECORDED_VOLVA_HOOK_EVENTS: usize = 32;
+const VOLVA_HOOK_EVENT_SCHEMA_VERSION: &str = "1.0";
 
 pub fn handle_hook_event(input: &str) -> Result<()> {
     let event = parse_hook_event(input)?;
@@ -20,6 +21,11 @@ fn parse_hook_event(input: &str) -> Result<VolvaHookEvent> {
 }
 
 fn validate_hook_event(event: &VolvaHookEvent) -> Result<()> {
+    ensure!(
+        event.schema_version == VOLVA_HOOK_EVENT_SCHEMA_VERSION,
+        "unsupported volva hook event schema_version: {} (expected {VOLVA_HOOK_EVENT_SCHEMA_VERSION})",
+        event.schema_version
+    );
     ensure!(
         !event.cwd.trim().is_empty(),
         "volva hook event `cwd` must not be empty"
@@ -76,6 +82,7 @@ mod tests {
         clear_recorded_hook_events(&cwd);
 
         let input = json!({
+            "schema_version": "1.0",
             "phase": "before_prompt_send",
             "backend_kind": "official-cli",
             "cwd": cwd,
@@ -91,6 +98,7 @@ mod tests {
 
         let events = load_recorded_hook_events(&cwd);
         assert_eq!(events.len(), 1);
+        assert_eq!(events[0].schema_version, "1.0");
         assert_eq!(events[0].phase, VolvaHookPhase::BeforePromptSend);
         assert_eq!(events[0].backend_kind, VolvaBackendKind::OfficialCli);
         assert_eq!(events[0].stdout.as_deref(), Some("assistant output"));
@@ -116,6 +124,7 @@ mod tests {
     #[test]
     fn rejects_unknown_phase() {
         let input = json!({
+            "schema_version": "1.0",
             "phase": "tool_intercepted",
             "backend_kind": "official-cli",
             "cwd": unique_cwd("unknown-phase"),
@@ -131,6 +140,33 @@ mod tests {
                 .contains("failed to parse volva hook event JSON"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn rejects_unsupported_schema_version() {
+        let input = json!({
+            "schema_version": "2.0",
+            "phase": "before_prompt_send",
+            "backend_kind": "official-cli",
+            "cwd": unique_cwd("bad-schema-version"),
+            "prompt_text": "x",
+            "prompt_summary": "x"
+        })
+        .to_string();
+
+        let error = handle_hook_event(&input).expect_err("unsupported schema version should fail");
+        assert!(
+            error.to_string().contains("unsupported volva hook event schema_version"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn fixture_payload_matches_consumer_contract() {
+        let input =
+            include_str!("../../../contracts/fixtures/volva-hook-event-v1.example.json");
+
+        handle_hook_event(input).expect("fixture payload should be accepted");
     }
 
     fn unique_cwd(name: &str) -> String {

@@ -9,8 +9,8 @@ use crate::policy::{CapturePolicy, capture_policy};
 #[cfg(test)]
 use crate::utils::save_json_file;
 use crate::utils::{
-    SessionState, command_exists, load_json_file, load_session_state, scope_hash,
-    scoped_session_liveness, temp_state_path,
+    SessionState, command_exists, evidence_bridge_stats, evidence_bridge_stats_path,
+    load_json_file, load_session_state, scope_hash, scoped_session_liveness, temp_state_path,
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -25,6 +25,8 @@ pub struct StatusReport {
     volva_hook_event_count: usize,
     pending_export_count: usize,
     pending_ingest_count: usize,
+    evidence_refs_written: usize,
+    evidence_write_failures: usize,
     policy: CapturePolicy,
 }
 
@@ -53,7 +55,10 @@ pub struct DoctorReport {
     volva_hook_events: FileHealth,
     pending_exports: FileHealth,
     pending_ingest: FileHealth,
+    evidence_bridge: FileHealth,
     warnings: Vec<String>,
+    evidence_refs_written: usize,
+    evidence_write_failures: usize,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -97,6 +102,8 @@ pub fn print_status(json: bool, cwd: Option<&str>) -> Result<()> {
     println!("volva_hook_event_count={}", report.volva_hook_event_count);
     println!("pending_export_count={}", report.pending_export_count);
     println!("pending_ingest_count={}", report.pending_ingest_count);
+    println!("evidence_refs_written={}", report.evidence_refs_written);
+    println!("evidence_write_failures={}", report.evidence_write_failures);
     println!(
         "policy=dedupe:{}ms correction:{}ms cleanup:{}ms export:{} ingest:{} grace:{}ms max_outcomes:{} fallback_on_end_failure:{}",
         report.policy.outcome_dedupe_window_ms,
@@ -133,6 +140,9 @@ pub fn print_doctor(json: bool, cwd: Option<&str>) -> Result<()> {
     print_file_health("volva_hook_events", &report.volva_hook_events);
     print_file_health("pending_exports", &report.pending_exports);
     print_file_health("pending_ingest", &report.pending_ingest);
+    print_file_health("evidence_bridge", &report.evidence_bridge);
+    println!("evidence_refs_written={}", report.evidence_refs_written);
+    println!("evidence_write_failures={}", report.evidence_write_failures);
     if report.warnings.is_empty() {
         println!("warnings=none");
     } else {
@@ -147,6 +157,7 @@ pub fn collect_status(cwd: Option<&str>) -> StatusReport {
     let cwd = normalized_cwd(cwd);
     let hash = scope_hash(Some(&cwd));
     let session_live = scoped_session_liveness(Some(&cwd));
+    let evidence_bridge = evidence_bridge_stats(&hash);
     StatusReport {
         cwd,
         scope_hash: hash.clone(),
@@ -158,6 +169,8 @@ pub fn collect_status(cwd: Option<&str>) -> StatusReport {
         volva_hook_event_count: json_vec_len(&volva_hook_events_path(&hash)),
         pending_export_count: json_vec_len(&pending_exports_path(&hash)),
         pending_ingest_count: json_vec_len(&pending_ingest_path(&hash)),
+        evidence_refs_written: evidence_bridge.evidence_refs_written,
+        evidence_write_failures: evidence_bridge.evidence_write_failures,
         policy: capture_policy().clone(),
     }
 }
@@ -175,6 +188,8 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
     let volva_hook_events = inspect_json_file(&volva_hook_events_path(&hash));
     let pending_exports = inspect_json_file(&pending_exports_path(&hash));
     let pending_ingest = inspect_json_file(&pending_ingest_path(&hash));
+    let evidence_bridge = inspect_json_file(&evidence_bridge_stats_path(&hash));
+    let evidence_bridge_counts = evidence_bridge_stats(&hash);
 
     let mut warnings = Vec::new();
     if !temp_dir_writable {
@@ -207,6 +222,7 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
         ("volva_hook_events", &volva_hook_events),
         ("pending_exports", &pending_exports),
         ("pending_ingest", &pending_ingest),
+        ("evidence_bridge", &evidence_bridge),
     ] {
         if health.exists && !health.valid_json {
             warnings.push(format!("{label} file is present but not valid JSON"));
@@ -226,7 +242,10 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
         volva_hook_events,
         pending_exports,
         pending_ingest,
+        evidence_bridge,
         warnings,
+        evidence_refs_written: evidence_bridge_counts.evidence_refs_written,
+        evidence_write_failures: evidence_bridge_counts.evidence_write_failures,
     }
 }
 
@@ -316,7 +335,10 @@ fn temp_dir_is_writable(temp_dir: &Path) -> bool {
 mod tests {
     use super::*;
     use crate::events::{OutcomeEvent, OutcomeKind};
-    use crate::utils::{current_timestamp_ms, update_json_file};
+    use crate::utils::{
+        current_timestamp_ms, note_evidence_write_failure, note_evidence_write_success,
+        update_json_file,
+    };
 
     fn test_cwd(name: &str) -> String {
         let dir = env::temp_dir().join(format!("cortina-status-{}-{name}", std::process::id()));
@@ -337,6 +359,7 @@ mod tests {
         .expect("write outcomes");
         update_json_file::<Vec<serde_json::Value>, _, _>(volva_hook_events_path(&hash), |events| {
             events.push(serde_json::json!({
+                "schema_version": "1.0",
                 "phase": "session_start",
                 "backend_kind": "official-cli",
                 "cwd": cwd,
@@ -353,6 +376,8 @@ mod tests {
             entries.push("docs/a.md".to_string());
         })
         .expect("write ingest");
+        note_evidence_write_success(&hash);
+        note_evidence_write_failure(&hash);
         save_json_file(
             session_state_path(&hash),
             &SessionState {
@@ -372,6 +397,8 @@ mod tests {
         assert_eq!(report.volva_hook_event_count, 1);
         assert_eq!(report.pending_export_count, 2);
         assert_eq!(report.pending_ingest_count, 1);
+        assert_eq!(report.evidence_refs_written, 1);
+        assert_eq!(report.evidence_write_failures, 1);
         assert_eq!(
             report.session.as_ref().map(|s| s.session_id.as_str()),
             Some("ses_demo")
@@ -398,12 +425,15 @@ mod tests {
         let hash = scope_hash(Some(&cwd));
         fs::write(outcomes_path(&hash), "{not-json").expect("write invalid json");
         fs::write(volva_hook_events_path(&hash), "{not-json").expect("write invalid json");
+        fs::write(evidence_bridge_stats_path(&hash), "{not-json").expect("write invalid json");
 
         let report = collect_doctor(Some(&cwd));
         assert!(report.outcomes.exists);
         assert!(!report.outcomes.valid_json);
         assert!(report.volva_hook_events.exists);
         assert!(!report.volva_hook_events.valid_json);
+        assert!(report.evidence_bridge.exists);
+        assert!(!report.evidence_bridge.valid_json);
         assert!(
             report
                 .warnings
@@ -416,6 +446,31 @@ mod tests {
                 .iter()
                 .any(|warning| warning.contains("volva_hook_events file"))
         );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("evidence_bridge file"))
+        );
+    }
+
+    #[test]
+    fn collect_status_reports_evidence_bridge_counts() {
+        let cwd = test_cwd("status-evidence");
+        let hash = scope_hash(Some(&cwd));
+        note_evidence_write_success(&hash);
+        note_evidence_write_success(&hash);
+        note_evidence_write_failure(&hash);
+
+        let report = collect_status(Some(&cwd));
+        assert_eq!(report.evidence_refs_written, 2);
+        assert_eq!(report.evidence_write_failures, 1);
+
+        let doctor = collect_doctor(Some(&cwd));
+        assert_eq!(doctor.evidence_refs_written, 2);
+        assert_eq!(doctor.evidence_write_failures, 1);
+        assert!(doctor.evidence_bridge.exists);
+        assert!(doctor.evidence_bridge.valid_json);
     }
 
     #[test]

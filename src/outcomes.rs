@@ -46,7 +46,7 @@ pub fn record_outcome(hash: &str, event: OutcomeEvent) -> bool {
 
     #[cfg(not(test))]
     if inserted {
-        crate::utils::attach_outcome_evidence(&event);
+        crate::utils::attach_outcome_evidence(hash, &event);
     }
 
     inserted

@@ -1,11 +1,15 @@
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 use std::process::Stdio;
+use std::thread;
+use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::events::OutcomeEvent;
 
 use super::hyphae_client::resolved_command;
+use super::state::{load_json_file, temp_state_path, update_json_file};
 
 #[derive(Debug, Deserialize)]
 struct CanopyAgent {
@@ -14,8 +18,36 @@ struct CanopyAgent {
     current_task_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct EvidenceBridgeStats {
+    pub(crate) evidence_refs_written: usize,
+    pub(crate) evidence_write_failures: usize,
+}
+
+pub(crate) fn evidence_bridge_stats_path(hash: &str) -> PathBuf {
+    temp_state_path("evidence-bridge", hash, "json")
+}
+
+pub(crate) fn evidence_bridge_stats(hash: &str) -> EvidenceBridgeStats {
+    load_json_file(evidence_bridge_stats_path(hash)).unwrap_or_default()
+}
+
+pub(crate) fn note_evidence_write_success(hash: &str) {
+    let _ =
+        update_json_file::<EvidenceBridgeStats, _, _>(evidence_bridge_stats_path(hash), |stats| {
+            stats.evidence_refs_written += 1;
+        });
+}
+
+pub(crate) fn note_evidence_write_failure(hash: &str) {
+    let _ =
+        update_json_file::<EvidenceBridgeStats, _, _>(evidence_bridge_stats_path(hash), |stats| {
+            stats.evidence_write_failures += 1;
+        });
+}
+
 #[cfg_attr(test, allow(dead_code))]
-pub(crate) fn attach_outcome_evidence(outcome: &OutcomeEvent) {
+pub(crate) fn attach_outcome_evidence(hash: &str, outcome: &OutcomeEvent) {
     let (Some(project_root), Some(worktree_id)) = (
         outcome.project_root.as_deref(),
         outcome.worktree_id.as_deref(),
@@ -23,31 +55,45 @@ pub(crate) fn attach_outcome_evidence(outcome: &OutcomeEvent) {
         return;
     };
 
-    let Some(task_id) = active_task_id(project_root, worktree_id) else {
-        return;
-    };
-    let Some(mut command) = resolved_command("canopy") else {
-        return;
-    };
+    let hash = hash.to_string();
+    let outcome = outcome.clone();
+    let project_root = project_root.to_string();
+    let worktree_id = worktree_id.to_string();
 
-    command
-        .args(["evidence", "add"])
-        .args(["--task-id", &task_id])
-        .args(["--source-kind", "cortina-event"])
-        .args(["--source-ref", &source_ref(outcome)])
-        .args(["--label", outcome.kind.label()]);
+    let _ = thread::Builder::new()
+        .name("cortina-evidence-bridge".to_string())
+        .spawn(move || {
+            let Some(task_id) = active_task_id(&project_root, &worktree_id) else {
+                return;
+            };
 
-    if !outcome.summary.trim().is_empty() {
-        command.args(["--summary", &outcome.summary]);
-    }
-    if let Some(session_id) = outcome.session_id.as_deref() {
-        command.args(["--related-session-id", session_id]);
-    }
-    if let Some(file_path) = outcome.file_path.as_deref() {
-        command.args(["--related-file", file_path]);
+            let success = record_outcome_evidence_write(
+                || attempt_outcome_evidence_write(&outcome, &task_id),
+                thread::sleep,
+            );
+
+            if success {
+                note_evidence_write_success(&hash);
+            } else {
+                note_evidence_write_failure(&hash);
+                eprintln!("cortina: warn: evidence write failed after retries for scope {hash}");
+            }
+        });
+}
+
+pub(crate) fn record_outcome_evidence_write<F, S>(mut attempt: F, mut sleep: S) -> bool
+where
+    F: FnMut() -> bool,
+    S: FnMut(Duration),
+{
+    for delay in retry_delays() {
+        if attempt() {
+            return true;
+        }
+        sleep(delay);
     }
 
-    let _ = command.stdout(Stdio::null()).stderr(Stdio::null()).status();
+    attempt()
 }
 
 #[cfg_attr(test, allow(dead_code))]
@@ -59,6 +105,22 @@ fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
     }
 
     parse_active_task_id(&output.stdout, project_root, worktree_id)
+}
+
+fn attempt_outcome_evidence_write(outcome: &OutcomeEvent, task_id: &str) -> bool {
+    let Some(mut command) = resolved_command("canopy") else {
+        return false;
+    };
+
+    for arg in evidence_command_args(task_id, outcome) {
+        command.arg(arg);
+    }
+
+    command
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 fn parse_active_task_id(payload: &[u8], project_root: &str, worktree_id: &str) -> Option<String> {
@@ -83,9 +145,53 @@ fn source_ref(outcome: &OutcomeEvent) -> String {
     )
 }
 
+fn evidence_command_args(task_id: &str, outcome: &OutcomeEvent) -> Vec<String> {
+    let mut args = vec![
+        "evidence".to_string(),
+        "add".to_string(),
+        "--task-id".to_string(),
+        task_id.to_string(),
+        "--source-kind".to_string(),
+        "cortina_event".to_string(),
+        "--source-ref".to_string(),
+        source_ref(outcome),
+        "--label".to_string(),
+        outcome.kind.label().to_string(),
+    ];
+
+    if !outcome.summary.trim().is_empty() {
+        args.push("--summary".to_string());
+        args.push(outcome.summary.clone());
+    }
+    if let Some(session_id) = outcome.session_id.as_deref() {
+        args.push("--related-session-id".to_string());
+        args.push(session_id.to_string());
+    }
+    if let Some(file_path) = outcome.file_path.as_deref() {
+        args.push("--related-file".to_string());
+        args.push(file_path.to_string());
+    }
+
+    args
+}
+
+fn retry_delays() -> [Duration; 3] {
+    [
+        Duration::from_millis(100),
+        Duration::from_millis(500),
+        Duration::from_secs(2),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_active_task_id, source_ref};
+    use std::time::Duration;
+
+    use super::{
+        evidence_bridge_stats, evidence_command_args, note_evidence_write_failure,
+        note_evidence_write_success, parse_active_task_id, record_outcome_evidence_write,
+        source_ref,
+    };
     use crate::events::{OutcomeEvent, OutcomeKind};
 
     #[test]
@@ -125,5 +231,88 @@ mod tests {
 
         let reference = source_ref(&outcome);
         assert!(reference.starts_with("cortina://outcome/validation_passed/ses-1/"));
+    }
+
+    #[test]
+    fn evidence_command_args_use_cortina_event_kind() {
+        let outcome = OutcomeEvent::new(OutcomeKind::ErrorDetected, "Command failed")
+            .with_session("ses-1", "demo")
+            .with_file_path("src/lib.rs");
+
+        let args = evidence_command_args("task-123", &outcome);
+
+        assert!(args.contains(&"evidence".to_string()));
+        assert!(args.contains(&"add".to_string()));
+        assert!(args.contains(&"--task-id".to_string()));
+        assert!(args.contains(&"task-123".to_string()));
+        assert!(args.contains(&"--source-kind".to_string()));
+        assert!(args.contains(&"cortina_event".to_string()));
+        assert!(args.contains(&"--source-ref".to_string()));
+        assert!(
+            args.iter()
+                .any(|arg| arg.starts_with("cortina://outcome/error_detected/ses-1/"))
+        );
+        assert!(args.contains(&"--related-session-id".to_string()));
+        assert!(args.contains(&"ses-1".to_string()));
+        assert!(args.contains(&"--related-file".to_string()));
+        assert!(args.contains(&"src/lib.rs".to_string()));
+    }
+
+    #[test]
+    fn record_outcome_evidence_write_retries_and_records_success() {
+        let hash = format!("test-evidence-success-{}", std::process::id());
+        let mut attempts = 0;
+        let mut sleeps = Vec::new();
+
+        let success = record_outcome_evidence_write(
+            || {
+                attempts += 1;
+                attempts >= 3
+            },
+            |delay| sleeps.push(delay),
+        );
+
+        assert!(success);
+        assert_eq!(attempts, 3);
+        assert_eq!(
+            sleeps,
+            vec![Duration::from_millis(100), Duration::from_millis(500)]
+        );
+
+        note_evidence_write_success(&hash);
+        let stats = evidence_bridge_stats(&hash);
+        assert_eq!(stats.evidence_refs_written, 1);
+        assert_eq!(stats.evidence_write_failures, 0);
+    }
+
+    #[test]
+    fn record_outcome_evidence_write_records_failure_after_all_retries() {
+        let hash = format!("test-evidence-failure-{}", std::process::id());
+        let mut attempts = 0;
+        let mut sleeps = Vec::new();
+
+        let success = record_outcome_evidence_write(
+            || {
+                attempts += 1;
+                false
+            },
+            |delay| sleeps.push(delay),
+        );
+
+        assert!(!success);
+        assert_eq!(attempts, 4);
+        assert_eq!(
+            sleeps,
+            vec![
+                Duration::from_millis(100),
+                Duration::from_millis(500),
+                Duration::from_secs(2),
+            ]
+        );
+
+        note_evidence_write_failure(&hash);
+        let stats = evidence_bridge_stats(&hash);
+        assert_eq!(stats.evidence_refs_written, 0);
+        assert_eq!(stats.evidence_write_failures, 1);
     }
 }

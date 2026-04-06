@@ -48,6 +48,7 @@ pub enum VolvaBackendKind {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct VolvaHookEvent {
+    pub schema_version: String,
     pub phase: VolvaHookPhase,
     pub backend_kind: VolvaBackendKind,
     pub cwd: String,

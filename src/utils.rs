@@ -8,6 +8,9 @@ mod tests;
 
 #[cfg(not(test))]
 pub(crate) use canopy_client::attach_outcome_evidence;
+pub(crate) use canopy_client::{evidence_bridge_stats, evidence_bridge_stats_path};
+#[cfg(test)]
+pub(crate) use canopy_client::{note_evidence_write_failure, note_evidence_write_success};
 #[cfg(test)]
 use command_signals::{SessionOutcome, is_test_command};
 pub use command_signals::{
