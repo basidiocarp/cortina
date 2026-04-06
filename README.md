@@ -1,110 +1,160 @@
 # Cortina
 
-Lifecycle signal runner for AI coding agents. Cortina reads the current host adapter envelope from stdin, normalizes it into internal signal types, detects patterns in tool results, and stores signals in Hyphae. The shipped adapter surfaces now include Claude Code hooks and a first passive Volva hook-event intake path, but the runtime logic sits behind an explicit adapter boundary instead of treating one host envelope as the core model. One Rust binary replaces five JavaScript files and two shell scripts.
+Lifecycle signal runner for AI coding agents. Intercepts host hook events,
+classifies useful outcomes, and writes structured session signals into the rest
+of the ecosystem.
 
-Named after the fungal cortina—a veil between the cap and stipe that intercepts what passes between them.
+Named after the fungal cortina, a veil between the cap and stipe that
+intercepts what passes between them.
 
 Part of the [Basidiocarp ecosystem](https://github.com/basidiocarp).
 
+---
+
+## The Problem
+
+Agent sessions generate corrections, failed commands, test recoveries, and
+session outcomes, but most of that signal disappears unless the host or user
+records it manually. The result is weak attribution, lost feedback loops, and
+thin session summaries.
+
+## The Solution
+
+Cortina adds an adapter-first lifecycle capture layer. It reads host hook
+envelopes from stdin, normalizes them into internal signal types, detects the
+outcomes worth keeping, and writes those outcomes into the rest of the
+ecosystem.
+
+---
+
+## The Ecosystem
+
+| Tool | Purpose |
+|------|---------|
+| **[cortina](https://github.com/basidiocarp/cortina)** | Lifecycle signal capture and session attribution |
+| **[canopy](https://github.com/basidiocarp/canopy)** | Multi-agent coordination runtime |
+| **[cap](https://github.com/basidiocarp/cap)** | Web dashboard for the ecosystem |
+| **[hyphae](https://github.com/basidiocarp/hyphae)** | Persistent agent memory |
+| **[lamella](https://github.com/basidiocarp/lamella)** | Skills, hooks, and plugins for coding agents |
+| **[mycelium](https://github.com/basidiocarp/mycelium)** | Token-optimized command output |
+| **[rhizome](https://github.com/basidiocarp/rhizome)** | Code intelligence via tree-sitter and LSP |
+| **[stipe](https://github.com/basidiocarp/stipe)** | Ecosystem installer and manager |
+| **[volva](https://github.com/basidiocarp/volva)** | Execution-host runtime layer |
+
+> **Boundary:** `cortina` owns host lifecycle capture and signal classification.
+> `hyphae` owns memory persistence, `rhizome` owns code graph export,
+> `stipe` owns setup, and `volva` owns execution-host orchestration.
+
+---
+
+## Quick Start
+
+```bash
+# Recommended: ecosystem-managed install
+stipe install cortina
+stipe init
+```
+
+```bash
+# Build from source
+cargo install --git https://github.com/basidiocarp/cortina
+
+# Operator surfaces
+cortina policy
+cortina status
+cortina doctor
+cortina statusline
+```
+
+---
+
 ## How It Works
 
-Claude Code currently fires hook events at three points: before a tool runs, after it completes, and when the session ends. Cortina ships a Claude adapter for all three, and now also accepts Volva's normalized hook-event envelope through a separate adapter path. Claude remains the richer capture path today; the Volva surface is currently passive intake only.
-
-```
-Claude Code                    Cortina                         Ecosystem
-───────────                    ───────                         ─────────
-PreToolUse  ──stdin JSON──►    Claude adapter          ──►     Rewrite via Mycelium
-PostToolUse ──stdin JSON──►    Claude adapter          ──►     Store to Hyphae
-SessionEnd  ──stdin JSON──►    Claude adapter          ──►     Session summary
+```text
+Claude Code or Volva         Cortina                         Ecosystem
+────────────────────         ───────                         ─────────
+hook envelope on stdin ─►    adapter layer            ─►     normalized signals
+tool result + metadata ─►    classifier               ─►     Hyphae session data
+change thresholds met   ─►   trigger logic            ─►     Rhizome export / doc ingest
 ```
 
-Preferred adapter-oriented CLI:
+1. Read host events: adapters parse Claude Code hooks and Volva hook-event payloads.
+2. Normalize signals: the shared runtime maps host-specific envelopes into common event types.
+3. Detect outcomes: identify failures, resolutions, self-corrections, and validation passes.
+4. Write structured state: record session and feedback signals in Hyphae.
+5. Trigger follow-up work: kick off Rhizome export or Hyphae doc ingest when thresholds are met.
 
-```bash
-cortina adapter claude-code pre-tool-use
-cortina adapter claude-code post-tool-use
-cortina adapter claude-code session-end
-cortina adapter volva hook-event
-```
-
-`cortina adapter volva hook-event` accepts Volva's normalized hook payload on stdin and records it into scoped temp-state storage. It does not yet classify those events into higher-level outcomes or session summaries.
-
-Compatibility aliases still work:
-
-```bash
-cortina pre-tool-use
-cortina post-tool-use
-cortina session-end
-cortina stop
-```
-
-`stop` remains available as a compatibility alias for older hook templates, but `session-end` is the preferred Claude session-finish adapter name.
-
-Operator-facing commands:
-
-```bash
-cortina policy
-cortina policy --json
-cortina status
-cortina status --json
-cortina doctor
-cortina doctor --json
-cortina statusline
-cortina statusline --no-color
-```
-
-`cortina policy` prints the active capture thresholds, dedupe windows, attribution grace period, and fallback session behavior after env overrides are applied.
-
-`cortina status` prints the scoped session state, outcome count, Volva hook-event count, pending export or ingest counts, and the active policy for the current worktree.
-
-`cortina doctor` checks temp-dir writability, Hyphae and Rhizome availability, and whether the scoped state files, including Volva hook-event state, are present and valid JSON.
-
-Both commands accept `--cwd <path>` to inspect a different worktree scope than the current directory.
-
-`cortina statusline` reads Claude Code's statusline stdin payload and prints a compact one-line session summary with context usage, token counts, estimated session cost, model name, git branch, and best-effort Mycelium savings when that data is available. Point Claude Code at it with:
-
-```json
-{
-  "statusLine": {
-    "command": "cortina statusline"
-  }
-}
-```
-
-The CLI entrypoint dispatches through the adapter layer rather than calling Claude-specific handlers directly. Adding a new host should be an adapter/module change, not a rewrite of the shared signal pipeline. The Volva intake path is the current example of that boundary expanding without rewriting the Claude-specific lifecycle logic.
-
-PostToolUse does the most work. It watches for failed commands, self-corrections (an edit immediately after a write to the same file), test failures, successful build/test validation, and accumulated code changes. When it detects a pattern, it stores a memory in Hyphae with the right topic so future sessions can recall it. It also keeps a small structured outcome ledger per worktree so the session-end handler can attribute what happened during the session even if the transcript is sparse. When Cortina is about to emit a structured correction, recovery, or validation signal, it also tries to ensure a Hyphae session exists for the current worktree. Those sessions are scoped per worktree hash so parallel workers in the same project do not collapse into one active session, and Cortina now checks liveness through structured `hyphae session status --id <session-id>` output instead of parsing human-readable session listings. Structured writes remain best-effort rather than guaranteed.
-
-If a structured Hyphae session is active, the SessionEnd handler tries to end it with a structured summary: which files changed, what errors occurred, what tools were used, and the final outcome. If no structured session exists, or structured shutdown fails, Cortina falls back to the older direct `session/{project}` memory write.
+---
 
 ## What Gets Captured
 
 | Signal | Trigger | Stored as |
 |--------|---------|-----------|
 | Error | Bash exit code != 0 | `errors/active` |
-| Resolution | Same command succeeds after failure | `errors/resolved` + `hyphae feedback signal error_resolved` |
-| Self-correction | Edit after recent Write to same file | `corrections` + `hyphae feedback signal correction` |
-| Validation pass | Build or test command succeeds | `hyphae feedback signal build_passed` / `test_passed` |
+| Resolution | Same command succeeds after failure | `errors/resolved` plus feedback signal |
+| Self-correction | Edit after recent write to same file | `corrections` plus feedback signal |
+| Validation pass | Build or test command succeeds | `build_passed` or `test_passed` signal |
 | Test failure | Test runner with failures | `tests/failed` |
 | Test fix | Test passes after failure | `tests/resolved` |
-| Code changes | 5+ edits + successful build | Triggers `rhizome export` |
-| Doc changes | 3+ doc edits | Triggers `hyphae ingest-file` |
-| Session end | SessionEnd or Stop event | `hyphae session end` with summary fallback to `session/{project}` |
+| Code changes | 5 or more edits plus successful build | Triggers Rhizome export |
+| Doc changes | 3 or more doc edits | Triggers Hyphae ingest |
+| Session end | SessionEnd or Stop event | `hyphae session end` with fallback summary |
 
-## Install
+---
 
-Stipe handles the current Claude adapter registration as part of ecosystem setup:
+## What Cortina Owns
 
-```bash
-stipe install cortina
-stipe init              # registers hooks in settings.json
+- Host adapter boundary and lifecycle event intake
+- Signal classification and scoped temp-state tracking
+- Session outcome attribution
+- Operator policy, status, and doctor surfaces
+
+## What Cortina Does Not Own
+
+- Long-term memory storage: handled by `hyphae`
+- Code intelligence and graph extraction: handled by `rhizome`
+- Installation and host registration: handled by `stipe`
+- Full execution-host orchestration: handled by `volva`
+
+---
+
+## Key Features
+
+- Adapter-first runtime: keeps host-specific intake separate from shared signal logic.
+- Structured feedback signals: turn transient hook activity into reusable session data.
+- Scoped operator views: report per-worktree policy, state, and hook health.
+- Status line support: renders compact session summaries for Claude Code.
+- Downstream triggers: launch Rhizome export and Hyphae doc ingest when local thresholds are met.
+
+---
+
+## Architecture
+
+```text
+cortina
+├── src/adapters/   host-specific hook intake
+├── src/events/     normalized signal types and classification
+├── src/hooks/      lifecycle handlers and write paths
+├── src/utils/      support code and scoped state helpers
+├── cortina/src/    CLI entry point
+└── docs/           boundary and behavior notes
 ```
 
-Or build from source:
-
-```bash
-cargo install --git https://github.com/basidiocarp/cortina
+```text
+cortina adapter claude-code pre-tool-use
+cortina adapter claude-code post-tool-use
+cortina adapter claude-code session-end
+cortina adapter volva hook-event
+cortina status
+cortina doctor
+cortina statusline
 ```
+
+---
+
+## Documentation
+
+- [docs/lamella-boundary.md](docs/lamella-boundary.md): ownership split between Lamella packaging and Cortina runtime behavior
 
 ## Development
 

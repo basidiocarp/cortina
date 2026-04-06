@@ -312,6 +312,91 @@ fn ensure_hyphae_session_with_runner_leaves_state_empty_on_spawn_failure() {
 }
 
 #[test]
+fn ensure_hyphae_session_with_runner_passes_context_signals_to_start() {
+    let hash = "ensure-context-signals";
+    clear_session_state(hash);
+    let identity = test_identity(hash, "demo-project");
+    let edits_path = temp_state_path("edits", hash, "json");
+    let outcomes_path = temp_state_path("outcomes", hash, "json");
+    let _ = fs::remove_file(&edits_path);
+    let _ = fs::remove_file(&outcomes_path);
+
+    save_json_file(
+        &edits_path,
+        &vec![
+            serde_json::json!({"file": "src/lib.rs"}),
+            serde_json::json!({"file": "src/main.rs"}),
+        ],
+    )
+    .unwrap();
+    save_json_file(
+        &outcomes_path,
+        &vec![
+            crate::events::OutcomeEvent::new(
+                crate::events::OutcomeKind::ErrorDetected,
+                "build failed",
+            ),
+            crate::events::OutcomeEvent::new(crate::events::OutcomeKind::ValidationPassed, "ok"),
+        ],
+    )
+    .unwrap();
+
+    let mut saw_git_branch = false;
+    let mut saw_start = false;
+    let result = ensure_hyphae_session_with_hash(hash, &identity, Some("task"), |cmd| {
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+        match args.as_slice() {
+            ["rev-parse", "--abbrev-ref", "HEAD"] => {
+                saw_git_branch = true;
+                Ok(output_with_status(0, "feat/context-aware-recall\n"))
+            }
+            [
+                "session",
+                "start",
+                "--project",
+                "demo-project",
+                "--project-root",
+                "/tmp/demo-project",
+                "--worktree-id",
+                "git:ensure-context-signals",
+                "--scope",
+                "ensure-context-signals",
+                "--task",
+                "task",
+                "--recent-files",
+                "src/main.rs",
+                "--recent-files",
+                "src/lib.rs",
+                "--active-errors",
+                "build failed",
+                "--git-branch",
+                "feat/context-aware-recall",
+            ] => {
+                saw_start = true;
+                Ok(output_with_status(0, "ses_context"))
+            }
+            unexpected => panic!("unexpected command args: {unexpected:?}"),
+        }
+    });
+
+    assert_eq!(
+        result.as_ref().map(|state| state.session_id.as_str()),
+        Some("ses_context")
+    );
+    assert!(saw_git_branch);
+    assert!(saw_start);
+
+    let _ = fs::remove_file(&edits_path);
+    let _ = fs::remove_file(&outcomes_path);
+    clear_session_state(hash);
+}
+
+#[test]
 fn ensure_hyphae_session_with_runner_reuses_active_cached_state() {
     let hash = "ensure-active-state";
     clear_session_state(hash);
@@ -396,6 +481,7 @@ fn ensure_hyphae_session_with_runner_discards_stale_cached_state() {
         let args = args.iter().map(String::as_str).collect::<Vec<_>>();
 
         match args.as_slice() {
+            ["rev-parse", "--abbrev-ref", "HEAD"] => Ok(output_with_status(1, "")),
             ["session", "status", "--id", "ses_stale"] => {
                 status_calls += 1;
                 Ok(output_with_status(
@@ -470,6 +556,7 @@ fn ensure_hyphae_session_with_runner_ignores_other_scoped_sessions() {
         let args = args.iter().map(String::as_str).collect::<Vec<_>>();
 
         match args.as_slice() {
+            ["rev-parse", "--abbrev-ref", "HEAD"] => Ok(output_with_status(1, "")),
             ["session", "status", "--id", "ses_scope_a"] => {
                 status_calls += 1;
                 Ok(output_with_status(
@@ -531,6 +618,7 @@ fn ensure_hyphae_session_with_runner_serializes_concurrent_starts() {
                 let args = args.iter().map(String::as_str).collect::<Vec<_>>();
 
                 match args.as_slice() {
+                    ["rev-parse", "--abbrev-ref", "HEAD"] => Ok(output_with_status(1, "")),
                     [
                         "session",
                         "start",
@@ -640,6 +728,7 @@ fn ensure_hyphae_session_with_runner_rejects_scope_only_match_for_legacy_cached_
         let args = args.iter().map(String::as_str).collect::<Vec<_>>();
 
         match args.as_slice() {
+            ["rev-parse", "--abbrev-ref", "HEAD"] => Ok(output_with_status(1, "")),
             ["session", "status", "--id", "ses_legacy"] => Ok(output_with_status(
                 0,
                 r#"{"session_id":"ses_legacy","project":"demo-project","scope":"legacy-scope","status":"active","active":true}"#,
@@ -705,6 +794,7 @@ fn ensure_hyphae_session_with_runner_does_not_accept_scope_only_match_for_identi
         let args = args.iter().map(String::as_str).collect::<Vec<_>>();
 
         match args.as_slice() {
+            ["rev-parse", "--abbrev-ref", "HEAD"] => Ok(output_with_status(1, "")),
             ["session", "status", "--id", "ses_new"] => Ok(output_with_status(
                 0,
                 &format!(

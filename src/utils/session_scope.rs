@@ -12,6 +12,8 @@ use super::state::{
     save_json_file, scope_hash, stable_identity_hash, temp_state_path, with_file_lock,
     with_lock_path,
 };
+use crate::events::OutcomeKind;
+use crate::outcomes::load_outcomes;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionState {
@@ -127,7 +129,10 @@ where
                 });
             }
 
-            let new_state = start_hyphae_session(identity, task, &mut run_command)?;
+            let context_signals =
+                collect_context_signals(hash, &identity.project_root, &mut run_command);
+            let new_state =
+                start_hyphae_session(identity, task, &context_signals, &mut run_command)?;
             return with_file_lock(&path, || match load_json_file::<SessionState>(&path) {
                 Some(current) if current.session_id != existing.session_id => Ok(Some(current)),
                 _ => {
@@ -137,7 +142,9 @@ where
             });
         }
 
-        let new_state = start_hyphae_session(identity, task, &mut run_command)?;
+        let context_signals =
+            collect_context_signals(hash, &identity.project_root, &mut run_command);
+        let new_state = start_hyphae_session(identity, task, &context_signals, &mut run_command)?;
         with_file_lock(&path, || {
             if let Some(current) = load_json_file::<SessionState>(&path) {
                 return Ok(Some(current));
@@ -286,9 +293,101 @@ fn with_session_operation_lock<R>(hash: &str, operation: impl FnOnce() -> Result
     with_lock_path(&session_operation_lock_path(hash), true, operation)
 }
 
+#[derive(Debug, Clone, Default)]
+struct ContextSignals {
+    recent_files: Vec<String>,
+    active_errors: Vec<String>,
+    git_branch: Option<String>,
+}
+
+fn collect_context_signals<F>(hash: &str, project_root: &str, run_command: &mut F) -> ContextSignals
+where
+    F: FnMut(&mut Command) -> std::io::Result<Output>,
+{
+    ContextSignals {
+        recent_files: collect_recent_files(hash),
+        active_errors: collect_active_errors(hash),
+        git_branch: git_branch_for_workspace(project_root, run_command),
+    }
+}
+
+fn collect_recent_files(hash: &str) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+
+    let edit_entries =
+        load_json_file::<Vec<Value>>(temp_state_path("edits", hash, "json")).unwrap_or_default();
+    for entry in edit_entries.iter().rev() {
+        let Some(file) = entry.get("file").and_then(Value::as_str) else {
+            continue;
+        };
+        if !files.iter().any(|existing| existing == file) {
+            files.push(file.to_string());
+        }
+        if files.len() >= 5 {
+            return files;
+        }
+    }
+
+    for path in [
+        temp_state_path("pending-exports", hash, "json"),
+        temp_state_path("pending-ingest", hash, "json"),
+    ] {
+        let entries = load_json_file::<Vec<String>>(path).unwrap_or_default();
+        for entry in entries.iter().rev() {
+            if !files.iter().any(|existing| existing == entry) {
+                files.push(entry.to_string());
+            }
+            if files.len() >= 5 {
+                return files;
+            }
+        }
+    }
+
+    files
+}
+
+fn collect_active_errors(hash: &str) -> Vec<String> {
+    let mut errors = Vec::new();
+    for outcome in load_outcomes(hash).into_iter().rev() {
+        if outcome.kind != OutcomeKind::ErrorDetected {
+            continue;
+        }
+        if !outcome.summary.trim().is_empty()
+            && !errors.iter().any(|existing| existing == &outcome.summary)
+        {
+            errors.push(outcome.summary);
+        }
+        if errors.len() >= 3 {
+            break;
+        }
+    }
+    errors
+}
+
+fn git_branch_for_workspace<F>(project_root: &str, run_command: &mut F) -> Option<String>
+where
+    F: FnMut(&mut Command) -> std::io::Result<Output>,
+{
+    let mut cmd = Command::new("git");
+    cmd.args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(project_root);
+    let output = run_command(&mut cmd).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let branch = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    if branch.is_empty() || matches!(branch.as_str(), "HEAD" | "main" | "master" | "develop") {
+        None
+    } else {
+        Some(branch)
+    }
+}
+
 fn start_hyphae_session<F>(
     identity: &SessionIdentity,
     task: Option<&str>,
+    context_signals: &ContextSignals,
     run_command: &mut F,
 ) -> Result<SessionState>
 where
@@ -306,6 +405,16 @@ where
     }
     if let Some(task_desc) = task.filter(|value| !value.trim().is_empty()) {
         cmd.args(["--task", task_desc]);
+    }
+
+    for file in &context_signals.recent_files {
+        cmd.args(["--recent-files", file]);
+    }
+    for error in &context_signals.active_errors {
+        cmd.args(["--active-errors", error]);
+    }
+    if let Some(branch) = &context_signals.git_branch {
+        cmd.args(["--git-branch", branch]);
     }
 
     let output = run_command(&mut cmd)?;
