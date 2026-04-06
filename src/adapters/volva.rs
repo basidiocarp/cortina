@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn fixture_payload_matches_consumer_contract() {
         let input =
-            include_str!("../../../contracts/fixtures/volva-hook-event-v1.example.json");
+            include_str!("../../../septa/fixtures/volva-hook-event-v1.example.json");
 
         handle_hook_event(input).expect("fixture payload should be accepted");
     }
