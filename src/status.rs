@@ -105,12 +105,14 @@ pub fn print_status(json: bool, cwd: Option<&str>) -> Result<()> {
     println!("evidence_refs_written={}", report.evidence_refs_written);
     println!("evidence_write_failures={}", report.evidence_write_failures);
     println!(
-        "policy=dedupe:{}ms correction:{}ms cleanup:{}ms export:{} ingest:{} grace:{}ms max_outcomes:{} fallback_on_end_failure:{}",
+        "policy=dedupe:{}ms correction:{}ms cleanup:{}ms export:{} ingest:{} rhizome_suggest:{}lines/{}calls grace:{}ms max_outcomes:{} fallback_on_end_failure:{}",
         report.policy.outcome_dedupe_window_ms,
         report.policy.correction_window_ms,
         report.policy.edit_cleanup_age_ms,
         report.policy.export_threshold,
         report.policy.ingest_threshold,
+        report.policy.rhizome_suggest_threshold,
+        report.policy.rhizome_suggest_every,
         report.policy.outcome_attribution_grace_ms,
         report.policy.max_outcome_events,
         report.policy.fallback_session_memory_on_end_failure

@@ -90,6 +90,7 @@ fn print_policy(json: bool) -> Result<()> {
         "rhizome_suggest_threshold={}",
         policy.rhizome_suggest_threshold
     );
+    println!("rhizome_suggest_every={}", policy.rhizome_suggest_every);
     println!("rhizome_suggest_enabled={}", policy.rhizome_suggest_enabled);
     println!(
         "outcome_attribution_grace_ms={}",

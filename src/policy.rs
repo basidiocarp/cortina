@@ -10,6 +10,7 @@ pub struct CapturePolicy {
     pub ingest_threshold: usize,
     pub stale_handoff_detection_enabled: bool,
     pub rhizome_suggest_threshold: usize,
+    pub rhizome_suggest_every: usize,
     pub rhizome_suggest_enabled: bool,
     pub outcome_attribution_grace_ms: u64,
     pub max_outcome_events: usize,
@@ -26,7 +27,7 @@ impl CapturePolicy {
         Self::from_reader(|name| env::var(name).ok())
     }
 
-    fn from_reader(read_env: impl Fn(&str) -> Option<String>) -> Self {
+    pub(crate) fn from_reader(read_env: impl Fn(&str) -> Option<String>) -> Self {
         Self {
             outcome_dedupe_window_ms: read_u64(
                 &read_env,
@@ -51,6 +52,7 @@ impl CapturePolicy {
                 "CORTINA_RHIZOME_SUGGEST_THRESHOLD",
                 100,
             ),
+            rhizome_suggest_every: read_usize(&read_env, "CORTINA_RHIZOME_SUGGEST_EVERY", 5),
             rhizome_suggest_enabled: read_bool(&read_env, "CORTINA_RHIZOME_SUGGEST_ENABLED", true),
             outcome_attribution_grace_ms: read_u64(
                 &read_env,
@@ -103,6 +105,7 @@ mod tests {
             "CORTINA_INGEST_THRESHOLD" => Some("7".to_string()),
             "CORTINA_STALE_HANDOFF_DETECTION_ENABLED" => Some("false".to_string()),
             "CORTINA_RHIZOME_SUGGEST_THRESHOLD" => Some("250".to_string()),
+            "CORTINA_RHIZOME_SUGGEST_EVERY" => Some("9".to_string()),
             "CORTINA_RHIZOME_SUGGEST_ENABLED" => Some("false".to_string()),
             "CORTINA_OUTCOME_ATTRIBUTION_GRACE_MS" => Some("60000".to_string()),
             "CORTINA_MAX_OUTCOME_EVENTS" => Some("55".to_string()),
@@ -117,6 +120,7 @@ mod tests {
         assert_eq!(policy.ingest_threshold, 7);
         assert!(!policy.stale_handoff_detection_enabled);
         assert_eq!(policy.rhizome_suggest_threshold, 250);
+        assert_eq!(policy.rhizome_suggest_every, 9);
         assert!(!policy.rhizome_suggest_enabled);
         assert_eq!(policy.outcome_attribution_grace_ms, 60_000);
         assert_eq!(policy.max_outcome_events, 55);
@@ -131,6 +135,7 @@ mod tests {
             "CORTINA_FALLBACK_SESSION_MEMORY_ON_END_FAILURE" => Some("off".to_string()),
             "CORTINA_STALE_HANDOFF_DETECTION_ENABLED" => Some("maybe".to_string()),
             "CORTINA_RHIZOME_SUGGEST_THRESHOLD" => Some("bad".to_string()),
+            "CORTINA_RHIZOME_SUGGEST_EVERY" => Some("oops".to_string()),
             _ => None,
         });
 
@@ -138,6 +143,7 @@ mod tests {
         assert_eq!(policy.export_threshold, 5);
         assert!(policy.stale_handoff_detection_enabled);
         assert_eq!(policy.rhizome_suggest_threshold, 100);
+        assert_eq!(policy.rhizome_suggest_every, 5);
         assert!(policy.rhizome_suggest_enabled);
         assert!(!policy.fallback_session_memory_on_end_failure);
     }

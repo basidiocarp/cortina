@@ -131,7 +131,7 @@ impl ClaudeCodeHookEnvelope {
             .and_then(|value| i32::try_from(value).ok())
     }
 
-    fn cwd(&self) -> Option<&str> {
+    pub(crate) fn cwd(&self) -> Option<&str> {
         self.raw.get("cwd").and_then(Value::as_str)
     }
 
