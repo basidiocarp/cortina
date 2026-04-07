@@ -9,6 +9,7 @@ pub struct CapturePolicy {
     pub export_threshold: usize,
     pub ingest_threshold: usize,
     pub stale_handoff_detection_enabled: bool,
+    pub handoff_lint_enabled: bool,
     pub rhizome_suggest_threshold: usize,
     pub rhizome_suggest_every: usize,
     pub rhizome_suggest_enabled: bool,
@@ -47,6 +48,7 @@ impl CapturePolicy {
                 "CORTINA_STALE_HANDOFF_DETECTION_ENABLED",
                 true,
             ),
+            handoff_lint_enabled: read_bool(&read_env, "CORTINA_HANDOFF_LINT_ENABLED", true),
             rhizome_suggest_threshold: read_usize(
                 &read_env,
                 "CORTINA_RHIZOME_SUGGEST_THRESHOLD",
@@ -104,6 +106,7 @@ mod tests {
             "CORTINA_EXPORT_THRESHOLD" => Some("9".to_string()),
             "CORTINA_INGEST_THRESHOLD" => Some("7".to_string()),
             "CORTINA_STALE_HANDOFF_DETECTION_ENABLED" => Some("false".to_string()),
+            "CORTINA_HANDOFF_LINT_ENABLED" => Some("false".to_string()),
             "CORTINA_RHIZOME_SUGGEST_THRESHOLD" => Some("250".to_string()),
             "CORTINA_RHIZOME_SUGGEST_EVERY" => Some("9".to_string()),
             "CORTINA_RHIZOME_SUGGEST_ENABLED" => Some("false".to_string()),
@@ -119,6 +122,7 @@ mod tests {
         assert_eq!(policy.export_threshold, 9);
         assert_eq!(policy.ingest_threshold, 7);
         assert!(!policy.stale_handoff_detection_enabled);
+        assert!(!policy.handoff_lint_enabled);
         assert_eq!(policy.rhizome_suggest_threshold, 250);
         assert_eq!(policy.rhizome_suggest_every, 9);
         assert!(!policy.rhizome_suggest_enabled);
@@ -134,6 +138,7 @@ mod tests {
             "CORTINA_EXPORT_THRESHOLD" => Some("nope".to_string()),
             "CORTINA_FALLBACK_SESSION_MEMORY_ON_END_FAILURE" => Some("off".to_string()),
             "CORTINA_STALE_HANDOFF_DETECTION_ENABLED" => Some("maybe".to_string()),
+            "CORTINA_HANDOFF_LINT_ENABLED" => Some("unexpected".to_string()),
             "CORTINA_RHIZOME_SUGGEST_THRESHOLD" => Some("bad".to_string()),
             "CORTINA_RHIZOME_SUGGEST_EVERY" => Some("oops".to_string()),
             _ => None,
@@ -142,6 +147,7 @@ mod tests {
         assert_eq!(policy.outcome_dedupe_window_ms, 30_000);
         assert_eq!(policy.export_threshold, 5);
         assert!(policy.stale_handoff_detection_enabled);
+        assert!(policy.handoff_lint_enabled);
         assert_eq!(policy.rhizome_suggest_threshold, 100);
         assert_eq!(policy.rhizome_suggest_every, 5);
         assert!(policy.rhizome_suggest_enabled);

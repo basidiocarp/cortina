@@ -8,6 +8,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
+use crate::handoff_lint::audit_handoff as lint_handoff;
 use crate::handoff_paths::{ChecklistItem, extract_paths, extract_paths_from_text};
 use crate::outcomes::{clear_outcomes, load_outcomes};
 use crate::policy::capture_policy;
@@ -95,6 +96,17 @@ pub fn handle(input: &str) -> Result<()> {
                     warning.unchecked_items.join(" | ")
                 );
             }
+        }
+    }
+
+    if capture_policy().handoff_lint_enabled {
+        let session_paths = summary
+            .files_modified
+            .iter()
+            .map(PathBuf::from)
+            .collect::<Vec<_>>();
+        for warning in check_handoff_completion(&session_paths, Path::new(&event.cwd)) {
+            eprintln!("{warning}");
         }
     }
 
@@ -201,10 +213,7 @@ fn check_handoff_staleness(
         warnings.push(StaleHandoffWarning {
             handoff_file: handoff_file.clone(),
             overlapping_files,
-            unchecked_items: unchecked_items
-                .into_iter()
-                .map(|(item, _)| item)
-                .collect(),
+            unchecked_items: unchecked_items.into_iter().map(|(item, _)| item).collect(),
             suggestion:
                 "update the handoff checklist or mark the completed items before dispatching again"
                     .to_string(),
@@ -212,6 +221,50 @@ fn check_handoff_staleness(
     }
 
     warnings
+}
+
+fn check_handoff_completion(session_files: &[PathBuf], cwd: &Path) -> Vec<String> {
+    let Some(workspace_root) = workspace_root_from_cwd(cwd) else {
+        return Vec::new();
+    };
+
+    session_files
+        .iter()
+        .filter_map(|path| resolve_modified_handoff_path(path, cwd, &workspace_root))
+        .filter_map(|handoff_path| {
+            let audit = lint_handoff(&handoff_path).ok()?;
+            let mut issues = Vec::new();
+
+            if !audit.unchecked_checkboxes.is_empty() {
+                issues.push(format!(
+                    "unchecked checklist items at {}",
+                    audit.unchecked_checkboxes
+                        .iter()
+                        .map(format_checklist_item)
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                ));
+            }
+            if !audit.empty_paste_markers.is_empty() {
+                issues.push(format!(
+                    "empty paste markers at lines {}",
+                    audit.empty_paste_markers
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+
+            (!issues.is_empty()).then(|| {
+                format!(
+                    "cortina: handoff completion warning for {}: {}; update the handoff before claiming completion",
+                    handoff_path.display(),
+                    issues.join("; ")
+                )
+            })
+        })
+        .collect()
 }
 
 fn ready_handoff_files(workspace_root: &Path) -> Vec<PathBuf> {
@@ -280,4 +333,31 @@ fn step_block_for_line(content: &str, line_number: usize) -> String {
     }
 
     lines[start..end].join("\n")
+}
+
+fn resolve_modified_handoff_path(
+    session_file: &Path,
+    cwd: &Path,
+    workspace_root: &Path,
+) -> Option<PathBuf> {
+    if !session_file.extension().is_some_and(|ext| ext == "md") {
+        return None;
+    }
+
+    let candidates = if session_file.is_absolute() {
+        vec![session_file.to_path_buf()]
+    } else {
+        vec![
+            cwd.join(session_file),
+            workspace_root.join(session_file),
+            workspace_root.join(session_file.strip_prefix("./").unwrap_or(session_file)),
+        ]
+    };
+
+    candidates.into_iter().find(|candidate| {
+        candidate.exists()
+            && candidate
+                .components()
+                .any(|component| component.as_os_str() == ".handoffs")
+    })
 }

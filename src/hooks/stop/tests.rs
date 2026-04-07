@@ -3,13 +3,13 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-use super::check_handoff_staleness;
 use super::handle;
 use super::summary::{
     TranscriptSummary, filter_outcomes_for_session, format_structured_outcome_attribution,
     has_unresolved_errors, merge_structured_outcomes,
 };
 use super::transcript::parse_jsonl_transcript;
+use super::{check_handoff_completion, check_handoff_staleness};
 
 #[test]
 fn parse_jsonl_transcript_valid() {
@@ -349,4 +349,41 @@ fn check_handoff_staleness_ignores_overlap_from_checked_items() {
     );
 
     assert!(warnings.is_empty());
+}
+
+#[test]
+fn check_handoff_completion_warns_for_modified_handoffs() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".handoffs/cross-project")).unwrap();
+    fs::write(
+        dir.path().join(".handoffs/HANDOFFS.md"),
+        "# Handoffs Index\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.path()
+            .join(".handoffs/cross-project/handoff-checkbox-enforcement.md"),
+        r#"# Handoff
+
+- [ ] Tighten stop hook
+
+**Output:**
+<!-- PASTE START -->
+
+<!-- PASTE END -->
+"#,
+    )
+    .unwrap();
+
+    let warnings = check_handoff_completion(
+        &[PathBuf::from(
+            ".handoffs/cross-project/handoff-checkbox-enforcement.md",
+        )],
+        dir.path(),
+    );
+
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].contains("unchecked checklist items"));
+    assert!(warnings[0].contains("empty paste markers"));
+    assert!(warnings[0].contains("claiming completion"));
 }

@@ -6,6 +6,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::adapters::claude_code::{ClaudeCodeHookEnvelope, rewrite_response};
+use crate::hooks::pre_commit::handoff_pre_commit_warnings;
 use crate::policy::{CapturePolicy, capture_policy};
 #[cfg(test)]
 use crate::utils::remove_file_with_lock;
@@ -45,6 +46,12 @@ pub fn handle(input: &str) -> Result<()> {
     if let Some(event) = envelope.command_rewrite_request() {
         if event.command.is_empty() {
             return Ok(());
+        }
+
+        if capture_policy().handoff_lint_enabled {
+            for warning in handoff_pre_commit_warnings(&event.command, envelope.cwd()) {
+                eprintln!("{warning}");
+            }
         }
 
         // Skip heredocs — they contain too much complexity
@@ -119,7 +126,11 @@ fn tool_suggestion_message_with_availability(
         envelope
             .tool_input_string("file_path")
             .and_then(|file_path| {
-                read_advisory_for_path(file_path, policy.rhizome_suggest_threshold)
+                read_advisory_for_path(
+                    file_path,
+                    envelope.cwd(),
+                    policy.rhizome_suggest_threshold,
+                )
             })
     } else if envelope.tool_name_is("Grep") {
         envelope
@@ -143,12 +154,17 @@ struct ToolAdvisory {
     rate_limit_key: String,
 }
 
-fn read_advisory_for_path(file_path: &str, threshold: usize) -> Option<ToolAdvisory> {
+fn read_advisory_for_path(
+    file_path: &str,
+    cwd: Option<&str>,
+    threshold: usize,
+) -> Option<ToolAdvisory> {
     if !is_code_file(file_path) {
         return None;
     }
 
-    let line_count = count_lines(file_path).ok()?;
+    let resolved_path = resolve_read_path(file_path, cwd);
+    let line_count = count_lines(&resolved_path).ok()?;
     if line_count <= threshold {
         return None;
     }
@@ -185,6 +201,16 @@ fn count_lines(file_path: &str) -> Result<usize> {
     reader.lines().try_fold(0usize, |count, line| {
         line.map(|_| count + 1).map_err(Into::into)
     })
+}
+
+fn resolve_read_path(file_path: &str, cwd: Option<&str>) -> String {
+    let path = Path::new(file_path);
+    if path.is_absolute() {
+        return file_path.to_string();
+    }
+
+    cwd.map(|cwd| Path::new(cwd).join(path).to_string_lossy().into_owned())
+        .unwrap_or_else(|| file_path.to_string())
 }
 
 fn symbol_like_grep_kind(pattern: &str) -> Option<&'static str> {
@@ -269,8 +295,8 @@ mod tests {
 
     #[test]
     fn read_advisory_skips_non_code_files() {
-        assert!(read_advisory_for_path("README.md", 100).is_none());
-        assert!(read_advisory_for_path(".env", 100).is_none());
+        assert!(read_advisory_for_path("README.md", None, 100).is_none());
+        assert!(read_advisory_for_path(".env", None, 100).is_none());
     }
 
     #[test]
@@ -281,7 +307,7 @@ mod tests {
         let file_path = temp_dir.join("small.rs");
         fs::write(&file_path, "fn main() {}\n").unwrap();
 
-        assert!(read_advisory_for_path(file_path.to_str().unwrap(), 100).is_none());
+        assert!(read_advisory_for_path(file_path.to_str().unwrap(), None, 100).is_none());
 
         let _ = fs::remove_dir_all(&temp_dir);
     }
@@ -297,9 +323,27 @@ mod tests {
             .collect::<String>();
         fs::write(&file_path, content).unwrap();
 
-        let advisory = read_advisory_for_path(file_path.to_str().unwrap(), 100)
+        let advisory = read_advisory_for_path(file_path.to_str().unwrap(), None, 100)
             .expect("large code file should trigger an advisory");
         assert_eq!(advisory.message, READ_ADVISORY_MESSAGE);
+        assert_eq!(advisory.rate_limit_key, "read:rs");
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn read_advisory_resolves_relative_paths_from_event_cwd() {
+        let temp_dir = std::env::temp_dir().join("cortina-read-suggestion-relative");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(temp_dir.join("src")).unwrap();
+        let file_path = temp_dir.join("src/large.rs");
+        let content = (0..101)
+            .map(|i| format!("fn line_{i}() {{}}\n"))
+            .collect::<String>();
+        fs::write(&file_path, content).unwrap();
+
+        let advisory = read_advisory_for_path("src/large.rs", temp_dir.to_str(), 100)
+            .expect("relative path should resolve using event cwd");
         assert_eq!(advisory.rate_limit_key, "read:rs");
 
         let _ = fs::remove_dir_all(&temp_dir);

@@ -7,6 +7,7 @@ mod adapters;
 mod cli;
 mod events;
 mod handoff_audit;
+mod handoff_lint;
 mod handoff_paths;
 mod hooks;
 mod outcomes;
@@ -86,6 +87,7 @@ fn print_policy(json: bool) -> Result<()> {
         "stale_handoff_detection_enabled={}",
         policy.stale_handoff_detection_enabled
     );
+    println!("handoff_lint_enabled={}", policy.handoff_lint_enabled);
     println!(
         "rhizome_suggest_threshold={}",
         policy.rhizome_suggest_threshold
