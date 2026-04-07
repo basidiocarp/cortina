@@ -513,10 +513,9 @@ mod tests {
 
     #[test]
     fn statusline_view_uses_latest_turn_for_context_pct() {
-        let temp_dir = std::env::temp_dir().join("cortina-statusline-context");
-        let _ = fs::remove_dir_all(&temp_dir);
-        fs::create_dir_all(&temp_dir).unwrap();
-        let transcript = temp_dir.join("transcript.jsonl");
+        let _lock = crate::test_support::test_lock();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let transcript = temp_dir.path().join("transcript.jsonl");
         fs::write(
             &transcript,
             concat!(
@@ -544,8 +543,6 @@ mod tests {
                 cache_creation_input_tokens: 19_000,
             })
         );
-
-        let _ = fs::remove_dir_all(&temp_dir);
     }
 
     #[test]

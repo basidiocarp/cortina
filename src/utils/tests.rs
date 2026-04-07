@@ -313,6 +313,7 @@ fn ensure_hyphae_session_with_runner_leaves_state_empty_on_spawn_failure() {
 
 #[test]
 fn ensure_hyphae_session_with_runner_passes_context_signals_to_start() {
+    let _lock = crate::test_support::test_lock();
     let hash = "ensure-context-signals";
     clear_session_state(hash);
     let identity = test_identity(hash, "demo-project");
@@ -458,6 +459,7 @@ fn ensure_hyphae_session_with_runner_reuses_active_cached_state() {
 
 #[test]
 fn ensure_hyphae_session_with_runner_discards_stale_cached_state() {
+    let _lock = crate::test_support::test_lock();
     let hash = "ensure-stale-state";
     clear_session_state(hash);
     let stale = SessionState {
@@ -533,6 +535,7 @@ fn ensure_hyphae_session_with_runner_discards_stale_cached_state() {
 
 #[test]
 fn ensure_hyphae_session_with_runner_ignores_other_scoped_sessions() {
+    let _lock = crate::test_support::test_lock();
     let hash = "ensure-scope-a";
     clear_session_state(hash);
     let cached = SessionState {
@@ -659,6 +662,7 @@ fn ensure_hyphae_session_with_runner_serializes_concurrent_starts() {
 
 #[test]
 fn ensure_hyphae_session_with_runner_upgrades_legacy_cached_state_after_exact_match() {
+    let _lock = crate::test_support::test_lock();
     let hash = "ensure-upgrade-legacy-cache";
     clear_session_state(hash);
     save_json_file(
@@ -868,6 +872,7 @@ fn legacy_scope_hash_for_test(cwd: &str) -> String {
 
 #[test]
 fn end_hyphae_session_with_spawn_failure_keeps_cached_state() {
+    let _lock = crate::test_support::test_lock();
     let hash = "end-spawn-failure";
     clear_session_state(hash);
     let state = SessionState {
@@ -891,6 +896,7 @@ fn end_hyphae_session_with_spawn_failure_keeps_cached_state() {
 
 #[test]
 fn end_hyphae_session_with_non_zero_exit_keeps_cached_state() {
+    let _lock = crate::test_support::test_lock();
     let hash = "end-non-zero";
     clear_session_state(hash);
     let state = SessionState {
@@ -914,6 +920,7 @@ fn end_hyphae_session_with_non_zero_exit_keeps_cached_state() {
 
 #[test]
 fn end_hyphae_session_with_success_clears_cached_state() {
+    let _lock = crate::test_support::test_lock();
     let hash = "end-success";
     clear_session_state(hash);
     let state = SessionState {

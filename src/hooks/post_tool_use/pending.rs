@@ -3,13 +3,13 @@ use std::path::{Path, PathBuf};
 use crate::events::{OutcomeEvent, OutcomeKind};
 use crate::outcomes::record_outcome;
 use crate::policy::capture_policy;
+use crate::utils::load_json_file;
+#[cfg(test)]
+use crate::utils::remove_file_with_lock;
 use crate::utils::{
     command_exists, ensure_scoped_hyphae_session, spawn_async_checked, temp_state_path,
     update_json_file,
 };
-use crate::utils::load_json_file;
-#[cfg(test)]
-use crate::utils::remove_file_with_lock;
 
 use super::annotate_outcome_with_session;
 

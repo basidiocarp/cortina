@@ -1,5 +1,9 @@
 use crate::events::{OutcomeEvent, OutcomeKind};
+use std::fs;
+use std::path::PathBuf;
+use tempfile::TempDir;
 
+use super::check_handoff_staleness;
 use super::handle;
 use super::summary::{
     TranscriptSummary, filter_outcomes_for_session, format_structured_outcome_attribution,
@@ -250,4 +254,99 @@ fn handle_accepts_valid_stop_envelope() {
     );
 
     assert!(handle(&json).is_ok());
+}
+
+#[test]
+fn check_handoff_staleness_warns_on_overlap_with_unchecked_items() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".handoffs/cortina")).unwrap();
+    fs::write(
+        dir.path().join(".handoffs/HANDOFFS.md"),
+        r#"# Handoffs Index
+
+| Handoff | Status | Priority | Depends On |
+|---------|--------|----------|------------|
+| [Stale Handoff Detection](cortina/stale-handoff-detection.md) | Ready | High | — |
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path()
+            .join(".handoffs/cortina/stale-handoff-detection.md"),
+        r#"# Handoff
+
+#### Files to modify
+
+**`cortina/src/hooks/stop.rs`** — add staleness detection
+
+#### Checklist
+
+- [ ] Add `check_handoff_staleness`
+"#,
+    )
+    .unwrap();
+
+    let warnings = check_handoff_staleness(
+        &[String::from("cortina/src/hooks/stop.rs")],
+        &PathBuf::from(dir.path()),
+    );
+
+    assert_eq!(warnings.len(), 1);
+    assert!(
+        warnings[0]
+            .overlapping_files
+            .iter()
+            .any(|path| path == "cortina/src/hooks/stop.rs")
+    );
+    assert!(
+        warnings[0]
+            .unchecked_items
+            .iter()
+            .any(|item| item.contains("check_handoff_staleness"))
+    );
+}
+
+#[test]
+fn check_handoff_staleness_ignores_overlap_from_checked_items() {
+    let dir = TempDir::new().unwrap();
+    fs::create_dir_all(dir.path().join(".handoffs/cortina")).unwrap();
+    fs::write(
+        dir.path().join(".handoffs/HANDOFFS.md"),
+        r#"# Handoffs Index
+
+| Handoff | Status | Priority | Depends On |
+|---------|--------|----------|------------|
+| [Mixed Handoff](cortina/mixed.md) | Ready | High | — |
+"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join(".handoffs/cortina/mixed.md"),
+        r#"# Handoff
+
+### Step 1
+
+#### Files to modify
+
+**`cortina/src/hooks/stop.rs`**
+
+- [x] Finish `check_handoff_staleness`
+
+### Step 2
+
+#### Files to modify
+
+**`cortina/src/main.rs`**
+
+- [ ] Tighten dispatch wording
+"#,
+    )
+    .unwrap();
+
+    let warnings = check_handoff_staleness(
+        &[String::from("cortina/src/hooks/stop.rs")],
+        &PathBuf::from(dir.path()),
+    );
+
+    assert!(warnings.is_empty());
 }

@@ -8,6 +8,7 @@ pub struct CapturePolicy {
     pub edit_cleanup_age_ms: u64,
     pub export_threshold: usize,
     pub ingest_threshold: usize,
+    pub stale_handoff_detection_enabled: bool,
     pub rhizome_suggest_threshold: usize,
     pub rhizome_suggest_enabled: bool,
     pub outcome_attribution_grace_ms: u64,
@@ -40,6 +41,11 @@ impl CapturePolicy {
             edit_cleanup_age_ms: read_u64(&read_env, "CORTINA_EDIT_CLEANUP_AGE_MS", 10 * 60 * 1000),
             export_threshold: read_usize(&read_env, "CORTINA_EXPORT_THRESHOLD", 5),
             ingest_threshold: read_usize(&read_env, "CORTINA_INGEST_THRESHOLD", 3),
+            stale_handoff_detection_enabled: read_bool(
+                &read_env,
+                "CORTINA_STALE_HANDOFF_DETECTION_ENABLED",
+                true,
+            ),
             rhizome_suggest_threshold: read_usize(
                 &read_env,
                 "CORTINA_RHIZOME_SUGGEST_THRESHOLD",
@@ -75,10 +81,11 @@ fn read_usize(read_env: &impl Fn(&str) -> Option<String>, name: &str, default: u
 
 fn read_bool(read_env: &impl Fn(&str) -> Option<String>, name: &str, default: bool) -> bool {
     read_env(name).map_or(default, |value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
+        match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            _ => default,
+        }
     })
 }
 
@@ -94,6 +101,7 @@ mod tests {
             "CORTINA_EDIT_CLEANUP_AGE_MS" => Some("5678".to_string()),
             "CORTINA_EXPORT_THRESHOLD" => Some("9".to_string()),
             "CORTINA_INGEST_THRESHOLD" => Some("7".to_string()),
+            "CORTINA_STALE_HANDOFF_DETECTION_ENABLED" => Some("false".to_string()),
             "CORTINA_RHIZOME_SUGGEST_THRESHOLD" => Some("250".to_string()),
             "CORTINA_RHIZOME_SUGGEST_ENABLED" => Some("false".to_string()),
             "CORTINA_OUTCOME_ATTRIBUTION_GRACE_MS" => Some("60000".to_string()),
@@ -107,6 +115,7 @@ mod tests {
         assert_eq!(policy.edit_cleanup_age_ms, 5_678);
         assert_eq!(policy.export_threshold, 9);
         assert_eq!(policy.ingest_threshold, 7);
+        assert!(!policy.stale_handoff_detection_enabled);
         assert_eq!(policy.rhizome_suggest_threshold, 250);
         assert!(!policy.rhizome_suggest_enabled);
         assert_eq!(policy.outcome_attribution_grace_ms, 60_000);
@@ -120,12 +129,14 @@ mod tests {
             "CORTINA_OUTCOME_DEDUPE_WINDOW_MS" => Some("bad".to_string()),
             "CORTINA_EXPORT_THRESHOLD" => Some("nope".to_string()),
             "CORTINA_FALLBACK_SESSION_MEMORY_ON_END_FAILURE" => Some("off".to_string()),
+            "CORTINA_STALE_HANDOFF_DETECTION_ENABLED" => Some("maybe".to_string()),
             "CORTINA_RHIZOME_SUGGEST_THRESHOLD" => Some("bad".to_string()),
             _ => None,
         });
 
         assert_eq!(policy.outcome_dedupe_window_ms, 30_000);
         assert_eq!(policy.export_threshold, 5);
+        assert!(policy.stale_handoff_detection_enabled);
         assert_eq!(policy.rhizome_suggest_threshold, 100);
         assert!(policy.rhizome_suggest_enabled);
         assert!(!policy.fallback_session_memory_on_end_failure);
