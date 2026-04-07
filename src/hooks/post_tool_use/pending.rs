@@ -7,8 +7,9 @@ use crate::utils::{
     command_exists, ensure_scoped_hyphae_session, spawn_async_checked, temp_state_path,
     update_json_file,
 };
+use crate::utils::load_json_file;
 #[cfg(test)]
-use crate::utils::{load_json_file, remove_file_with_lock};
+use crate::utils::remove_file_with_lock;
 
 use super::annotate_outcome_with_session;
 
@@ -23,13 +24,11 @@ fn pending_documents_path(hash: &str) -> PathBuf {
     temp_state_path("pending-ingest", hash, "json")
 }
 
-#[cfg(test)]
-pub(super) fn get_pending_files(hash: &str) -> Vec<String> {
+pub(crate) fn get_pending_files(hash: &str) -> Vec<String> {
     load_json_file(pending_files_path(hash)).unwrap_or_default()
 }
 
-#[cfg(test)]
-pub(super) fn get_pending_documents(hash: &str) -> Vec<String> {
+pub(crate) fn get_pending_documents(hash: &str) -> Vec<String> {
     load_json_file(pending_documents_path(hash)).unwrap_or_default()
 }
 

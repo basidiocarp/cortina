@@ -6,7 +6,7 @@ mod outcome_events;
     reason = "Re-exported adapter event types are used by tests and adapter modules"
 )]
 pub use adapter_events::{
-    BashToolEvent, CommandRewriteRequest, FileEditEvent, SessionStopEvent, ToolResultEvent,
-    VolvaBackendKind, VolvaHookEvent, VolvaHookPhase,
+    BashToolEvent, CommandRewriteRequest, FileEditEvent, PreCompactEvent, SessionStopEvent,
+    ToolResultEvent, UserPromptSubmitEvent, VolvaBackendKind, VolvaHookEvent, VolvaHookPhase,
 };
 pub use outcome_events::{OutcomeEvent, OutcomeKind};

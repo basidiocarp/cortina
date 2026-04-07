@@ -10,6 +10,8 @@ use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::events::{OutcomeEvent, ToolResultEvent};
 use crate::utils::SessionState;
 
+pub(crate) use pending::{get_pending_documents, get_pending_files};
+
 #[allow(
     clippy::unnecessary_wraps,
     reason = "Result return type required by dispatch match in main"

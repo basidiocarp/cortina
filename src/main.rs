@@ -41,6 +41,14 @@ enum Commands {
     #[command(name = "post-tool-use", hide = true)]
     PostToolUse,
 
+    /// Compatibility alias for `cortina adapter claude-code user-prompt-submit`
+    #[command(name = "user-prompt-submit", hide = true)]
+    UserPromptSubmit,
+
+    /// Compatibility alias for `cortina adapter claude-code pre-compact`
+    #[command(name = "pre-compact", hide = true)]
+    PreCompact,
+
     /// Compatibility alias for `cortina adapter claude-code stop`
     #[command(name = "stop", hide = true)]
     Stop,
@@ -101,6 +109,14 @@ fn main() -> Result<()> {
         Commands::PostToolUse => {
             let input = read_stdin()?;
             adapters::handle_legacy_claude_command(ClaudeCodeEventCommand::PostToolUse, &input)
+        }
+        Commands::UserPromptSubmit => {
+            let input = read_stdin()?;
+            adapters::handle_legacy_claude_command(ClaudeCodeEventCommand::UserPromptSubmit, &input)
+        }
+        Commands::PreCompact => {
+            let input = read_stdin()?;
+            adapters::handle_legacy_claude_command(ClaudeCodeEventCommand::PreCompact, &input)
         }
         Commands::Stop => {
             let input = read_stdin()?;
@@ -187,11 +203,19 @@ mod tests {
             .expect("expected compatibility alias to parse");
 
         assert!(matches!(cli.command, Commands::PreToolUse));
+        let prompt_submit = Cli::try_parse_from(["cortina", "user-prompt-submit"])
+            .expect("expected prompt-submit alias to parse");
+        assert!(matches!(prompt_submit.command, Commands::UserPromptSubmit));
+        let pre_compact = Cli::try_parse_from(["cortina", "pre-compact"])
+            .expect("expected pre-compact alias to parse");
+        assert!(matches!(pre_compact.command, Commands::PreCompact));
         let session_end = Cli::try_parse_from(["cortina", "session-end"])
             .expect("expected session-end alias to parse");
         assert!(matches!(session_end.command, Commands::SessionEnd));
         let help = Cli::command().render_long_help().to_string();
         assert!(!help.contains("pre-tool-use"));
+        assert!(!help.contains("user-prompt-submit"));
+        assert!(!help.contains("pre-compact"));
         assert!(!help.contains("session-end"));
     }
 

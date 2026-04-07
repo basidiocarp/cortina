@@ -29,6 +29,21 @@ pub struct SessionStopEvent {
     pub transcript_path: Option<String>,
 }
 
+pub struct UserPromptSubmitEvent {
+    pub session_id: String,
+    pub cwd: String,
+    pub prompt: String,
+    pub transcript_path: Option<String>,
+}
+
+pub struct PreCompactEvent {
+    pub session_id: String,
+    pub cwd: String,
+    pub trigger: String,
+    pub custom_instructions: Option<String>,
+    pub transcript_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VolvaHookPhase {

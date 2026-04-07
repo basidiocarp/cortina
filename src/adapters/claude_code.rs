@@ -1,7 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::events::{
-    BashToolEvent, CommandRewriteRequest, FileEditEvent, SessionStopEvent, ToolResultEvent,
+    BashToolEvent, CommandRewriteRequest, FileEditEvent, PreCompactEvent, SessionStopEvent,
+    ToolResultEvent, UserPromptSubmitEvent,
 };
 
 /// Adapter for the current Claude Code hook-event envelope.
@@ -66,12 +67,46 @@ impl ClaudeCodeHookEnvelope {
         })
     }
 
+    pub fn user_prompt_submit_event(&self) -> Option<UserPromptSubmitEvent> {
+        let session_id = self.session_id()?.to_string();
+        let cwd = self.cwd()?.to_string();
+        let prompt = self.raw.get("prompt")?.as_str()?.to_string();
+        Some(UserPromptSubmitEvent {
+            session_id,
+            cwd,
+            prompt,
+            transcript_path: self.transcript_path().map(ToString::to_string),
+        })
+    }
+
+    pub fn pre_compact_event(&self) -> Option<PreCompactEvent> {
+        let session_id = self.session_id()?.to_string();
+        let cwd = self.cwd()?.to_string();
+        let trigger = self.raw.get("trigger")?.as_str()?.to_string();
+        let custom_instructions = self
+            .raw
+            .get("custom_instructions")
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+        Some(PreCompactEvent {
+            session_id,
+            cwd,
+            trigger,
+            custom_instructions,
+            transcript_path: self.transcript_path().map(ToString::to_string),
+        })
+    }
+
     pub(crate) fn tool_name_is(&self, name: &str) -> bool {
         self.tool_name() == Some(name)
     }
 
     fn tool_name(&self) -> Option<&str> {
         self.raw.get("tool_name").and_then(Value::as_str)
+    }
+
+    fn session_id(&self) -> Option<&str> {
+        self.raw.get("session_id").and_then(Value::as_str)
     }
 
     pub(crate) fn tool_input_string(&self, key: &str) -> Option<&str> {
@@ -238,5 +273,60 @@ mod tests {
 
         assert!(envelope.tool_name_is("Read"));
         assert_eq!(envelope.tool_input_string("file_path"), Some("src/main.rs"));
+    }
+
+    #[test]
+    fn parses_user_prompt_submit_event() {
+        let envelope = ClaudeCodeHookEnvelope::parse(
+            r#"{
+                "session_id": "abc123",
+                "cwd": "/tmp/demo",
+                "transcript_path": "/tmp/transcript.jsonl",
+                "prompt": "capture this prompt",
+                "hook_event_name": "UserPromptSubmit"
+            }"#,
+        )
+        .expect("valid envelope");
+
+        let event = envelope
+            .user_prompt_submit_event()
+            .expect("expected prompt submit event");
+        assert_eq!(event.session_id, "abc123");
+        assert_eq!(event.cwd, "/tmp/demo");
+        assert_eq!(event.prompt, "capture this prompt");
+        assert_eq!(
+            event.transcript_path.as_deref(),
+            Some("/tmp/transcript.jsonl")
+        );
+    }
+
+    #[test]
+    fn parses_pre_compact_event() {
+        let envelope = ClaudeCodeHookEnvelope::parse(
+            r#"{
+                "session_id": "abc123",
+                "cwd": "/tmp/demo",
+                "transcript_path": "/tmp/transcript.jsonl",
+                "trigger": "manual",
+                "custom_instructions": "summarize current state",
+                "hook_event_name": "PreCompact"
+            }"#,
+        )
+        .expect("valid envelope");
+
+        let event = envelope
+            .pre_compact_event()
+            .expect("expected pre-compact event");
+        assert_eq!(event.session_id, "abc123");
+        assert_eq!(event.cwd, "/tmp/demo");
+        assert_eq!(event.trigger, "manual");
+        assert_eq!(
+            event.custom_instructions.as_deref(),
+            Some("summarize current state")
+        );
+        assert_eq!(
+            event.transcript_path.as_deref(),
+            Some("/tmp/transcript.jsonl")
+        );
     }
 }

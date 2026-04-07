@@ -156,15 +156,16 @@ mod tests {
 
         let error = handle_hook_event(&input).expect_err("unsupported schema version should fail");
         assert!(
-            error.to_string().contains("unsupported volva hook event schema_version"),
+            error
+                .to_string()
+                .contains("unsupported volva hook event schema_version"),
             "unexpected error: {error}"
         );
     }
 
     #[test]
     fn fixture_payload_matches_consumer_contract() {
-        let input =
-            include_str!("../../../septa/fixtures/volva-hook-event-v1.example.json");
+        let input = include_str!("../../../septa/fixtures/volva-hook-event-v1.example.json");
 
         handle_hook_event(input).expect("fixture payload should be accepted");
     }

@@ -33,6 +33,14 @@ pub enum ClaudeCodeEventCommand {
     #[command(name = "post-tool-use")]
     PostToolUse,
 
+    /// Handle `UserPromptSubmit` adapter events (prompt capture)
+    #[command(name = "user-prompt-submit")]
+    UserPromptSubmit,
+
+    /// Handle `PreCompact` adapter events (compaction snapshot capture)
+    #[command(name = "pre-compact")]
+    PreCompact,
+
     /// Handle `Stop` adapter events (session summary)
     #[command(name = "stop")]
     Stop,
@@ -64,6 +72,8 @@ fn handle_claude_code_event(event: ClaudeCodeEventCommand, input: &str) -> Resul
     match event {
         ClaudeCodeEventCommand::PreToolUse => hooks::pre_tool_use::handle(input),
         ClaudeCodeEventCommand::PostToolUse => hooks::post_tool_use::handle(input),
+        ClaudeCodeEventCommand::UserPromptSubmit => hooks::user_prompt_submit::handle(input),
+        ClaudeCodeEventCommand::PreCompact => hooks::pre_compact::handle(input),
         ClaudeCodeEventCommand::Stop | ClaudeCodeEventCommand::SessionEnd => {
             hooks::stop::handle(input)
         }
