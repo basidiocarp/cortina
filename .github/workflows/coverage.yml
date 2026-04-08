@@ -6,12 +6,15 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
-  group: coverage-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   coverage:
-    uses: basidiocarp/.github/.github/workflows/rust-coverage.yml@main
+    uses: basidiocarp/.github/.github/workflows/rust-coverage.yml@ac464bb
     with:
       threshold: 0

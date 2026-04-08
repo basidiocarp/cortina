@@ -8,9 +8,16 @@ on:
   schedule:
     - cron: '0 6 * * *'
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ci:
-    uses: basidiocarp/.github/.github/workflows/rust-ci.yml@main
+    uses: basidiocarp/.github/.github/workflows/rust-ci.yml@ac464bb
     with:
       workspace: false
       audit: true
