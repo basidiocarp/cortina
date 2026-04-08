@@ -196,7 +196,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cortina"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "anyhow",
  "clap",
@@ -206,6 +206,7 @@ dependencies = [
  "serde_json",
  "spore",
  "tempfile",
+ "tracing",
  "windows-sys 0.59.0",
 ]
 
@@ -833,8 +834,8 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "spore"
-version = "0.4.7"
-source = "git+https://github.com/basidiocarp/spore?rev=ca13188aa966ce4627d2a7f7c968a333d76a65c1#ca13188aa966ce4627d2a7f7c968a333d76a65c1"
+version = "0.4.9"
+source = "git+https://github.com/basidiocarp/spore?tag=v0.4.9#a899dbd671cc8b79c68c37f183ea8ea830f922c6"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1010,6 +1011,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1019,12 +1030,15 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex-automata",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]

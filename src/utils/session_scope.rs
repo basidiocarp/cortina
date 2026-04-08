@@ -1,10 +1,12 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use spore::logging::{SpanContext, subprocess_span, tool_span};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use tracing::{debug, warn};
 
 use super::hyphae_client::{command_exists, resolved_command};
 use super::state::{
@@ -14,6 +16,16 @@ use super::state::{
 };
 use crate::events::OutcomeKind;
 use crate::outcomes::load_outcomes;
+
+fn span_context(project_root: Option<&str>, tool: &str) -> SpanContext {
+    let context = SpanContext::for_app("cortina").with_tool(tool);
+    match project_root {
+        Some(project_root) if !project_root.trim().is_empty() => {
+            context.with_workspace_root(project_root.to_string())
+        }
+        _ => context,
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionState {
@@ -197,8 +209,11 @@ where
         let Some(state) = state else {
             return Ok(None);
         };
+        let context = span_context(state.project_root.as_deref(), "hyphae_session_end");
+        let _tool_span = tool_span("hyphae_session_end", &context).entered();
 
         let Some(mut cmd) = resolved_command("hyphae") else {
+            warn!("Hyphae binary is not discoverable; cannot end scoped session");
             return Ok(None);
         };
         cmd.args(["session", "end", "--id", &state.session_id]);
@@ -213,11 +228,17 @@ where
 
         cmd.args(["--errors", &errors_encountered.to_string()]);
 
+        let _subprocess_span = subprocess_span("hyphae session end", &context).entered();
         let Ok(output) = run_command(&mut cmd) else {
+            warn!("Failed to execute hyphae session end");
             return Ok(None);
         };
 
         if !output.status.success() {
+            warn!(
+                "Hyphae session end exited non-zero for session {}",
+                state.session_id
+            );
             return Ok(None);
         }
 
@@ -265,7 +286,10 @@ pub fn log_hyphae_feedback_signal_for_session(
         return;
     }
 
+    let context = span_context(state.project_root.as_deref(), "hyphae_feedback_signal");
+    let _tool_span = tool_span("hyphae_feedback_signal", &context).entered();
     let Some(mut cmd) = resolved_command("hyphae") else {
+        warn!("Hyphae binary is not discoverable; cannot log feedback signal");
         return;
     };
     cmd.args(["feedback", "signal"])
@@ -275,10 +299,14 @@ pub fn log_hyphae_feedback_signal_for_session(
         .args(["--source", source])
         .args(["--project", &state.project]);
 
-    let _ = cmd
+    let _spawn_span = subprocess_span("hyphae feedback signal", &context).entered();
+    if let Err(err) = cmd
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .spawn();
+        .spawn()
+    {
+        warn!("Failed to spawn hyphae feedback signal command: {err}");
+    }
 }
 
 pub(super) fn session_state_path(hash: &str) -> PathBuf {
@@ -368,6 +396,8 @@ fn git_branch_for_workspace<F>(project_root: &str, run_command: &mut F) -> Optio
 where
     F: FnMut(&mut Command) -> std::io::Result<Output>,
 {
+    let context = span_context(Some(project_root), "git_branch_for_workspace");
+    let _subprocess_span = subprocess_span("git rev-parse --abbrev-ref HEAD", &context).entered();
     let mut cmd = Command::new("git");
     cmd.args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(project_root);
@@ -393,6 +423,8 @@ fn start_hyphae_session<F>(
 where
     F: FnMut(&mut Command) -> std::io::Result<Output>,
 {
+    let context = span_context(Some(&identity.project_root), "hyphae_session_start");
+    let _tool_span = tool_span("hyphae_session_start", &context).entered();
     let Some(mut cmd) = resolved_command("hyphae") else {
         return Err(anyhow::anyhow!("hyphae is not discoverable"));
     };
@@ -417,8 +449,13 @@ where
         cmd.args(["--git-branch", branch]);
     }
 
+    let _subprocess_span = subprocess_span("hyphae session start", &context).entered();
     let output = run_command(&mut cmd)?;
     if !output.status.success() {
+        warn!(
+            "Hyphae session start exited non-zero for project {}",
+            identity.project
+        );
         return Err(anyhow::anyhow!("hyphae session start failed"));
     }
 
@@ -440,14 +477,19 @@ fn match_active_session<F>(
 where
     F: FnMut(&mut Command) -> std::io::Result<Output>,
 {
+    let context = span_context(Some(&identity.project_root), "hyphae_session_status");
+    let _tool_span = tool_span("hyphae_session_status", &context).entered();
     let mut cmd = resolved_command("hyphae")?;
     cmd.args(["session", "status", "--id", session_id]);
 
+    let _subprocess_span = subprocess_span("hyphae session status", &context).entered();
     let Ok(output) = run_command(&mut cmd) else {
+        debug!("Failed to execute hyphae session status for session {session_id}");
         return None;
     };
 
     if !output.status.success() {
+        debug!("Hyphae session status returned non-success for session {session_id}");
         return None;
     }
 

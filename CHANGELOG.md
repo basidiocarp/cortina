@@ -9,6 +9,21 @@ All notable changes to Cortina are documented in this file.
 - **Changelog format**: Release headings and entry structure now follow the
   shared ecosystem changelog template.
 
+## [0.2.7] - 2026-04-08
+
+### Changed
+
+- **Shared logging rollout**: Cortina now initializes logging through Spore's
+  app-aware `CORTINA_LOG` path instead of relying on generic runtime setup.
+- **Lifecycle tracing**: Hook dispatch, Hyphae session flows, Hyphae background
+  writes, and Canopy evidence bridge subprocesses now emit shared tracing spans
+  with workspace-aware context for faster failure localization.
+
+### Fixed
+
+- **Operator guidance**: Docs now distinguish Cortina's debug logging from
+  normal hook stdin/stdout behavior and stderr diagnostics.
+
 ## [0.2.6] - 2026-04-03
 
 ### Added

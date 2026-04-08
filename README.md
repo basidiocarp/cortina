@@ -165,6 +165,19 @@ cargo clippy
 cargo fmt
 ```
 
+## Logging
+
+Cortina writes diagnostic logs to stderr through Spore's shared logger so hook
+stdout stays clean.
+
+- Use `CORTINA_LOG` for repo-specific logging, for example
+  `CORTINA_LOG=cortina=debug cortina status`.
+- `RUST_LOG` still works as the broader Rust fallback, but `CORTINA_LOG` is the
+  intended operator knob for this binary.
+- Logging is separate from Cortina's normal runtime surfaces: hook payloads
+  still flow through stdin/stdout, while warnings and other operator-visible
+  diagnostics stay on stderr.
+
 ## License
 
 MIT

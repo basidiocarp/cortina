@@ -5,11 +5,23 @@ use std::thread;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use spore::logging::{SpanContext, subprocess_span, tool_span};
+use tracing::{debug, warn};
 
 use crate::events::OutcomeEvent;
 
 use super::hyphae_client::resolved_command;
 use super::state::{load_json_file, temp_state_path, update_json_file};
+
+fn span_context(project_root: Option<&str>, tool: &str) -> SpanContext {
+    let context = SpanContext::for_app("cortina").with_tool(tool);
+    match project_root {
+        Some(project_root) if !project_root.trim().is_empty() => {
+            context.with_workspace_root(project_root.to_string())
+        }
+        _ => context,
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct CanopyAgent {
@@ -63,7 +75,12 @@ pub(crate) fn attach_outcome_evidence(hash: &str, outcome: &OutcomeEvent) {
     let _ = thread::Builder::new()
         .name("cortina-evidence-bridge".to_string())
         .spawn(move || {
+            let context = span_context(Some(&project_root), "canopy_evidence_bridge");
+            let _workflow_span = tool_span("canopy_evidence_bridge", &context).entered();
             let Some(task_id) = active_task_id(&project_root, &worktree_id) else {
+                debug!(
+                    "No active Canopy task matched project_root/worktree_id for evidence attach"
+                );
                 return;
             };
 
@@ -76,6 +93,7 @@ pub(crate) fn attach_outcome_evidence(hash: &str, outcome: &OutcomeEvent) {
                 note_evidence_write_success(&hash);
             } else {
                 note_evidence_write_failure(&hash);
+                warn!("Canopy evidence write failed after retries for scope {hash}");
                 eprintln!("cortina: warn: evidence write failed after retries for scope {hash}");
             }
         });
@@ -98,9 +116,13 @@ where
 
 #[cfg_attr(test, allow(dead_code))]
 fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
+    let context = span_context(Some(project_root), "canopy_agent_list");
+    let _tool_span = tool_span("canopy_agent_list", &context).entered();
     let mut command = resolved_command("canopy")?;
+    let _subprocess_span = subprocess_span("canopy agent list", &context).entered();
     let output = command.arg("agent").arg("list").output().ok()?;
     if !output.status.success() {
+        debug!("canopy agent list returned non-success for worktree {worktree_id}");
         return None;
     }
 
@@ -108,6 +130,8 @@ fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
 }
 
 fn attempt_outcome_evidence_write(outcome: &OutcomeEvent, task_id: &str) -> bool {
+    let context = span_context(outcome.project_root.as_deref(), "canopy_evidence_add");
+    let _tool_span = tool_span("canopy_evidence_add", &context).entered();
     let Some(mut command) = resolved_command("canopy") else {
         return false;
     };
@@ -116,6 +140,7 @@ fn attempt_outcome_evidence_write(outcome: &OutcomeEvent, task_id: &str) -> bool
         command.arg(arg);
     }
 
+    let _subprocess_span = subprocess_span("canopy evidence add", &context).entered();
     command
         .stdout(Stdio::null())
         .stderr(Stdio::null())
