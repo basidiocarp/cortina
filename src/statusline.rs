@@ -299,10 +299,7 @@ fn workspace_name_for_dir(cwd: &str) -> Option<String> {
 }
 
 fn current_runtime_session_id() -> Option<String> {
-    std::env::var("CLAUDE_SESSION_ID")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    spore::claude_session_id()
 }
 
 fn mycelium_session_savings(session_id: &str) -> Result<Option<SavingsStat>> {

@@ -43,10 +43,7 @@ pub fn scope_hash(cwd: Option<&str>) -> String {
 }
 
 pub(super) fn current_runtime_session_id() -> Option<String> {
-    env::var("CLAUDE_SESSION_ID")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
+    spore::claude_session_id()
 }
 
 pub(super) fn scope_hash_with<F>(cwd: Option<&str>, mut run_command: F) -> String

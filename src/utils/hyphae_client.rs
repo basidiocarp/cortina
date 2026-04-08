@@ -21,19 +21,8 @@ impl Importance {
     }
 }
 
-fn spore_tool(name: &str) -> Option<Tool> {
-    match name {
-        "mycelium" => Some(Tool::Mycelium),
-        "hyphae" => Some(Tool::Hyphae),
-        "rhizome" => Some(Tool::Rhizome),
-        "cortina" => Some(Tool::Cortina),
-        "canopy" => Some(Tool::Canopy),
-        _ => None,
-    }
-}
-
 fn command_path(name: &str) -> Option<PathBuf> {
-    let tool = spore_tool(name)?;
+    let tool = Tool::from_binary_name(name)?;
     discover(tool).map(|info| info.binary_path)
 }
 
@@ -82,20 +71,20 @@ pub fn spawn_async_checked(cmd: &str, args: &[&str]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::spore_tool;
+    use spore::Tool;
 
     #[test]
     fn known_tools_map_to_spore_tooling() {
-        assert_eq!(spore_tool("mycelium"), Some(spore::Tool::Mycelium));
-        assert_eq!(spore_tool("hyphae"), Some(spore::Tool::Hyphae));
-        assert_eq!(spore_tool("rhizome"), Some(spore::Tool::Rhizome));
-        assert_eq!(spore_tool("cortina"), Some(spore::Tool::Cortina));
-        assert_eq!(spore_tool("canopy"), Some(spore::Tool::Canopy));
+        assert_eq!(Tool::from_binary_name("mycelium"), Some(Tool::Mycelium));
+        assert_eq!(Tool::from_binary_name("hyphae"), Some(Tool::Hyphae));
+        assert_eq!(Tool::from_binary_name("rhizome"), Some(Tool::Rhizome));
+        assert_eq!(Tool::from_binary_name("cortina"), Some(Tool::Cortina));
+        assert_eq!(Tool::from_binary_name("canopy"), Some(Tool::Canopy));
     }
 
     #[test]
     fn unknown_tools_do_not_claim_spore_support() {
-        assert_eq!(spore_tool("git"), None);
-        assert_eq!(spore_tool("python"), None);
+        assert_eq!(Tool::from_binary_name("git"), None);
+        assert_eq!(Tool::from_binary_name("python"), None);
     }
 }

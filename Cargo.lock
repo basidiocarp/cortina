@@ -834,7 +834,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 [[package]]
 name = "spore"
 version = "0.4.7"
-source = "git+https://github.com/basidiocarp/spore?tag=v0.4.7#e6d3c6db78663702efe14561fdafa6abfc536001"
+source = "git+https://github.com/basidiocarp/spore?rev=ca13188aa966ce4627d2a7f7c968a333d76a65c1#ca13188aa966ce4627d2a7f7c968a333d76a65c1"
 dependencies = [
  "anyhow",
  "chrono",
