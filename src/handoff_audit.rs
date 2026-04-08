@@ -507,7 +507,11 @@ mod tests {
         let repo_root = dir.path();
         fs::create_dir_all(repo_root.join(".handoffs/cortina")).unwrap();
         fs::create_dir_all(repo_root.join("src")).unwrap();
-        fs::write(repo_root.join("src/already_done.rs"), "pub fn already_done() {}\n").unwrap();
+        fs::write(
+            repo_root.join("src/already_done.rs"),
+            "pub fn already_done() {}\n",
+        )
+        .unwrap();
         fs::write(
             repo_root.join(".handoffs/cortina/demo.md"),
             r"# Demo
@@ -528,8 +532,14 @@ mod tests {
         assert_eq!(result.total_items, 1);
         assert_eq!(result.likely_implemented, 0);
         assert_eq!(result.evidence.len(), 1);
-        assert_eq!(result.evidence[0].checklist_item, "Tighten dispatch wording");
-        assert_eq!(result.evidence[0].confidence, AuditConfidence::HeuristicMatch);
+        assert_eq!(
+            result.evidence[0].checklist_item,
+            "Tighten dispatch wording"
+        );
+        assert_eq!(
+            result.evidence[0].confidence,
+            AuditConfidence::HeuristicMatch
+        );
     }
 
     #[test]

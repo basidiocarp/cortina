@@ -47,7 +47,8 @@ fn session_handoff_files(cwd: &Path, workspace_root: &Path) -> Vec<PathBuf> {
 
     for hash in [cwd_hash, workspace_hash] {
         for entry in recent_edit_paths(&hash) {
-            if let Some(path) = resolve_modified_handoff_path(Path::new(&entry), cwd, workspace_root)
+            if let Some(path) =
+                resolve_modified_handoff_path(Path::new(&entry), cwd, workspace_root)
             {
                 resolved.insert(path);
             }
@@ -137,7 +138,7 @@ mod tests {
 
     use tempfile::TempDir;
 
-    use crate::utils::{scope_hash, save_json_file, temp_state_path};
+    use crate::utils::{save_json_file, scope_hash, temp_state_path};
 
     use super::{handoff_pre_commit_warnings, looks_like_git_commit, validate_session_handoffs};
 
@@ -228,8 +229,7 @@ mod tests {
         )
         .unwrap();
 
-        let warnings =
-            handoff_pre_commit_warnings("git commit -m test", repo_root.to_str());
+        let warnings = handoff_pre_commit_warnings("git commit -m test", repo_root.to_str());
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("unchecked items"));
     }

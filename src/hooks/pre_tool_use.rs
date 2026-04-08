@@ -126,11 +126,7 @@ fn tool_suggestion_message_with_availability(
         envelope
             .tool_input_string("file_path")
             .and_then(|file_path| {
-                read_advisory_for_path(
-                    file_path,
-                    envelope.cwd(),
-                    policy.rhizome_suggest_threshold,
-                )
+                read_advisory_for_path(file_path, envelope.cwd(), policy.rhizome_suggest_threshold)
             })
     } else if envelope.tool_name_is("Grep") {
         envelope
