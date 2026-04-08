@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use spore::logging::{SpanContext, subprocess_span, tool_span};
 use spore::{Tool, discover};
@@ -36,6 +36,17 @@ fn span_context(tool: &str) -> SpanContext {
     }
 }
 
+fn diagnostic_stderr() -> Stdio {
+    #[cfg(test)]
+    {
+        Stdio::null()
+    }
+    #[cfg(not(test))]
+    {
+        Stdio::inherit()
+    }
+}
+
 pub(crate) fn resolved_command(name: &str) -> Option<Command> {
     let binary_path = command_path(name)?;
     Some(Command::new(binary_path))
@@ -64,7 +75,7 @@ pub fn store_in_hyphae(topic: &str, content: &str, importance: Importance, proje
     let _spawn_span = subprocess_span("hyphae store", &context).entered();
     if let Err(err) = cmd
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(diagnostic_stderr())
         .spawn()
     {
         warn!("Failed to spawn hyphae store command: {err}");
@@ -85,7 +96,7 @@ pub fn spawn_async_checked(cmd: &str, args: &[&str]) -> bool {
     let _spawn_span = subprocess_span(cmd, &context).entered();
     match command
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(diagnostic_stderr())
         .spawn()
     {
         Ok(_) => true,

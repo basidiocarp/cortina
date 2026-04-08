@@ -27,6 +27,17 @@ fn span_context(project_root: Option<&str>, tool: &str) -> SpanContext {
     }
 }
 
+fn diagnostic_stderr() -> std::process::Stdio {
+    #[cfg(test)]
+    {
+        std::process::Stdio::null()
+    }
+    #[cfg(not(test))]
+    {
+        std::process::Stdio::inherit()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionState {
     pub session_id: String,
@@ -302,7 +313,7 @@ pub fn log_hyphae_feedback_signal_for_session(
     let _spawn_span = subprocess_span("hyphae feedback signal", &context).entered();
     if let Err(err) = cmd
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stderr(diagnostic_stderr())
         .spawn()
     {
         warn!("Failed to spawn hyphae feedback signal command: {err}");

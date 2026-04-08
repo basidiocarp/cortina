@@ -9,6 +9,22 @@ All notable changes to Cortina are documented in this file.
 - **Changelog format**: Release headings and entry structure now follow the
   shared ecosystem changelog template.
 
+## [0.2.8] - 2026-04-08
+
+### Fixed
+
+- **Durable Canopy evidence attachment**: outcome evidence writes now complete
+  synchronously with bounded retries, so one-shot CLI exits no longer drop
+  Canopy evidence references on process shutdown.
+- **Broader adapter and subprocess tracing**: rewrite and evidence paths now
+  enter shared workflow, tool, and subprocess spans at the boundaries that tend
+  to fail under real hook traffic.
+- **Better child-process diagnostics**: Canopy and Hyphae helper subprocesses
+  no longer black-hole stderr in production, while test runs still stay quiet.
+- **Logging docs now match runtime reality**: the README now distinguishes
+  shared structured tracing from the remaining intentional direct `eprintln!`
+  compatibility warnings.
+
 ## [0.2.7] - 2026-04-08
 
 ### Changed

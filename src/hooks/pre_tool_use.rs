@@ -4,6 +4,8 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::Result;
+use spore::logging::{SpanContext, subprocess_span, tool_span};
+use tracing::{debug, warn};
 
 use crate::adapters::claude_code::{ClaudeCodeHookEnvelope, rewrite_response};
 use crate::hooks::pre_commit::handoff_pre_commit_warnings;
@@ -38,10 +40,14 @@ pub fn handle(input: &str) -> Result<()> {
     let envelope = match ClaudeCodeHookEnvelope::parse(input) {
         Ok(envelope) => envelope,
         Err(e) => {
+            warn!("Failed to parse pre-tool-use adapter input: {e}");
             eprintln!("cortina: failed to parse event input: {e}");
             return Ok(());
         }
     };
+
+    let context = span_context(&envelope);
+    let _tool_span = tool_span("pre_tool_use", &context).entered();
 
     if let Some(event) = envelope.command_rewrite_request() {
         if event.command.is_empty() {
@@ -76,14 +82,29 @@ pub fn handle(input: &str) -> Result<()> {
                     "mycelium not discoverable",
                 ))
             },
-            |mut command| command.args(["rewrite", &event.command]).output(),
+            |mut command| {
+                let _subprocess_span = subprocess_span("mycelium rewrite", &context).entered();
+                command.args(["rewrite", &event.command]).output()
+            },
         );
 
         let rewritten = match output {
             Ok(out) if out.status.success() => {
                 String::from_utf8_lossy(&out.stdout).trim().to_string()
             }
-            _ => return Ok(()), // mycelium rewrite failed or exited non-zero, pass through
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                if stderr.trim().is_empty() {
+                    debug!("mycelium rewrite exited non-zero; leaving command unchanged");
+                } else {
+                    warn!("mycelium rewrite exited non-zero: {}", stderr.trim());
+                }
+                return Ok(());
+            }
+            Err(error) => {
+                warn!("Failed to execute mycelium rewrite: {error}");
+                return Ok(());
+            }
         };
 
         // If no change or empty rewrite, nothing to do
@@ -106,6 +127,14 @@ pub fn handle(input: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn span_context(envelope: &ClaudeCodeHookEnvelope) -> SpanContext {
+    let context = SpanContext::for_app("cortina").with_tool("pre_tool_use");
+    match envelope.cwd() {
+        Some(cwd) => context.with_workspace_root(cwd.to_string()),
+        None => context,
+    }
 }
 
 fn tool_suggestion_message(envelope: &ClaudeCodeHookEnvelope) -> Option<String> {

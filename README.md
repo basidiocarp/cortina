@@ -175,8 +175,11 @@ stdout stays clean.
 - `RUST_LOG` still works as the broader Rust fallback, but `CORTINA_LOG` is the
   intended operator knob for this binary.
 - Logging is separate from Cortina's normal runtime surfaces: hook payloads
-  still flow through stdin/stdout, while warnings and other operator-visible
-  diagnostics stay on stderr.
+  still flow through stdin/stdout, while shared tracing spans, subprocess
+  diagnostics, and compatibility warnings stay on stderr.
+- Most runtime diagnostics now flow through the shared tracing contract, but a
+  few user-facing compatibility warnings still intentionally write straight to
+  stderr with `eprintln!` so they appear even when structured logging is off.
 
 ## License
 

@@ -1,11 +1,10 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::thread;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use spore::logging::{SpanContext, subprocess_span, tool_span};
+use spore::logging::{SpanContext, subprocess_span, tool_span, workflow_span};
 use tracing::{debug, warn};
 
 use crate::events::OutcomeEvent;
@@ -67,36 +66,25 @@ pub(crate) fn attach_outcome_evidence(hash: &str, outcome: &OutcomeEvent) {
         return;
     };
 
-    let hash = hash.to_string();
-    let outcome = outcome.clone();
-    let project_root = project_root.to_string();
-    let worktree_id = worktree_id.to_string();
+    let context = span_context(Some(project_root), "canopy_evidence_bridge");
+    let _workflow_span = workflow_span("canopy_evidence_bridge", &context).entered();
+    let Some(task_id) = active_task_id(project_root, worktree_id) else {
+        debug!("No active Canopy task matched project_root/worktree_id for evidence attach");
+        return;
+    };
 
-    let _ = thread::Builder::new()
-        .name("cortina-evidence-bridge".to_string())
-        .spawn(move || {
-            let context = span_context(Some(&project_root), "canopy_evidence_bridge");
-            let _workflow_span = tool_span("canopy_evidence_bridge", &context).entered();
-            let Some(task_id) = active_task_id(&project_root, &worktree_id) else {
-                debug!(
-                    "No active Canopy task matched project_root/worktree_id for evidence attach"
-                );
-                return;
-            };
+    let success = record_outcome_evidence_write(
+        || attempt_outcome_evidence_write(outcome, &task_id),
+        std::thread::sleep,
+    );
 
-            let success = record_outcome_evidence_write(
-                || attempt_outcome_evidence_write(&outcome, &task_id),
-                thread::sleep,
-            );
-
-            if success {
-                note_evidence_write_success(&hash);
-            } else {
-                note_evidence_write_failure(&hash);
-                warn!("Canopy evidence write failed after retries for scope {hash}");
-                eprintln!("cortina: warn: evidence write failed after retries for scope {hash}");
-            }
-        });
+    if success {
+        note_evidence_write_success(hash);
+    } else {
+        note_evidence_write_failure(hash);
+        warn!("Canopy evidence write failed after retries for scope {hash}");
+        eprintln!("cortina: warn: evidence write failed after retries for scope {hash}");
+    }
 }
 
 pub(crate) fn record_outcome_evidence_write<F, S>(mut attempt: F, mut sleep: S) -> bool
@@ -122,7 +110,15 @@ fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
     let _subprocess_span = subprocess_span("canopy agent list", &context).entered();
     let output = command.arg("agent").arg("list").output().ok()?;
     if !output.status.success() {
-        debug!("canopy agent list returned non-success for worktree {worktree_id}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.trim().is_empty() {
+            debug!("canopy agent list returned non-success for worktree {worktree_id}");
+        } else {
+            warn!(
+                "canopy agent list returned non-success for worktree {worktree_id}: {}",
+                stderr.trim()
+            );
+        }
         return None;
     }
 
@@ -141,11 +137,29 @@ fn attempt_outcome_evidence_write(outcome: &OutcomeEvent, task_id: &str) -> bool
     }
 
     let _subprocess_span = subprocess_span("canopy evidence add", &context).entered();
-    command
+    let output = match command
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
+        .stderr(Stdio::piped())
+        .output()
+    {
+        Ok(output) => output,
+        Err(err) => {
+            warn!("Failed to execute canopy evidence add: {err}");
+            return false;
+        }
+    };
+
+    if output.status.success() {
+        true
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.trim().is_empty() {
+            warn!("canopy evidence add exited non-zero");
+        } else {
+            warn!("canopy evidence add exited non-zero: {}", stderr.trim());
+        }
+        false
+    }
 }
 
 fn parse_active_task_id(payload: &[u8], project_root: &str, worktree_id: &str) -> Option<String> {
