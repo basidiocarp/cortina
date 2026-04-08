@@ -9,7 +9,9 @@ use super::session_scope::{
     SessionIdentity, clear_session_state, end_hyphae_session_with, ensure_hyphae_session_with_hash,
     session_identity_for_cwd_with, session_state_path,
 };
-use super::state::{lock_path_for, save_json_file, scope_hash_with, stable_identity_hash};
+use super::state::{
+    canonicalize_path, lock_path_for, save_json_file, scope_hash_with, stable_identity_hash,
+};
 use super::*;
 
 fn output_with_status(code: i32, stdout: &str) -> Output {
@@ -168,6 +170,10 @@ fn project_name_for_cwd_uses_explicit_path() {
 
 #[test]
 fn session_identity_for_cwd_uses_canonical_cwd_and_git_dir() {
+    let cwd = canonicalize_path("/tmp/demo/subdir");
+    let git_dir = canonicalize_path("/tmp/demo/.git/worktrees/feature-a");
+    let cwd_text = cwd.to_string_lossy().into_owned();
+    let git_dir_text = git_dir.to_string_lossy().into_owned();
     let identity = session_identity_for_cwd_with(Some("/tmp/demo/subdir"), |cmd| {
         let args: Vec<String> = cmd
             .get_args()
@@ -186,19 +192,18 @@ fn session_identity_for_cwd_uses_canonical_cwd_and_git_dir() {
     .expect("git identity");
 
     assert_eq!(identity.project, "subdir");
-    assert_eq!(identity.project_root, "/tmp/demo/subdir");
+    assert_eq!(identity.project_root, cwd_text);
     assert_eq!(
         identity.worktree_id,
-        format!(
-            "git:{}",
-            stable_identity_hash("/tmp/demo/.git/worktrees/feature-a")
-        )
+        format!("git:{}", stable_identity_hash(&git_dir_text))
     );
     assert_eq!(identity.scope, scope_hash(Some("/tmp/demo/subdir")));
 }
 
 #[test]
 fn session_identity_for_cwd_falls_back_to_canonical_path_identity() {
+    let cwd = canonicalize_path("/tmp/no-git");
+    let cwd_text = cwd.to_string_lossy().into_owned();
     let identity = session_identity_for_cwd_with(Some("/tmp/no-git"), |_cmd| {
         Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -208,10 +213,13 @@ fn session_identity_for_cwd_falls_back_to_canonical_path_identity() {
     .expect("fallback identity");
 
     assert_eq!(identity.project, "no-git");
-    assert_eq!(identity.project_root, "/tmp/no-git");
+    assert_eq!(identity.project_root, cwd_text);
     assert_eq!(
         identity.worktree_id,
-        format!("path:{}", stable_identity_hash("/tmp/no-git"))
+        format!(
+            "path:{}",
+            stable_identity_hash(identity.project_root.as_str())
+        )
     );
     assert_eq!(identity.scope, scope_hash(Some("/tmp/no-git")));
 }
@@ -852,11 +860,15 @@ fn end_hyphae_session_with_missing_state_returns_false() {
 }
 
 fn identity_hash_for_test(project_root: &str, git_dir: &str) -> String {
-    let project = std::path::Path::new(project_root)
+    let project_root = canonicalize_path(project_root);
+    let git_dir = canonicalize_path(git_dir);
+    let project_root = project_root.to_string_lossy().into_owned();
+    let git_dir = git_dir.to_string_lossy().into_owned();
+    let project = std::path::Path::new(&project_root)
         .file_name()
         .and_then(|value| value.to_str())
-        .unwrap_or(project_root);
-    let worktree_id = format!("git:{}", stable_identity_hash(git_dir));
+        .unwrap_or(project_root.as_str());
+    let worktree_id = format!("git:{}", stable_identity_hash(&git_dir));
     let key = format!("{project}\n{project_root}\n{worktree_id}");
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     std::hash::Hash::hash(&key, &mut hasher);
@@ -971,6 +983,9 @@ fn update_json_file_serializes_concurrent_mutations() {
     let path = temp_state_path("counter", "concurrent-update", "json");
     let _ = fs::remove_file(&path);
 
+    #[cfg(windows)]
+    let workers = 4;
+    #[cfg(not(windows))]
     let workers = 16;
     let barrier = Arc::new(Barrier::new(workers));
     let mut handles = Vec::new();

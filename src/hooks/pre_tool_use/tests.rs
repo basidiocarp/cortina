@@ -127,16 +127,17 @@ fn tool_suggestion_respects_rate_limit_per_scope_and_pattern_type() {
         std::env::temp_dir().join(format!("cortina-advisory-scope-{}", std::process::id()));
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).unwrap();
-    let cwd = temp_dir.to_str().unwrap();
-    let hash = scope_hash(Some(cwd));
+    let cwd = temp_dir.to_string_lossy().into_owned();
+    let hash = scope_hash(Some(&cwd));
     let path = temp_state_path(ADVISORY_STATE_NAME, &hash, "json");
-    let envelope = ClaudeCodeHookEnvelope::parse(&format!(
-        r#"{{
+    let envelope = ClaudeCodeHookEnvelope::parse(
+        &serde_json::json!({
             "tool_name": "Grep",
-            "tool_input": {{"pattern": "AuthService"}},
-            "cwd": "{cwd}"
-        }}"#
-    ))
+            "tool_input": {"pattern": "AuthService"},
+            "cwd": cwd,
+        })
+        .to_string(),
+    )
     .expect("valid envelope");
     let policy = CapturePolicy::from_reader(|name| match name {
         "CORTINA_RHIZOME_SUGGEST_EVERY" => Some("2".to_string()),
