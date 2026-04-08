@@ -1,6 +1,7 @@
 use std::env;
 use std::sync::OnceLock;
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct CapturePolicy {
     pub outcome_dedupe_window_ms: u64,
@@ -103,13 +104,12 @@ mod tests {
             "CORTINA_OUTCOME_DEDUPE_WINDOW_MS" => Some("45000".to_string()),
             "CORTINA_CORRECTION_WINDOW_MS" => Some("1234".to_string()),
             "CORTINA_EDIT_CLEANUP_AGE_MS" => Some("5678".to_string()),
-            "CORTINA_EXPORT_THRESHOLD" => Some("9".to_string()),
+            "CORTINA_EXPORT_THRESHOLD" | "CORTINA_RHIZOME_SUGGEST_EVERY" => Some("9".to_string()),
             "CORTINA_INGEST_THRESHOLD" => Some("7".to_string()),
-            "CORTINA_STALE_HANDOFF_DETECTION_ENABLED" => Some("false".to_string()),
-            "CORTINA_HANDOFF_LINT_ENABLED" => Some("false".to_string()),
+            "CORTINA_STALE_HANDOFF_DETECTION_ENABLED"
+            | "CORTINA_HANDOFF_LINT_ENABLED"
+            | "CORTINA_RHIZOME_SUGGEST_ENABLED" => Some("false".to_string()),
             "CORTINA_RHIZOME_SUGGEST_THRESHOLD" => Some("250".to_string()),
-            "CORTINA_RHIZOME_SUGGEST_EVERY" => Some("9".to_string()),
-            "CORTINA_RHIZOME_SUGGEST_ENABLED" => Some("false".to_string()),
             "CORTINA_OUTCOME_ATTRIBUTION_GRACE_MS" => Some("60000".to_string()),
             "CORTINA_MAX_OUTCOME_EVENTS" => Some("55".to_string()),
             "CORTINA_FALLBACK_SESSION_MEMORY_ON_END_FAILURE" => Some("true".to_string()),
@@ -134,12 +134,13 @@ mod tests {
     #[test]
     fn falls_back_to_defaults_for_invalid_values() {
         let policy = CapturePolicy::from_reader(|name| match name {
-            "CORTINA_OUTCOME_DEDUPE_WINDOW_MS" => Some("bad".to_string()),
+            "CORTINA_OUTCOME_DEDUPE_WINDOW_MS" | "CORTINA_RHIZOME_SUGGEST_THRESHOLD" => {
+                Some("bad".to_string())
+            }
             "CORTINA_EXPORT_THRESHOLD" => Some("nope".to_string()),
             "CORTINA_FALLBACK_SESSION_MEMORY_ON_END_FAILURE" => Some("off".to_string()),
             "CORTINA_STALE_HANDOFF_DETECTION_ENABLED" => Some("maybe".to_string()),
             "CORTINA_HANDOFF_LINT_ENABLED" => Some("unexpected".to_string()),
-            "CORTINA_RHIZOME_SUGGEST_THRESHOLD" => Some("bad".to_string()),
             "CORTINA_RHIZOME_SUGGEST_EVERY" => Some("oops".to_string()),
             _ => None,
         });

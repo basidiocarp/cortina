@@ -240,8 +240,10 @@ fn resolve_read_path(file_path: &str, cwd: Option<&str>) -> String {
         return file_path.to_string();
     }
 
-    cwd.map(|cwd| Path::new(cwd).join(path).to_string_lossy().into_owned())
-        .unwrap_or_else(|| file_path.to_string())
+    cwd.map_or_else(
+        || file_path.to_string(),
+        |cwd| Path::new(cwd).join(path).to_string_lossy().into_owned(),
+    )
 }
 
 fn symbol_like_grep_kind(pattern: &str) -> Option<&'static str> {

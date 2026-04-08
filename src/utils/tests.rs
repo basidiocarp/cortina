@@ -857,17 +857,15 @@ fn identity_hash_for_test(project_root: &str, git_dir: &str) -> String {
     let worktree_id = format!("git:{}", stable_identity_hash(git_dir));
     let key = format!("{project}\n{project_root}\n{worktree_id}");
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    use std::hash::{Hash, Hasher};
-    key.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
+    std::hash::Hash::hash(&key, &mut hasher);
+    format!("{:x}", std::hash::Hasher::finish(&hasher))
 }
 
 fn legacy_scope_hash_for_test(cwd: &str) -> String {
     let key = cwd.to_string();
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    use std::hash::{Hash, Hasher};
-    key.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
+    std::hash::Hash::hash(&key, &mut hasher);
+    format!("{:x}", std::hash::Hasher::finish(&hasher))
 }
 
 #[test]

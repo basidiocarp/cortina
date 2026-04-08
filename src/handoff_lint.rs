@@ -18,10 +18,10 @@ pub struct HandoffAudit {
 
 pub fn audit_handoff(path: &Path) -> Result<HandoffAudit> {
     let content = fs::read_to_string(path).context("failed to read handoff document")?;
-    audit_handoff_content(path, &content)
+    Ok(audit_handoff_content(path, &content))
 }
 
-pub(crate) fn audit_handoff_content(path: &Path, content: &str) -> Result<HandoffAudit> {
+pub(crate) fn audit_handoff_content(path: &Path, content: &str) -> HandoffAudit {
     let checklist_items = content
         .lines()
         .enumerate()
@@ -33,13 +33,13 @@ pub(crate) fn audit_handoff_content(path: &Path, content: &str) -> Result<Handof
         .filter(|item| !item.checked)
         .collect();
 
-    Ok(HandoffAudit {
+    HandoffAudit {
         file: path.to_path_buf(),
         total_checkboxes: checked_checkboxes + unchecked_checkboxes.len(),
         checked_checkboxes,
         unchecked_checkboxes,
         empty_paste_markers: find_empty_paste_markers(content),
-    })
+    }
 }
 
 fn parse_checklist_item(line: &str, line_number: usize) -> Option<ChecklistItem> {
@@ -125,7 +125,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = write_handoff(
             &dir,
-            r#"# Handoff
+            r"# Handoff
 
 - [x] First
 - [X] Second
@@ -133,7 +133,7 @@ mod tests {
 <!-- PASTE START -->
 ok
 <!-- PASTE END -->
-"#,
+",
         );
 
         let audit = audit_handoff(&path).unwrap();
@@ -149,12 +149,12 @@ ok
         let dir = TempDir::new().unwrap();
         let path = write_handoff(
             &dir,
-            r#"# Handoff
+            r"# Handoff
 
 - [ ] First
 - [x] Second
 - [ ] Third
-"#,
+",
         );
 
         let audit = audit_handoff(&path).unwrap();
@@ -171,7 +171,7 @@ ok
         let dir = TempDir::new().unwrap();
         let path = write_handoff(
             &dir,
-            r#"# Handoff
+            r"# Handoff
 
 **Output:**
 <!-- PASTE START -->
@@ -185,7 +185,7 @@ present
 
 **Unclosed output:**
 <!-- PASTE START -->
-"#,
+",
         );
 
         let audit = audit_handoff(&path).unwrap();

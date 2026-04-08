@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 
 use crate::utils::remove_file_with_lock;
@@ -29,9 +30,10 @@ fn read_advisory_triggers_for_large_code_files() {
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(&temp_dir).unwrap();
     let file_path = temp_dir.join("large.rs");
-    let content = (0..101)
-        .map(|i| format!("fn line_{i}() {{}}\n"))
-        .collect::<String>();
+    let content = (0..101).fold(String::new(), |mut content, i| {
+        writeln!(&mut content, "fn line_{i}() {{}}").unwrap();
+        content
+    });
     fs::write(&file_path, content).unwrap();
 
     let advisory = read_advisory_for_path(file_path.to_str().unwrap(), None, 100)
@@ -48,9 +50,10 @@ fn read_advisory_resolves_relative_paths_from_event_cwd() {
     let _ = fs::remove_dir_all(&temp_dir);
     fs::create_dir_all(temp_dir.join("src")).unwrap();
     let file_path = temp_dir.join("src/large.rs");
-    let content = (0..101)
-        .map(|i| format!("fn line_{i}() {{}}\n"))
-        .collect::<String>();
+    let content = (0..101).fold(String::new(), |mut content, i| {
+        writeln!(&mut content, "fn line_{i}() {{}}").unwrap();
+        content
+    });
     fs::write(&file_path, content).unwrap();
 
     let advisory = read_advisory_for_path("src/large.rs", temp_dir.to_str(), 100)

@@ -374,7 +374,7 @@ fn collect_recent_files(hash: &str) -> Vec<String> {
         let entries = load_json_file::<Vec<String>>(path).unwrap_or_default();
         for entry in entries.iter().rev() {
             if !files.iter().any(|existing| existing == entry) {
-                files.push(entry.to_string());
+                files.push(entry.clone());
             }
             if files.len() >= 5 {
                 return files;

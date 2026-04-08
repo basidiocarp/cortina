@@ -193,6 +193,7 @@ fn span_context_for_input(input: &str) -> SpanContext {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::span_context_for_input;
 

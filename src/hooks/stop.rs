@@ -32,6 +32,7 @@ pub struct StaleHandoffWarning {
 }
 
 #[allow(
+    clippy::too_many_lines,
     clippy::unnecessary_wraps,
     reason = "Result return type required by dispatch match in main"
 )]
@@ -340,7 +341,7 @@ fn resolve_modified_handoff_path(
     cwd: &Path,
     workspace_root: &Path,
 ) -> Option<PathBuf> {
-    if !session_file.extension().is_some_and(|ext| ext == "md") {
+    if session_file.extension().is_none_or(|ext| ext != "md") {
         return None;
     }
 

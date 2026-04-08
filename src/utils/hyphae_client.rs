@@ -57,8 +57,8 @@ pub fn command_exists(name: &str) -> bool {
 }
 
 pub fn store_in_hyphae(topic: &str, content: &str, importance: Importance, project: Option<&str>) {
-    let context = span_context("hyphae_store");
-    let _tool_span = tool_span("hyphae_store", &context).entered();
+    let span_ctx = span_context("hyphae_store");
+    let _tool_span = tool_span("hyphae_store", &span_ctx).entered();
     let Some(mut cmd) = resolved_command("hyphae") else {
         debug!("Hyphae binary is not discoverable; skipping store");
         return;
@@ -72,7 +72,7 @@ pub fn store_in_hyphae(topic: &str, content: &str, importance: Importance, proje
         cmd.args(["-P", proj]);
     }
 
-    let _spawn_span = subprocess_span("hyphae store", &context).entered();
+    let _spawn_span = subprocess_span("hyphae store", &span_ctx).entered();
     if let Err(err) = cmd
         .stdout(std::process::Stdio::null())
         .stderr(diagnostic_stderr())

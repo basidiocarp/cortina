@@ -74,7 +74,7 @@ pub fn validate_session_handoffs(handoff_files: &[PathBuf]) -> Result<Vec<String
             continue;
         }
 
-        let audit = audit_handoff(&handoff_path)?;
+        let audit = audit_handoff(handoff_path)?;
         if !audit.empty_paste_markers.is_empty() {
             warnings.push(format!(
                 "cortina: active handoff {} has empty paste markers at lines {}",
@@ -110,7 +110,7 @@ fn resolve_modified_handoff_path(
     cwd: &Path,
     workspace_root: &Path,
 ) -> Option<PathBuf> {
-    if !session_file.extension().is_some_and(|ext| ext == "md") {
+    if session_file.extension().is_none_or(|ext| ext != "md") {
         return None;
     }
 
@@ -156,14 +156,14 @@ mod tests {
         fs::create_dir_all(handoff_path.parent().unwrap()).unwrap();
         fs::write(
             &handoff_path,
-            r#"# Handoff
+            r"# Handoff
 
 - [x] done
 
 <!-- PASTE START -->
 
 <!-- PASTE END -->
-"#,
+",
         )
         .unwrap();
 
@@ -180,10 +180,10 @@ mod tests {
         fs::create_dir_all(handoff_path.parent().unwrap()).unwrap();
         fs::write(
             &handoff_path,
-            r#"# Handoff
+            r"# Handoff
 
 - [ ] still open
-"#,
+",
         )
         .unwrap();
 
@@ -209,10 +209,10 @@ mod tests {
         fs::write(workspace_root.join(".handoffs/HANDOFFS.md"), "# index\n").unwrap();
         fs::write(
             &handoff_path,
-            r#"# Handoff
+            r"# Handoff
 
 - [ ] still open
-"#,
+",
         )
         .unwrap();
 

@@ -262,18 +262,18 @@ fn check_handoff_staleness_warns_on_overlap_with_unchecked_items() {
     fs::create_dir_all(dir.path().join(".handoffs/cortina")).unwrap();
     fs::write(
         dir.path().join(".handoffs/HANDOFFS.md"),
-        r#"# Handoffs Index
+        r"# Handoffs Index
 
 | Handoff | Status | Priority | Depends On |
 |---------|--------|----------|------------|
 | [Stale Handoff Detection](cortina/stale-handoff-detection.md) | Ready | High | — |
-"#,
+",
     )
     .unwrap();
     fs::write(
         dir.path()
             .join(".handoffs/cortina/stale-handoff-detection.md"),
-        r#"# Handoff
+        r"# Handoff
 
 #### Files to modify
 
@@ -282,7 +282,7 @@ fn check_handoff_staleness_warns_on_overlap_with_unchecked_items() {
 #### Checklist
 
 - [ ] Add `check_handoff_staleness`
-"#,
+",
     )
     .unwrap();
 
@@ -312,17 +312,17 @@ fn check_handoff_staleness_ignores_overlap_from_checked_items() {
     fs::create_dir_all(dir.path().join(".handoffs/cortina")).unwrap();
     fs::write(
         dir.path().join(".handoffs/HANDOFFS.md"),
-        r#"# Handoffs Index
+        r"# Handoffs Index
 
 | Handoff | Status | Priority | Depends On |
 |---------|--------|----------|------------|
 | [Mixed Handoff](cortina/mixed.md) | Ready | High | — |
-"#,
+",
     )
     .unwrap();
     fs::write(
         dir.path().join(".handoffs/cortina/mixed.md"),
-        r#"# Handoff
+        r"# Handoff
 
 ### Step 1
 
@@ -339,7 +339,7 @@ fn check_handoff_staleness_ignores_overlap_from_checked_items() {
 **`cortina/src/main.rs`**
 
 - [ ] Tighten dispatch wording
-"#,
+",
     )
     .unwrap();
 
@@ -363,7 +363,7 @@ fn check_handoff_completion_warns_for_modified_handoffs() {
     fs::write(
         dir.path()
             .join(".handoffs/cross-project/handoff-checkbox-enforcement.md"),
-        r#"# Handoff
+        r"# Handoff
 
 - [ ] Tighten stop hook
 
@@ -371,7 +371,7 @@ fn check_handoff_completion_warns_for_modified_handoffs() {
 <!-- PASTE START -->
 
 <!-- PASTE END -->
-"#,
+",
     )
     .unwrap();
 
