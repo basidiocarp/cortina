@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   ci:
-    uses: basidiocarp/.github/.github/workflows/rust-ci.yml@ac464bb
+    uses: basidiocarp/.github/.github/workflows/rust-ci.yml@ac464bbd159bc15d40a4d496c44c1a8d77e3d50f
     with:
       workspace: false
       audit: true
