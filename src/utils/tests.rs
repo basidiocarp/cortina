@@ -422,6 +422,7 @@ fn ensure_hyphae_session_with_runner_reuses_active_cached_state() {
         let args = args.iter().map(String::as_str).collect::<Vec<_>>();
 
         match args.as_slice() {
+            ["rev-parse", "--abbrev-ref", "HEAD"] => Ok(output_with_status(1, "")),
             ["session", "status", "--id", "ses_active"] => {
                 status_calls += 1;
                 Ok(output_with_status(
@@ -687,6 +688,7 @@ fn ensure_hyphae_session_with_runner_upgrades_legacy_cached_state_after_exact_ma
             let args = args.iter().map(String::as_str).collect::<Vec<_>>();
 
             match args.as_slice() {
+                ["rev-parse", "--abbrev-ref", "HEAD"] => Ok(output_with_status(1, "")),
                 ["session", "status", "--id", "ses_exact"] => Ok(output_with_status(
                     0,
                     r#"{"session_id":"ses_exact","project":"demo-project","project_root":"/tmp/demo-project","worktree_id":"git:ensure-upgrade-legacy-cache","status":"active","active":true}"#,

@@ -25,7 +25,16 @@ impl Importance {
 
 fn command_path(name: &str) -> Option<PathBuf> {
     let tool = Tool::from_binary_name(name)?;
-    discover(tool).map(|info| info.binary_path)
+    discover(tool).map(|info| info.binary_path).or({
+        #[cfg(test)]
+        {
+            Some(PathBuf::from(name))
+        }
+        #[cfg(not(test))]
+        {
+            None
+        }
+    })
 }
 
 fn span_context(tool: &str) -> SpanContext {
