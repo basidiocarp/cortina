@@ -553,6 +553,7 @@ fn replace_file_atomic(temp_path: &Path, path: &Path) -> Result<()> {
 }
 
 #[cfg(windows)]
+#[allow(unsafe_code)]
 fn replace_file_atomic(temp_path: &Path, path: &Path) -> Result<()> {
     let mut from: Vec<u16> = temp_path.as_os_str().encode_wide().collect();
     from.push(0);
