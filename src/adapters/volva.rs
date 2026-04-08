@@ -165,7 +165,18 @@ mod tests {
 
     #[test]
     fn fixture_payload_matches_consumer_contract() {
-        let input = include_str!("../../../septa/fixtures/volva-hook-event-v1.example.json");
+        let input = r#"{
+  "schema_version": "1.0",
+  "phase": "before_prompt_send",
+  "backend_kind": "official-cli",
+  "cwd": "/tmp/volva-example",
+  "prompt_text": "[volva-host-context]\nbackend: official-cli\ncwd: /tmp/volva-example\n\n[user-prompt]\nsummarize this repository",
+  "prompt_summary": "summarize this repository",
+  "stdout": null,
+  "stderr": null,
+  "exit_code": null,
+  "error": null
+}"#;
 
         handle_hook_event(input).expect("fixture payload should be accepted");
     }
