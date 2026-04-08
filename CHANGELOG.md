@@ -9,6 +9,23 @@ All notable changes to Cortina are documented in this file.
 - **Changelog format**: Release headings and entry structure now follow the
   shared ecosystem changelog template.
 
+## [0.2.9] - 2026-04-08
+
+### Changed
+
+- **Foundation alignment**: maintainer docs and boundary notes now describe
+  Cortina's adapter-first ownership and evidence bridge more explicitly.
+- **Test surface split**: Pre-tool-use regression coverage now lives in a
+  focused test module instead of growing the hook implementation file further.
+
+### Fixed
+
+- **Evidence durability**: one-shot process exits no longer drop bounded
+  Canopy evidence writes at shutdown.
+- **Tracing and diagnostics**: adapter rewrites and helper subprocesses now
+  preserve the shared tracing context and stderr at the failure points that
+  operators actually need.
+
 ## [0.2.8] - 2026-04-08
 
 ### Fixed
