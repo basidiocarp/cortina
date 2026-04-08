@@ -12,8 +12,19 @@ use crate::events::OutcomeEvent;
 use super::hyphae_client::resolved_command;
 use super::state::{load_json_file, temp_state_path, update_json_file};
 
-fn span_context(project_root: Option<&str>, tool: &str) -> SpanContext {
-    let context = SpanContext::for_app("cortina").with_tool(tool);
+fn span_context(
+    project_root: Option<&str>,
+    session_id: Option<&str>,
+    request_id: Option<&str>,
+    tool: &str,
+) -> SpanContext {
+    let mut context = SpanContext::for_app("cortina").with_tool(tool);
+    if let Some(session_id) = session_id {
+        context = context.with_session_id(session_id.to_string());
+    }
+    if let Some(request_id) = request_id {
+        context = context.with_request_id(request_id.to_string());
+    }
     match project_root {
         Some(project_root) if !project_root.trim().is_empty() => {
             context.with_workspace_root(project_root.to_string())
@@ -66,7 +77,12 @@ pub(crate) fn attach_outcome_evidence(hash: &str, outcome: &OutcomeEvent) {
         return;
     };
 
-    let context = span_context(Some(project_root), "canopy_evidence_bridge");
+    let context = span_context(
+        Some(project_root),
+        outcome.session_id.as_deref(),
+        Some(hash),
+        "canopy_evidence_bridge",
+    );
     let _workflow_span = workflow_span("canopy_evidence_bridge", &context).entered();
     let Some(task_id) = active_task_id(project_root, worktree_id) else {
         debug!("No active Canopy task matched project_root/worktree_id for evidence attach");
@@ -92,6 +108,8 @@ where
     F: FnMut() -> bool,
     S: FnMut(Duration),
 {
+    // Keep retries on the calling thread so the CLI waits for the bridge to
+    // finish instead of depending on detached work that can be cut off on exit.
     for delay in retry_delays() {
         if attempt() {
             return true;
@@ -104,7 +122,12 @@ where
 
 #[cfg_attr(test, allow(dead_code))]
 fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
-    let context = span_context(Some(project_root), "canopy_agent_list");
+    let context = span_context(
+        Some(project_root),
+        None,
+        Some(worktree_id),
+        "canopy_agent_list",
+    );
     let _tool_span = tool_span("canopy_agent_list", &context).entered();
     let mut command = resolved_command("canopy")?;
     let _subprocess_span = subprocess_span("canopy agent list", &context).entered();
@@ -118,6 +141,7 @@ fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
                 "canopy agent list returned non-success for worktree {worktree_id}: {}",
                 stderr.trim()
             );
+            eprint!("{stderr}");
         }
         return None;
     }
@@ -126,7 +150,12 @@ fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
 }
 
 fn attempt_outcome_evidence_write(outcome: &OutcomeEvent, task_id: &str) -> bool {
-    let context = span_context(outcome.project_root.as_deref(), "canopy_evidence_add");
+    let context = span_context(
+        outcome.project_root.as_deref(),
+        outcome.session_id.as_deref(),
+        Some(task_id),
+        "canopy_evidence_add",
+    );
     let _tool_span = tool_span("canopy_evidence_add", &context).entered();
     let Some(mut command) = resolved_command("canopy") else {
         return false;
@@ -145,6 +174,7 @@ fn attempt_outcome_evidence_write(outcome: &OutcomeEvent, task_id: &str) -> bool
         Ok(output) => output,
         Err(err) => {
             warn!("Failed to execute canopy evidence add: {err}");
+            eprintln!("cortina: failed to execute canopy evidence add: {err}");
             return false;
         }
     };
@@ -157,6 +187,7 @@ fn attempt_outcome_evidence_write(outcome: &OutcomeEvent, task_id: &str) -> bool
             warn!("canopy evidence add exited non-zero");
         } else {
             warn!("canopy evidence add exited non-zero: {}", stderr.trim());
+            eprint!("{stderr}");
         }
         false
     }
@@ -353,5 +384,19 @@ mod tests {
         let stats = evidence_bridge_stats(&hash);
         assert_eq!(stats.evidence_refs_written, 0);
         assert_eq!(stats.evidence_write_failures, 1);
+    }
+
+    #[test]
+    fn span_context_includes_session_and_request_fields() {
+        let context = super::span_context(
+            Some("/repo/demo"),
+            Some("ses-123"),
+            Some("request-456"),
+            "canopy_evidence_bridge",
+        );
+
+        assert_eq!(context.session_id.as_deref(), Some("ses-123"));
+        assert_eq!(context.request_id.as_deref(), Some("request-456"));
+        assert_eq!(context.workspace_root.as_deref(), Some("/repo/demo"));
     }
 }

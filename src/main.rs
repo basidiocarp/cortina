@@ -165,8 +165,9 @@ fn span_context_for_cwd(cwd: Option<std::path::PathBuf>) -> SpanContext {
 }
 
 fn span_context_for_input(input: &str) -> SpanContext {
-    let cwd = serde_json::from_str::<serde_json::Value>(input)
-        .ok()
+    let value = serde_json::from_str::<serde_json::Value>(input).ok();
+    let cwd = value
+        .as_ref()
         .and_then(|value| {
             value
                 .get("cwd")
@@ -180,7 +181,33 @@ fn span_context_for_input(input: &str) -> SpanContext {
                 .map(std::path::PathBuf::from)
         })
         .or_else(|| std::env::current_dir().ok());
-    span_context_for_cwd(cwd)
+    let context = span_context_for_cwd(cwd);
+    match value
+        .as_ref()
+        .and_then(|value| value.get("session_id"))
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(session_id) => context.with_session_id(session_id.to_string()),
+        None => context,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::span_context_for_input;
+
+    #[test]
+    fn span_context_for_input_includes_session_and_workspace_context() {
+        let context = span_context_for_input(
+            r#"{
+                "session_id": "ses-123",
+                "cwd": "/tmp/demo"
+            }"#,
+        );
+
+        assert_eq!(context.session_id.as_deref(), Some("ses-123"));
+        assert_eq!(context.workspace_root.as_deref(), Some("/tmp/demo"));
+    }
 }
 
 fn adapter_operation_name(adapter: &adapters::AdapterCommand) -> &'static str {

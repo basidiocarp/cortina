@@ -22,8 +22,8 @@ thin session summaries.
 
 Cortina adds an adapter-first lifecycle capture layer. It reads host hook
 envelopes from stdin, normalizes them into internal signal types, detects the
-outcomes worth keeping, and writes those outcomes into the rest of the
-ecosystem.
+outcomes worth keeping, and forwards only the narrow downstream writes that
+belong in the ecosystem.
 
 ---
 
@@ -41,9 +41,10 @@ ecosystem.
 | **[stipe](https://github.com/basidiocarp/stipe)** | Ecosystem installer and manager |
 | **[volva](https://github.com/basidiocarp/volva)** | Execution-host runtime layer |
 
-> **Boundary:** `cortina` owns host lifecycle capture and signal classification.
-> `hyphae` owns memory persistence, `rhizome` owns code graph export,
-> `stipe` owns setup, and `volva` owns execution-host orchestration.
+> **Boundary:** `cortina` owns host lifecycle capture and signal
+> classification. Host-specific quirks stay in adapters. `hyphae` owns memory
+> persistence, `rhizome` owns code graph export, `stipe` owns setup, and
+> `volva` owns execution-host orchestration.
 
 ---
 
@@ -177,6 +178,9 @@ stdout stays clean.
 - Logging is separate from Cortina's normal runtime surfaces: hook payloads
   still flow through stdin/stdout, while shared tracing spans, subprocess
   diagnostics, and compatibility warnings stay on stderr.
+- The runtime is intentionally fail-open. If a downstream bridge or adapter
+  helper fails, Cortina warns, leaves the hook output intact, and keeps the
+  host session moving.
 - Most runtime diagnostics now flow through the shared tracing contract, but a
   few user-facing compatibility warnings still intentionally write straight to
   stderr with `eprintln!` so they appear even when structured logging is off.

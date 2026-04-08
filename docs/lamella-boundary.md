@@ -2,7 +2,7 @@
 
 ## Overview
 
-Cortina should own host lifecycle event handling, signal detection, temp state, and ecosystem side effects such as Hyphae writes and Rhizome exports. Lamella should own plugin packaging, hook templates, skills, docs, and user-facing workflow guidance.
+Cortina should own host lifecycle event handling, signal detection, temp state, and ecosystem side effects such as Hyphae writes and Rhizome exports. Lamella should own plugin packaging, hook templates, skills, docs, and user-facing workflow guidance. Host-specific parsing belongs in Cortina adapters, not in the shared lifecycle handlers.
 
 This page classifies the current Lamella scripts into three buckets:
 
@@ -25,6 +25,8 @@ Keep a hook in Lamella when it is primarily:
 - local authoring guidance or reminders
 - project-specific continuous-learning behavior
 - formatting, linting, or interactive workflow assistance
+
+Fail-open behavior is intentional across the boundary: if a downstream bridge fails, Cortina should warn and continue instead of turning hook execution into a hard stop.
 
 ## Move Now
 

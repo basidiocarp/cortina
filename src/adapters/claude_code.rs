@@ -101,12 +101,12 @@ impl ClaudeCodeHookEnvelope {
         self.tool_name() == Some(name)
     }
 
-    fn tool_name(&self) -> Option<&str> {
-        self.raw.get("tool_name").and_then(Value::as_str)
+    pub(crate) fn session_id(&self) -> Option<&str> {
+        self.raw.get("session_id").and_then(Value::as_str)
     }
 
-    fn session_id(&self) -> Option<&str> {
-        self.raw.get("session_id").and_then(Value::as_str)
+    fn tool_name(&self) -> Option<&str> {
+        self.raw.get("tool_name").and_then(Value::as_str)
     }
 
     pub(crate) fn tool_input_string(&self, key: &str) -> Option<&str> {
@@ -328,5 +328,18 @@ mod tests {
             event.transcript_path.as_deref(),
             Some("/tmp/transcript.jsonl")
         );
+    }
+
+    #[test]
+    fn exposes_session_id_helper() {
+        let envelope = ClaudeCodeHookEnvelope::parse(
+            r#"{
+                "session_id": "abc123",
+                "tool_name": "Bash"
+            }"#,
+        )
+        .expect("valid envelope");
+
+        assert_eq!(envelope.session_id(), Some("abc123"));
     }
 }

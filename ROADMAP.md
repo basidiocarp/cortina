@@ -4,7 +4,7 @@ This page is the Cortina-specific backlog. The workspace [ROADMAP.md](../docs/RO
 
 ## Recently Shipped
 
-- Cortina now has an adapter-first event model instead of a Claude-shaped core. Claude-specific envelopes live behind an adapter boundary, which keeps the runtime flexible as more hosts appear.
+- Cortina now has an adapter-first event model instead of a Claude-shaped core. Claude-specific envelopes live behind an adapter boundary, which keeps host parsing at the edge and the runtime flexible as more hosts appear.
 - The CLI surface follows the same boundary. Operators can inspect lifecycle policy, state, and health through Cortina itself instead of piecing behavior together from hooks and local files.
 - Hyphae session bridging is in place. Cortina can now start, reuse, and end scoped sessions while emitting best-effort feedback signals and structured outcome attribution.
 - Lifecycle persistence is much harder to knock over. Session state, outcome tracking, edit tracking, and export or ingest queues now use locked, atomic updates with extracted regression coverage.
@@ -14,7 +14,7 @@ This page is the Cortina-specific backlog. The workspace [ROADMAP.md](../docs/RO
 
 ### Lamella boundary cleanup
 
-Cortina needs to finish absorbing lifecycle and capture-hook ownership from Lamella. Lamella should package workflows and templates; Cortina should own the runtime behavior that captures, normalizes, and forwards session events. See [docs/lamella-boundary.md](docs/lamella-boundary.md) for the current split.
+Cortina needs to finish absorbing lifecycle and capture-hook ownership from Lamella. Lamella should package workflows and templates; Cortina should own the runtime behavior that captures, normalizes, and forwards session events. The forward path should stay narrow, and host-specific parsing should remain in the adapters. See [docs/lamella-boundary.md](docs/lamella-boundary.md) for the current split.
 
 ### Session and outcome policy refinement
 
