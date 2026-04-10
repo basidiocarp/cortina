@@ -4,6 +4,30 @@ All notable changes to Cortina are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-04-10
+
+### Added
+
+- **Normalized lifecycle vocabulary**: Cortina now defines a shared
+  host-agnostic lifecycle event model for host, tool, compaction, and council
+  capture.
+- **Lifecycle boundary docs**: the repo now documents the normalized
+  vocabulary and fail-open rules in a dedicated maintainer reference.
+
+### Changed
+
+- **Compaction and council capture**: pre-compact and council-style prompt
+  flows now emit normalized lifecycle envelopes alongside their stored
+  snapshots.
+- **Volva adapter degradation policy**: Volva hook parsing and recording now
+  preserve Cortina's fail-open lifecycle invariant.
+
+### Fixed
+
+- **Shared contract coverage**: Septa now has an explicit
+  `cortina-lifecycle-event-v1` schema and fixture instead of forcing downstream
+  consumers to reverse-engineer host-specific envelopes.
+
 ## [0.2.11] - 2026-04-09
 
 ### Changed

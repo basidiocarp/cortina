@@ -8,6 +8,8 @@ Start with:
 
 - [lamella-boundary.md](lamella-boundary.md): ownership split between Lamella
   packaging and Cortina runtime behavior
+- [normalized-lifecycle-vocabulary.md](normalized-lifecycle-vocabulary.md):
+  shared lifecycle categories, statuses, and fail-open boundary rules
 - [plans/README.md](plans/README.md): active planning entrypoint
 
 Then use the root docs for the broader repo view:

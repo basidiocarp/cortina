@@ -1,6 +1,10 @@
 use std::env;
 use std::sync::OnceLock;
 
+/// Cortina lifecycle capture must stay fail-open across hosts so hook delivery
+/// never blocks user sessions when normalization or downstream writes fail.
+pub const FAIL_OPEN_LIFECYCLE_CAPTURE: bool = true;
+
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct CapturePolicy {
@@ -17,6 +21,7 @@ pub struct CapturePolicy {
     pub outcome_attribution_grace_ms: u64,
     pub max_outcome_events: usize,
     pub fallback_session_memory_on_end_failure: bool,
+    pub fail_open_lifecycle_capture: bool,
 }
 
 pub fn capture_policy() -> &'static CapturePolicy {
@@ -68,6 +73,7 @@ impl CapturePolicy {
                 "CORTINA_FALLBACK_SESSION_MEMORY_ON_END_FAILURE",
                 false,
             ),
+            fail_open_lifecycle_capture: FAIL_OPEN_LIFECYCLE_CAPTURE,
         }
     }
 }
@@ -129,6 +135,7 @@ mod tests {
         assert_eq!(policy.outcome_attribution_grace_ms, 60_000);
         assert_eq!(policy.max_outcome_events, 55);
         assert!(policy.fallback_session_memory_on_end_failure);
+        assert!(policy.fail_open_lifecycle_capture);
     }
 
     #[test]
@@ -153,5 +160,6 @@ mod tests {
         assert_eq!(policy.rhizome_suggest_every, 5);
         assert!(policy.rhizome_suggest_enabled);
         assert!(!policy.fallback_session_memory_on_end_failure);
+        assert!(policy.fail_open_lifecycle_capture);
     }
 }

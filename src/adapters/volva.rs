@@ -1,6 +1,8 @@
 use anyhow::{Context, Result, ensure};
+use tracing::warn;
 
-use crate::events::VolvaHookEvent;
+use crate::events::{NormalizedLifecycleEvent, VolvaHookEvent};
+use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 #[cfg(test)]
 use crate::utils::{load_json_file, remove_file_with_lock};
 use crate::utils::{scope_hash, temp_state_path, update_json_file};
@@ -9,8 +11,27 @@ const MAX_RECORDED_VOLVA_HOOK_EVENTS: usize = 32;
 const VOLVA_HOOK_EVENT_SCHEMA_VERSION: &str = "1.0";
 
 pub fn handle_hook_event(input: &str) -> Result<()> {
-    let event = parse_hook_event(input)?;
-    record_hook_event(&event)
+    let event = match parse_hook_event(input) {
+        Ok(event) => event,
+        Err(error) => {
+            if FAIL_OPEN_LIFECYCLE_CAPTURE {
+                warn!("cortina: failed-open on volva hook event parse: {error}");
+                return Ok(());
+            }
+            return Err(error);
+        }
+    };
+
+    if let Err(error) = record_hook_event(&event) {
+        if FAIL_OPEN_LIFECYCLE_CAPTURE {
+            warn!("cortina: failed-open on volva hook event capture: {error}");
+            return Ok(());
+        }
+        return Err(error);
+    }
+
+    let _normalized = NormalizedLifecycleEvent::from_volva_hook(&event);
+    Ok(())
 }
 
 fn parse_hook_event(input: &str) -> Result<VolvaHookEvent> {
@@ -110,15 +131,7 @@ mod tests {
 
     #[test]
     fn rejects_malformed_json() {
-        let error =
-            handle_hook_event("{not-json").expect_err("malformed json should return an error");
-
-        assert!(
-            error
-                .to_string()
-                .contains("failed to parse volva hook event JSON"),
-            "unexpected error: {error}"
-        );
+        handle_hook_event("{not-json").expect("malformed json should fail open");
     }
 
     #[test]
@@ -133,13 +146,7 @@ mod tests {
         })
         .to_string();
 
-        let error = handle_hook_event(&input).expect_err("unknown phase should be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("failed to parse volva hook event JSON"),
-            "unexpected error: {error}"
-        );
+        handle_hook_event(&input).expect("unknown phase should fail open");
     }
 
     #[test]
@@ -154,13 +161,7 @@ mod tests {
         })
         .to_string();
 
-        let error = handle_hook_event(&input).expect_err("unsupported schema version should fail");
-        assert!(
-            error
-                .to_string()
-                .contains("unsupported volva hook event schema_version"),
-            "unexpected error: {error}"
-        );
+        handle_hook_event(&input).expect("unsupported schema version should fail open");
     }
 
     #[test]

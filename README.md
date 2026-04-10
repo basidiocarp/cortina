@@ -100,6 +100,8 @@ change thresholds met   ─►   trigger logic            ─►     Rhizome exp
 | Code changes | 5 or more edits plus successful build | Triggers Rhizome export |
 | Doc changes | 3 or more doc edits | Triggers Hyphae ingest |
 | Session end | SessionEnd or Stop event | `hyphae session end` with fallback summary |
+| Compaction lifecycle | `PreCompact` event | `session/compaction-snapshot` plus normalized lifecycle envelope |
+| Council lifecycle | council-style prompt submission | `session/council-lifecycle` |
 
 ---
 
@@ -157,6 +159,7 @@ cortina statusline
 
 - [docs/README.md](docs/README.md): repo-local docs index
 - [docs/lamella-boundary.md](docs/lamella-boundary.md): ownership split between Lamella packaging and Cortina runtime behavior
+- [docs/normalized-lifecycle-vocabulary.md](docs/normalized-lifecycle-vocabulary.md): normalized lifecycle categories, transferable fields, and fail-open rules
 
 ## Development
 

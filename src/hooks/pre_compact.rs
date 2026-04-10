@@ -3,6 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
+use crate::events::NormalizedLifecycleEvent;
+use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 use crate::utils::{
     Importance, command_exists, ensure_scoped_hyphae_session, load_json_file, project_name_for_cwd,
     scope_hash, store_in_hyphae, temp_state_path, update_json_file,
@@ -31,6 +33,7 @@ pub fn handle(input: &str) -> anyhow::Result<()> {
         Ok(envelope) => envelope,
         Err(e) => {
             eprintln!("cortina: failed to parse event input: {e}");
+            debug_assert!(FAIL_OPEN_LIFECYCLE_CAPTURE);
             return Ok(());
         }
     };
@@ -79,6 +82,7 @@ fn compaction_snapshot_content(
 
     json!({
         "type": "compaction_snapshot",
+        "normalized_lifecycle_event": NormalizedLifecycleEvent::from_pre_compact(event),
         "session_id": event.session_id,
         "cwd": event.cwd,
         "trigger": event.trigger,
@@ -153,8 +157,17 @@ mod tests {
             &active_errors,
             &["src/main.rs".to_string(), "README.md".to_string()],
         );
+        let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid json");
 
         assert!(content.contains(r#""type":"compaction_snapshot""#));
+        assert_eq!(
+            parsed["normalized_lifecycle_event"]["category"].as_str(),
+            Some("compaction")
+        );
+        assert_eq!(
+            parsed["normalized_lifecycle_event"]["event_name"].as_str(),
+            Some("pre_compact")
+        );
         assert!(content.contains(
             r#""summary_request":"Please summarize the current work before compaction.""#
         ));
