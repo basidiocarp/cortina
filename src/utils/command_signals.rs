@@ -1,6 +1,3 @@
-use regex::Regex;
-use std::sync::OnceLock;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionOutcome {
     Success,
@@ -25,7 +22,15 @@ pub fn has_error(output: &str, exit_code: Option<i32>) -> bool {
         return true;
     }
 
-    error_patterns().iter().any(|re| re.is_match(output))
+    let output = output.to_ascii_lowercase();
+    contains_word_followed_by(&output, "error", |ch| matches!(ch, ' ' | ':' | '[' | ']'))
+        || contains_word(&output, "failed")
+        || contains_word(&output, "failure")
+        || contains_word(&output, "panicked")
+        || contains_word_followed_by(&output, "fatal", |ch| ch.is_whitespace() || ch == ':')
+        || contains_phrase(&output, "command not found")
+        || contains_phrase(&output, "segmentation fault")
+        || contains_word(&output, "aborted")
 }
 
 pub fn is_document_file(path: &str) -> bool {
@@ -39,15 +44,24 @@ pub fn is_document_file(path: &str) -> bool {
 }
 
 pub fn is_build_command(cmd: &str) -> bool {
-    build_patterns().iter().any(|re| re.is_match(cmd))
+    let cmd = cmd.to_ascii_lowercase();
+    BUILD_PATTERNS
+        .iter()
+        .any(|pattern| contains_phrase(&cmd, pattern))
 }
 
 pub fn is_test_command(cmd: &str) -> bool {
-    test_patterns().iter().any(|re| re.is_match(cmd))
+    let cmd = cmd.to_ascii_lowercase();
+    TEST_PATTERNS
+        .iter()
+        .any(|pattern| contains_phrase(&cmd, pattern))
 }
 
 pub fn is_significant_command(cmd: &str) -> bool {
-    significant_patterns().iter().any(|re| re.is_match(cmd))
+    let cmd = cmd.to_ascii_lowercase();
+    SIGNIFICANT_PATTERNS
+        .iter()
+        .any(|pattern| contains_phrase(&cmd, pattern))
 }
 
 pub fn successful_validation_feedback(
@@ -95,108 +109,115 @@ pub fn session_outcome_feedback(
     }
 }
 
-fn error_patterns() -> &'static [Regex] {
-    static ERROR_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+const BUILD_PATTERNS: &[&str] = &[
+    "cargo build",
+    "cargo check",
+    "npm run build",
+    "yarn build",
+    "pnpm build",
+    "bun build",
+    "tsc",
+    "next build",
+    "make",
+    "go build",
+    "gradlew build",
+    "mvn clean package",
+];
 
-    ERROR_PATTERNS.get_or_init(|| {
-        [
-            r"\berror[\s:[\]]",
-            r"\bFAILED\b",
-            r"\bpanicked\b",
-            r"\bfailed\b",
-            r"\bfatal[\s:]",
-            r"\bcommand not found\b",
-            r"\bsegmentation fault\b",
-            r"\baborted\b",
-        ]
-        .iter()
-        .filter_map(|p| Regex::new(p).ok())
-        .collect()
-    })
+const TEST_PATTERNS: &[&str] = &[
+    "cargo test",
+    "npm test",
+    "npm run test",
+    "yarn test",
+    "yarn run test",
+    "pnpm test",
+    "pnpm run test",
+    "bun test",
+    "pytest",
+    "go test",
+    "vitest",
+    "jest",
+    "playwright test",
+    "gradlew test",
+    "mvn test",
+    "make test",
+];
+
+const SIGNIFICANT_PATTERNS: &[&str] = &[
+    "cargo",
+    "npm",
+    "yarn",
+    "pnpm",
+    "bun",
+    "git push",
+    "docker",
+    "pytest",
+    "make",
+    "go build",
+    "go test",
+    "go run",
+    "go vet",
+    "rustc",
+    "gcc",
+    "g++",
+    "javac",
+    "mvn",
+    "gradle",
+    "vitest",
+    "jest",
+    "playwright",
+    "tsc",
+    "python",
+    "ruby",
+    "swift",
+];
+
+fn contains_phrase(text: &str, phrase: &str) -> bool {
+    contains_phrase_with(text, phrase, |_| true)
 }
 
-fn build_patterns() -> &'static [Regex] {
-    static BUILD_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
-
-    BUILD_PATTERNS.get_or_init(|| {
-        [
-            r"\bcargo\s+(build|check)\b",
-            r"\bnpm\s+run\s+build\b",
-            r"\byarn\s+build\b",
-            r"\bpnpm\s+build\b",
-            r"\bbun\s+build\b",
-            r"\btsc\b",
-            r"\bnext\s+build\b",
-            r"\bmake\b",
-            r"\bgo\s+build\b",
-            r"\bgradlew\s+build\b",
-            r"\bmvn\s+clean\s+package\b",
-        ]
-        .iter()
-        .filter_map(|p| Regex::new(p).ok())
-        .collect()
-    })
+fn contains_word(text: &str, word: &str) -> bool {
+    contains_phrase_with(text, word, |_| true)
 }
 
-fn test_patterns() -> &'static [Regex] {
-    static TEST_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
-
-    TEST_PATTERNS.get_or_init(|| {
-        [
-            r"\bcargo\s+test\b",
-            r"\bnpm\s+test\b",
-            r"\bnpm\s+run\s+test\b",
-            r"\byarn\s+test\b",
-            r"\byarn\s+run\s+test\b",
-            r"\bpnpm\s+test\b",
-            r"\bpnpm\s+run\s+test\b",
-            r"\bbun\s+test\b",
-            r"\bpytest\b",
-            r"\bgo\s+test\b",
-            r"\bvitest\b",
-            r"\bjest\b",
-            r"\bplaywright\s+test\b",
-            r"\bgradlew\s+test\b",
-            r"\bmvn\s+test\b",
-            r"\bmake\s+test\b",
-        ]
-        .iter()
-        .filter_map(|p| Regex::new(p).ok())
-        .collect()
-    })
+fn contains_word_followed_by(text: &str, word: &str, allow_next: fn(char) -> bool) -> bool {
+    contains_phrase_with(text, word, allow_next)
 }
 
-fn significant_patterns() -> &'static [Regex] {
-    static SIG_PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+fn contains_phrase_with(text: &str, phrase: &str, allow_next: fn(char) -> bool) -> bool {
+    let mut start = 0;
+    while let Some(offset) = text[start..].find(phrase) {
+        let index = start + offset;
+        let end = index + phrase.len();
 
-    SIG_PATTERNS.get_or_init(|| {
-        [
-            r"\bcargo\b",
-            r"\bnpm\b",
-            r"\byarn\b",
-            r"\bpnpm\b",
-            r"\bbun\b",
-            r"\bgit\s+push\b",
-            r"\bdocker\b",
-            r"\bpytest\b",
-            r"\bmake\b",
-            r"\bgo\s+(build|test|run|vet)\b",
-            r"\brustc\b",
-            r"\bgcc\b",
-            r"\bg\+\+\b",
-            r"\bjavac\b",
-            r"\bmvn\b",
-            r"\bgradle\b",
-            r"\bvitest\b",
-            r"\bjest\b",
-            r"\bplaywright\b",
-            r"\btsc\b",
-            r"\bpython\b",
-            r"\bruby\b",
-            r"\bswift\b",
-        ]
-        .iter()
-        .filter_map(|p| Regex::new(p).ok())
-        .collect()
-    })
+        let left_ok = if index == 0 {
+            true
+        } else {
+            text[..index]
+                .chars()
+                .next_back()
+                .is_none_or(|ch| !is_word_char(ch))
+        };
+
+        let right_ok = if end == text.len() {
+            true
+        } else {
+            text[end..]
+                .chars()
+                .next()
+                .is_some_and(|ch| allow_next(ch) && !is_word_char(ch))
+        };
+
+        if left_ok && right_ok {
+            return true;
+        }
+
+        start = end;
+    }
+
+    false
+}
+
+fn is_word_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
 }

@@ -155,16 +155,27 @@ cortina statusline
 
 ## Documentation
 
+- [docs/README.md](docs/README.md): repo-local docs index
 - [docs/lamella-boundary.md](docs/lamella-boundary.md): ownership split between Lamella packaging and Cortina runtime behavior
 
 ## Development
 
 ```bash
 cargo build --release
+cargo nextest run
 cargo test
 cargo clippy
 cargo fmt
 ```
+
+- Prefer `cargo nextest run` for the normal test loop.
+- Keep `criterion` out of scope here until a concrete hot path is named.
+- Use whole-command timing when runtime capture behavior feels slow, for
+  example `time cargo run -- status`.
+- Cortina links SQLite from the system on non-Windows targets and keeps the
+  bundled SQLite fallback only on Windows.
+- Command classification stays regex-free so the hook binary keeps a smaller
+  dependency surface.
 
 ## Logging
 

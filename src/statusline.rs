@@ -437,8 +437,8 @@ mod tests {
     #[test]
     fn workspace_name_for_dir_uses_path_basename() {
         assert_eq!(
-            workspace_name_for_dir("/Users/williamnewton/projects/claude-mycelium"),
-            Some("claude-mycelium".to_string())
+            workspace_name_for_dir("/workspace/basidiocarp"),
+            Some("basidiocarp".to_string())
         );
         assert_eq!(workspace_name_for_dir("/"), None);
     }
@@ -556,7 +556,7 @@ mod tests {
                 cost: Some(1.23),
                 model_name: "sonnet 4.6".to_string(),
                 branch: Some("main".to_string()),
-                workspace_name: Some("claude-mycelium".to_string()),
+                workspace_name: Some("basidiocarp".to_string()),
                 savings: Some(SavingsStat {
                     saved_tokens: 8_200,
                     input_tokens: 10_000,
@@ -567,7 +567,7 @@ mod tests {
 
         assert_eq!(
             line,
-            "ctx: ▲ 42% │ in: 45.0K • out: 12.0K • cache: 89.0K │ $1.23\nsonnet 4.6 │ ↓8.2K saved │ git: main │ ws: claude-mycelium"
+            "ctx: ▲ 42% │ in: 45.0K • out: 12.0K • cache: 89.0K │ $1.23\nsonnet 4.6 │ ↓8.2K saved │ git: main │ ws: basidiocarp"
         );
     }
 

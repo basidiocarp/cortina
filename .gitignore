@@ -20,7 +20,6 @@ target/
 # Project tooling
 .claude/
 .serena/
-.plans/
 CLAUDE.md
 INSTALL.md
 .rhizome/

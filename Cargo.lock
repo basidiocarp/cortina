@@ -196,11 +196,10 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cortina"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "anyhow",
  "clap",
- "regex",
  "rusqlite",
  "serde",
  "serde_json",
@@ -623,18 +622,6 @@ dependencies = [
  "getrandom 0.2.17",
  "libredox",
  "thiserror",
-]
-
-[[package]]
-name = "regex"
-version = "1.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e10754a14b9137dd7b1e3e5b0493cc9171fdd105e0ab477f51b72e7f3ac0e276"
-dependencies = [
- "aho-corasick",
- "memchr",
- "regex-automata",
- "regex-syntax",
 ]
 
 [[package]]

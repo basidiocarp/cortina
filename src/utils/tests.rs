@@ -61,6 +61,7 @@ fn has_error_with_error_pattern_in_output() {
     assert!(has_error("Command failed", Some(0)));
     assert!(has_error("FAILED: test suite", Some(0)));
     assert!(has_error("thread panicked", Some(0)));
+    assert!(has_error("error: build failed", Some(0)));
 }
 
 #[test]
@@ -101,6 +102,14 @@ fn is_test_command_detects_common_runners() {
     assert!(is_test_command("npm run test"));
     assert!(is_test_command("make test"));
     assert!(!is_test_command("cargo build"));
+}
+
+#[test]
+fn is_significant_command_detects_common_tooling() {
+    assert!(is_significant_command("git push origin main"));
+    assert!(is_significant_command("docker build ."));
+    assert!(is_significant_command("python scripts/run.py"));
+    assert!(!is_significant_command("git status"));
 }
 
 #[test]

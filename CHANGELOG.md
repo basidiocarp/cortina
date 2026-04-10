@@ -4,10 +4,16 @@ All notable changes to Cortina are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-04-09
+
 ### Changed
 
-- **Changelog format**: Release headings and entry structure now follow the
-  shared ecosystem changelog template.
+- **Lighter command classification**: The significant-command classifier now
+  uses token and phrase matching instead of a direct `regex` dependency.
+- **SQLite packaging policy**: Non-Windows builds use system SQLite, while
+  Windows keeps the bundled fallback for portability.
+- **Docs structure**: Cortina now has a central `docs/README.md` and plan
+  index aligned to the lowercase docs layout.
 
 ## [0.2.9] - 2026-04-08
 
