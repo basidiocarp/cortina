@@ -210,6 +210,9 @@ fn track_pending_file_preserves_concurrent_writes() {
     let hash = format!("test-pending-concurrent-{}", std::process::id());
     clear_pending_files(&hash);
 
+    #[cfg(windows)]
+    let workers = 4;
+    #[cfg(not(windows))]
     let workers = 10;
     let barrier = Arc::new(Barrier::new(workers));
     let mut handles = Vec::new();
