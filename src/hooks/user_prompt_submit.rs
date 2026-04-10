@@ -7,8 +7,9 @@ use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 #[cfg(test)]
 use crate::utils::load_json_file;
 use crate::utils::{
-    Importance, command_exists, ensure_scoped_hyphae_session, project_name_for_cwd, scope_hash,
-    store_in_hyphae, temp_state_path, update_json_file,
+    Importance, command_exists, current_task_id_for_cwd, ensure_scoped_hyphae_session,
+    project_name_for_cwd, scope_hash, scope_identity_for_cwd, store_in_hyphae,
+    temp_state_path, update_json_file,
 };
 
 const MAX_RECORDED_PROMPTS: usize = 32;
@@ -98,7 +99,38 @@ fn council_lifecycle_content(event: &UserPromptSubmitEvent) -> Option<String> {
         return None;
     }
 
-    serde_json::to_string(&NormalizedLifecycleEvent::from_council_prompt(event)).ok()
+    let mut normalized = NormalizedLifecycleEvent::from_council_prompt(event);
+    annotate_task_linkage(
+        &mut normalized,
+        Some(&event.cwd),
+        scope_identity_for_cwd,
+        current_task_id_for_cwd,
+    );
+
+    serde_json::to_string(&normalized).ok()
+}
+
+fn annotate_task_linkage<SI, TL>(
+    normalized: &mut NormalizedLifecycleEvent,
+    cwd: Option<&str>,
+    scope_identity: SI,
+    task_lookup: TL,
+) where
+    SI: FnOnce(Option<&str>) -> Option<(String, String)>,
+    TL: FnOnce(Option<&str>) -> Option<String>,
+{
+    if let Some((project_root, worktree_id)) = scope_identity(cwd) {
+        normalized.project_root = Some(project_root);
+        normalized.worktree_id = Some(worktree_id);
+    }
+    if let Some(task_id) = task_lookup(cwd) {
+        normalized
+            .metadata
+            .insert("task_id".to_string(), json!(task_id));
+        normalized
+            .metadata
+            .insert("task_linked".to_string(), json!(true));
+    }
 }
 
 fn prompt_capture_state_path(hash: &str) -> PathBuf {
@@ -191,6 +223,30 @@ mod tests {
         assert!(content.contains(r#""category":"council""#));
         assert!(content.contains(r#""event_name":"user_prompt_submit""#));
         assert!(content.contains(r#""prompt_excerpt":"/council review the unresolved failures""#));
+    }
+
+    #[test]
+    fn council_lifecycle_content_includes_task_identity_when_available() {
+        let event = UserPromptSubmitEvent {
+            session_id: "abc123".to_string(),
+            cwd: "/tmp/demo".to_string(),
+            prompt: "/council review the unresolved failures".to_string(),
+            transcript_path: Some("/tmp/transcript.jsonl".to_string()),
+        };
+
+        let mut normalized = NormalizedLifecycleEvent::from_council_prompt(&event);
+        annotate_task_linkage(
+            &mut normalized,
+            Some(&event.cwd),
+            |_| Some(("/tmp/demo".to_string(), "git:demo".to_string())),
+            |_| Some("task-123".to_string()),
+        );
+
+        let parsed = serde_json::to_value(&normalized).expect("valid json");
+        assert_eq!(parsed["project_root"].as_str(), Some("/tmp/demo"));
+        assert_eq!(parsed["worktree_id"].as_str(), Some("git:demo"));
+        assert_eq!(parsed["metadata"]["task_id"].as_str(), Some("task-123"));
+        assert_eq!(parsed["metadata"]["task_linked"].as_bool(), Some(true));
     }
 
     #[test]

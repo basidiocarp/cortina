@@ -8,7 +8,9 @@ mod tests;
 
 #[cfg(not(test))]
 pub(crate) use canopy_client::attach_outcome_evidence;
-pub(crate) use canopy_client::{evidence_bridge_stats, evidence_bridge_stats_path};
+pub(crate) use canopy_client::{
+    current_task_id_for_cwd, evidence_bridge_stats, evidence_bridge_stats_path,
+};
 #[cfg(test)]
 pub(crate) use canopy_client::{note_evidence_write_failure, note_evidence_write_success};
 #[cfg(test)]
@@ -24,6 +26,7 @@ pub use session_scope::{
     log_hyphae_feedback_signal_for_session, log_scoped_hyphae_feedback_signal,
     project_name_for_cwd, scoped_session_liveness,
 };
+pub(crate) use session_scope::scope_identity_for_cwd;
 #[cfg(test)]
 pub use state::save_json_file;
 pub use state::{

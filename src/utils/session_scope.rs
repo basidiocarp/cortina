@@ -550,6 +550,11 @@ fn session_identity_for_cwd(cwd: Option<&str>) -> Option<SessionIdentity> {
     session_identity_for_cwd_with(cwd, Command::output)
 }
 
+pub(crate) fn scope_identity_for_cwd(cwd: Option<&str>) -> Option<(String, String)> {
+    let identity = session_identity_for_cwd(cwd)?;
+    Some((identity.project_root, identity.worktree_id))
+}
+
 pub(super) fn session_identity_for_cwd_with<F>(
     cwd: Option<&str>,
     mut run_command: F,

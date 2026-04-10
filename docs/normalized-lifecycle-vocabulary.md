@@ -11,6 +11,7 @@ can rely on without parsing host quirks.
 - `session`: session-adjacent lifecycle such as prompt submission
 - `compaction`: explicit pre-compaction capture
 - `council`: prompts or workflow steps that invoke council-like coordination
+  and, when available, point back to the active task/worktree identity
 
 ## Status Values
 
@@ -32,6 +33,8 @@ The shared contract keeps only the fields other repos can safely reuse:
 - `summary`
 - `fail_open`
 - optional identity fields such as `session_id`, `cwd`, `project_root`, and `worktree_id`
+- task-linked council capture may also include `metadata.task_id` and
+  `metadata.task_linked=true` when Cortina can resolve the active Canopy task
 - optional event-specific fields such as `tool_name`, `trigger`, and `metadata`
 
 ## Boundaries

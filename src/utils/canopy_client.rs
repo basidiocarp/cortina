@@ -10,6 +10,7 @@ use tracing::{debug, warn};
 use crate::events::OutcomeEvent;
 
 use super::hyphae_client::resolved_command;
+use super::session_scope::scope_identity_for_cwd;
 use super::state::{load_json_file, temp_state_path, update_json_file};
 
 fn span_context(
@@ -101,6 +102,11 @@ pub(crate) fn attach_outcome_evidence(hash: &str, outcome: &OutcomeEvent) {
         warn!("Canopy evidence write failed after retries for scope {hash}");
         eprintln!("cortina: warn: evidence write failed after retries for scope {hash}");
     }
+}
+
+pub(crate) fn current_task_id_for_cwd(cwd: Option<&str>) -> Option<String> {
+    let (project_root, worktree_id) = scope_identity_for_cwd(cwd)?;
+    active_task_id(&project_root, &worktree_id)
 }
 
 pub(crate) fn record_outcome_evidence_write<F, S>(mut attempt: F, mut sleep: S) -> bool
