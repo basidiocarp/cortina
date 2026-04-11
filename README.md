@@ -114,6 +114,19 @@ change thresholds met   ─►   trigger logic            ─►     Rhizome exp
 - Session outcome attribution
 - Operator policy, status, and doctor surfaces
 
+### Usage Event Producer Path
+
+The current production-adjacent `usage-event-v1` producer path lives in
+[`src/statusline.rs`](src/statusline.rs). Specifically,
+`read_transcript_usage(...)` and `build_usage_event_payload(...)` form the
+Cortina seam that reads Claude transcript usage blocks and normalizes them into
+Septa's `usage-event-v1` field names. Cortina does not expose a standalone
+usage-event emission command yet, so the producer-side regression seam also
+lives there: the
+`usage_event_serialization_matches_septa_fixture_shape` test serializes that
+normalized payload and compares it directly against
+`../septa/fixtures/usage-event-v1.example.json`.
+
 ## What Cortina Does Not Own
 
 - Long-term memory storage: handled by `hyphae`

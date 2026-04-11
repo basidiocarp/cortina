@@ -5,7 +5,7 @@ use std::process::Command;
 
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 const DEFAULT_CONTEXT_LIMIT: usize = 200_000;
@@ -49,6 +49,13 @@ impl TokenUsage {
         self.input_tokens + self.cache_read_input_tokens + self.cache_creation_input_tokens
     }
 
+    fn total_tokens(self) -> usize {
+        self.input_tokens
+            + self.output_tokens
+            + self.cache_read_input_tokens
+            + self.cache_creation_input_tokens
+    }
+
     fn has_data(self) -> bool {
         self.input_tokens > 0
             || self.output_tokens > 0
@@ -59,8 +66,76 @@ impl TokenUsage {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct TranscriptUsage {
+    requests: usize,
     cumulative: TokenUsage,
     latest_assistant: Option<TokenUsage>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UsageEventContext<'a> {
+    captured_at_unix: u64,
+    tool_name: &'a str,
+    runtime: &'a str,
+    project_scope: &'a str,
+    project_root: &'a str,
+    worktree_id: &'a str,
+    workflow_id: &'a str,
+    participant_id: &'a str,
+    runtime_session_id: &'a str,
+    host_ref: &'a str,
+    backend_ref: &'a str,
+    source_kind: &'a str,
+    source_ref: &'a str,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+struct UsageEventPayload<'a> {
+    schema_version: &'static str,
+    event_kind: &'static str,
+    captured_at_unix: u64,
+    tool_name: &'a str,
+    runtime: &'a str,
+    scope: UsageEventScope<'a>,
+    usage: UsageEventUsage,
+    origin: UsageEventOrigin<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+struct UsageEventScope<'a> {
+    project_scope: &'a str,
+    project_root: &'a str,
+    worktree_id: &'a str,
+    workflow_identity: UsageEventWorkflowIdentity<'a>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+struct UsageEventWorkflowIdentity<'a> {
+    schema_version: &'static str,
+    workflow_id: &'a str,
+    participant_id: &'a str,
+    runtime_session_id: &'a str,
+    project_root: &'a str,
+    worktree_id: &'a str,
+    host_ref: &'a str,
+    backend_ref: &'a str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+struct UsageEventUsage {
+    requests: usize,
+    input_tokens: usize,
+    output_tokens: usize,
+    cache_creation_input_tokens: usize,
+    cache_read_input_tokens: usize,
+    total_tokens: usize,
+    cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+struct UsageEventOrigin<'a> {
+    producer: &'static str,
+    source_kind: &'a str,
+    source_ref: &'a str,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -184,21 +259,68 @@ fn read_transcript_usage(path: &str) -> Result<TranscriptUsage> {
             .get("message")
             .and_then(|message| message.get("usage"))
             .or_else(|| entry.get("usage"));
+        let Some(usage_value) = usage_value else {
+            continue;
+        };
 
         let entry_usage = TokenUsage {
-            input_tokens: usage_field(usage_value, "input_tokens"),
-            output_tokens: usage_field(usage_value, "output_tokens"),
-            cache_read_input_tokens: usage_field(usage_value, "cache_read_input_tokens"),
-            cache_creation_input_tokens: usage_field(usage_value, "cache_creation_input_tokens"),
+            input_tokens: usage_field(Some(usage_value), "input_tokens"),
+            output_tokens: usage_field(Some(usage_value), "output_tokens"),
+            cache_read_input_tokens: usage_field(Some(usage_value), "cache_read_input_tokens"),
+            cache_creation_input_tokens: usage_field(Some(usage_value), "cache_creation_input_tokens"),
         };
         usage.cumulative.input_tokens += entry_usage.input_tokens;
         usage.cumulative.output_tokens += entry_usage.output_tokens;
         usage.cumulative.cache_read_input_tokens += entry_usage.cache_read_input_tokens;
         usage.cumulative.cache_creation_input_tokens += entry_usage.cache_creation_input_tokens;
+        usage.requests += 1;
         usage.latest_assistant = Some(entry_usage);
     }
 
     Ok(usage)
+}
+
+fn build_usage_event_payload(
+    usage: TranscriptUsage,
+    context: UsageEventContext<'_>,
+    cost_usd: Option<f64>,
+) -> UsageEventPayload<'_> {
+    UsageEventPayload {
+        schema_version: "1.0",
+        event_kind: "session_usage",
+        captured_at_unix: context.captured_at_unix,
+        tool_name: context.tool_name,
+        runtime: context.runtime,
+        scope: UsageEventScope {
+            project_scope: context.project_scope,
+            project_root: context.project_root,
+            worktree_id: context.worktree_id,
+            workflow_identity: UsageEventWorkflowIdentity {
+                schema_version: "1.0",
+                workflow_id: context.workflow_id,
+                participant_id: context.participant_id,
+                runtime_session_id: context.runtime_session_id,
+                project_root: context.project_root,
+                worktree_id: context.worktree_id,
+                host_ref: context.host_ref,
+                backend_ref: context.backend_ref,
+            },
+        },
+        usage: UsageEventUsage {
+            requests: usage.requests,
+            input_tokens: usage.cumulative.input_tokens,
+            output_tokens: usage.cumulative.output_tokens,
+            cache_creation_input_tokens: usage.cumulative.cache_creation_input_tokens,
+            cache_read_input_tokens: usage.cumulative.cache_read_input_tokens,
+            total_tokens: usage.cumulative.total_tokens(),
+            cost_usd,
+        },
+        origin: UsageEventOrigin {
+            producer: "cortina",
+            source_kind: context.source_kind,
+            source_ref: context.source_ref,
+        },
+    }
 }
 
 fn is_assistant_entry(entry: &Value) -> bool {
@@ -423,9 +545,12 @@ fn paint(value: &str, code: &str, color: bool) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
     use std::fs;
+    use std::path::PathBuf;
 
     use super::*;
+    use serde_json::Value;
 
     #[test]
     fn compact_model_name_normalizes_claude_labels() {
@@ -490,6 +615,7 @@ mod tests {
         assert_eq!(
             usage,
             TranscriptUsage {
+                requests: 2,
                 cumulative: TokenUsage {
                     input_tokens: 2000,
                     output_tokens: 500,
@@ -506,6 +632,80 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn read_transcript_usage_ignores_assistant_entries_without_usage_payload() {
+        let temp_dir = tempfile::TempDir::new().expect("tempdir");
+        let transcript = temp_dir.path().join("usage-gaps.jsonl");
+        fs::write(
+            &transcript,
+            concat!(
+                "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"no usage\"}]}}\n",
+                "{\"type\":\"assistant\",\"usage\":{\"input_tokens\":300,\"output_tokens\":100,\"cache_read_input_tokens\":25,\"cache_creation_input_tokens\":50}}\n"
+            ),
+        )
+        .expect("write transcript");
+
+        let usage = read_transcript_usage(transcript.to_str().expect("utf8 path"))
+            .expect("read transcript usage");
+
+        assert_eq!(usage.requests, 1);
+        assert_eq!(
+            usage.cumulative,
+            TokenUsage {
+                input_tokens: 300,
+                output_tokens: 100,
+                cache_read_input_tokens: 25,
+                cache_creation_input_tokens: 50,
+            }
+        );
+    }
+
+    #[test]
+    fn usage_event_serialization_matches_septa_fixture_shape() {
+        let temp_dir = tempfile::TempDir::new().expect("tempdir");
+        let transcript = temp_dir.path().join("usage-transcript.jsonl");
+        fs::write(
+            &transcript,
+            concat!(
+                "{\"type\":\"assistant\",\"usage\":{\"input_tokens\":700,\"output_tokens\":100,\"cache_read_input_tokens\":50,\"cache_creation_input_tokens\":100}}\n",
+                "{\"type\":\"assistant\",\"usage\":{\"input_tokens\":300,\"output_tokens\":200,\"cache_read_input_tokens\":25,\"cache_creation_input_tokens\":50}}\n",
+                "{\"type\":\"assistant\",\"usage\":{\"input_tokens\":200,\"output_tokens\":100,\"cache_read_input_tokens\":25,\"cache_creation_input_tokens\":50}}\n"
+            ),
+        )
+        .expect("write transcript");
+
+        let usage = read_transcript_usage(transcript.to_str().expect("utf8 path"))
+            .expect("read transcript usage");
+        let payload = serde_json::to_value(build_usage_event_payload(
+            usage,
+            UsageEventContext {
+                captured_at_unix: 1_773_446_400,
+                tool_name: "claude_code",
+                runtime: "anthropic",
+                project_scope: "worktree",
+                project_root: "/workspace/basidiocarp",
+                worktree_id: "main",
+                workflow_id: "task-usage-rollup",
+                participant_id: "operator:claude-code",
+                runtime_session_id: "session-abc123",
+                host_ref: "claude_code",
+                backend_ref: "anthropic-api",
+                source_kind: "transcript",
+                source_ref: "transcripts/session-abc123.jsonl",
+            },
+            Some(0.0184),
+        ))
+        .expect("serialize usage event payload");
+        let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../septa/fixtures/usage-event-v1.example.json");
+        let fixture: Value = serde_json::from_str(
+            &fs::read_to_string(&fixture_path).expect("read Septa usage-event fixture"),
+        )
+        .expect("parse Septa usage-event fixture");
+
+        assert_eq!(payload, fixture);
     }
 
     #[test]
