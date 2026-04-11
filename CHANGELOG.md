@@ -4,6 +4,14 @@ All notable changes to Cortina are documented in this file.
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-04-10
+
+### Changed
+
+- **Usage producer boundary**: Cortina now documents its role as the normalized
+  edge-capture producer for the shared `usage-event-v1` contract instead of
+  letting downstream tools infer usage semantics from host-specific inputs.
+
 ## [0.2.12] - 2026-04-10
 
 ### Added

@@ -81,9 +81,10 @@ change thresholds met   ─►   trigger logic            ─►     Rhizome exp
 
 1. Read host events: adapters parse Claude Code hooks and Volva hook-event payloads.
 2. Normalize signals: the shared runtime maps host-specific envelopes into common event types.
-3. Detect outcomes: identify failures, resolutions, self-corrections, and validation passes.
-4. Write structured state: record session and feedback signals in Hyphae.
-5. Trigger follow-up work: kick off Rhizome export or Hyphae doc ingest when thresholds are met.
+3. Normalize usage edges: transcript-derived token and cost counters should converge on Septa's `usage-event-v1` contract before downstream summary layers.
+4. Detect outcomes: identify failures, resolutions, self-corrections, and validation passes.
+5. Write structured state: record session and feedback signals in Hyphae.
+6. Trigger follow-up work: kick off Rhizome export or Hyphae doc ingest when thresholds are met.
 
 ---
 
@@ -109,6 +110,7 @@ change thresholds met   ─►   trigger logic            ─►     Rhizome exp
 
 - Host adapter boundary and lifecycle event intake
 - Signal classification and scoped temp-state tracking
+- Normalized usage-event producer boundary before downstream summaries
 - Session outcome attribution
 - Operator policy, status, and doctor surfaces
 
