@@ -1,3 +1,7 @@
+// DEPRECATED: use `annulus statusline` instead.
+// This module remains for backwards compatibility but will be removed
+// in a future release.
+
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, IsTerminal, Read};
 use std::path::{Path, PathBuf};
@@ -267,7 +271,10 @@ fn read_transcript_usage(path: &str) -> Result<TranscriptUsage> {
             input_tokens: usage_field(Some(usage_value), "input_tokens"),
             output_tokens: usage_field(Some(usage_value), "output_tokens"),
             cache_read_input_tokens: usage_field(Some(usage_value), "cache_read_input_tokens"),
-            cache_creation_input_tokens: usage_field(Some(usage_value), "cache_creation_input_tokens"),
+            cache_creation_input_tokens: usage_field(
+                Some(usage_value),
+                "cache_creation_input_tokens",
+            ),
         };
         usage.cumulative.input_tokens += entry_usage.input_tokens;
         usage.cumulative.output_tokens += entry_usage.output_tokens;
