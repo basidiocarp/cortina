@@ -1,4 +1,4 @@
-use crate::events::{OutcomeEvent, OutcomeKind};
+use crate::events::{CausalSignal, OutcomeEvent, OutcomeKind};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -220,6 +220,29 @@ fn filter_outcomes_for_session_ignores_clock_skewed_unattributed_outcomes_for_st
     let filtered = filter_outcomes_for_session(&[near_start], Some(&session), "demo");
 
     assert!(filtered.is_empty());
+}
+
+#[test]
+fn filter_outcomes_for_session_preserves_causal_attribution() {
+    let session = crate::utils::SessionState {
+        session_id: "ses_current".to_string(),
+        project: "demo".to_string(),
+        project_root: Some("/tmp/demo".to_string()),
+        worktree_id: Some("git:demo".to_string()),
+        legacy_scope: None,
+        started_at: 100,
+    };
+    let caused_by = CausalSignal::new("error_detected", "Command failed: cargo test", 90)
+        .with_command("cargo test");
+    let mut resolved =
+        OutcomeEvent::new(OutcomeKind::ErrorResolved, "Recovered command: cargo test");
+    resolved.session_id = Some("ses_current".to_string());
+    resolved.caused_by = Some(caused_by.clone());
+
+    let filtered = filter_outcomes_for_session(&[resolved], Some(&session), "demo");
+
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].caused_by, Some(caused_by));
 }
 
 #[test]

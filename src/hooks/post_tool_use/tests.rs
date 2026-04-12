@@ -155,6 +155,87 @@ fn log_validation_success_records_structured_outcome() {
 }
 
 #[test]
+fn handle_bash_resolution_attaches_causal_error_signal() {
+    let cwd = format!("/tmp/cortina-error-cause-{}", std::process::id());
+    let hash = crate::utils::scope_hash(Some(&cwd));
+    crate::outcomes::clear_outcomes(&hash);
+
+    let fail = format!(
+        r#"{{
+            "tool_name": "Bash",
+            "cwd": "{cwd}",
+            "tool_input": {{"command": "cargo test"}},
+            "tool_output": {{"output": "error: failed", "exit_code": 101}}
+        }}"#
+    );
+    let success = format!(
+        r#"{{
+            "tool_name": "Bash",
+            "cwd": "{cwd}",
+            "tool_input": {{"command": "cargo test"}},
+            "tool_output": {{"output": "ok", "exit_code": 0}}
+        }}"#
+    );
+
+    assert!(handle(&fail).is_ok());
+    assert!(handle(&success).is_ok());
+
+    let outcomes = crate::outcomes::load_outcomes(&hash);
+    assert_eq!(outcomes.len(), 3);
+    assert!(outcomes
+        .iter()
+        .any(|event| event.kind == OutcomeKind::ValidationPassed));
+    let resolved = outcomes
+        .iter()
+        .find(|event| event.kind == OutcomeKind::ErrorResolved)
+        .expect("resolved outcome should be recorded");
+    let caused_by = resolved
+        .caused_by
+        .as_ref()
+        .expect("resolved outcome should carry causal attribution");
+    assert_eq!(caused_by.signal_kind, "error_detected");
+    assert_eq!(caused_by.command.as_deref(), Some("cargo test"));
+
+    crate::outcomes::clear_outcomes(&hash);
+}
+
+#[test]
+fn handle_file_edits_carries_prior_write_signal() {
+    let cwd = format!("/tmp/cortina-write-cause-{}", std::process::id());
+    let hash = crate::utils::scope_hash(Some(&cwd));
+    clear_pending_files(&hash);
+    clear_pending_documents(&hash);
+    crate::outcomes::clear_outcomes(&hash);
+
+    handle_file_edits(&FileEditEvent {
+        file_path: "src/lib.rs".to_string(),
+        old_string: String::new(),
+        new_string: "fn first() {}".to_string(),
+        cwd: Some(cwd.clone()),
+    });
+    handle_file_edits(&FileEditEvent {
+        file_path: "src/lib.rs".to_string(),
+        old_string: "fn first() {}".to_string(),
+        new_string: "fn second() {}".to_string(),
+        cwd: Some(cwd.clone()),
+    });
+
+    let outcomes = crate::outcomes::load_outcomes(&hash);
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].kind, OutcomeKind::SelfCorrection);
+    let caused_by = outcomes[0]
+        .caused_by
+        .as_ref()
+        .expect("self-correction should carry causal attribution");
+    assert_eq!(caused_by.signal_kind, "write");
+    assert_eq!(caused_by.file_path.as_deref(), Some("src/lib.rs"));
+
+    clear_pending_files(&hash);
+    clear_pending_documents(&hash);
+    crate::outcomes::clear_outcomes(&hash);
+}
+
+#[test]
 fn handle_file_edits_tracks_new_file_when_old_string_is_empty() {
     let cwd = format!("/tmp/cortina-new-file-{}", std::process::id());
     let hash = crate::utils::scope_hash(Some(&cwd));

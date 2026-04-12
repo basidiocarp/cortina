@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::events::OutcomeEvent;
+use crate::events::{CausalSignal, OutcomeEvent};
 use crate::policy::capture_policy;
 use crate::utils::{load_json_file, remove_file_with_lock, temp_state_path, update_json_file};
 
@@ -54,6 +54,36 @@ pub fn record_outcome(hash: &str, event: OutcomeEvent) -> bool {
 
 pub fn clear_outcomes(hash: &str) {
     let _ = remove_file_with_lock(outcomes_path(hash));
+}
+
+pub fn error_causal_signal(
+    command: &str,
+    summary: &str,
+    timestamp: u64,
+    session: Option<&crate::utils::SessionState>,
+) -> CausalSignal {
+    let mut signal = CausalSignal::new("error_detected", summary, timestamp)
+        .with_command(command)
+        .with_signal_type("tool_error");
+    if let Some(session) = session {
+        signal = signal.with_session_state(session);
+    }
+    signal
+}
+
+pub fn write_causal_signal(
+    file_path: &str,
+    summary: &str,
+    timestamp: u64,
+    session: Option<&crate::utils::SessionState>,
+) -> CausalSignal {
+    let mut signal = CausalSignal::new("write", summary, timestamp)
+        .with_file_path(file_path)
+        .with_signal_type("file_edit");
+    if let Some(session) = session {
+        signal = signal.with_session_state(session);
+    }
+    signal
 }
 
 #[cfg(test)]
@@ -169,5 +199,39 @@ mod tests {
         assert_eq!(outcomes.len(), 1);
 
         clear_outcomes(&hash);
+    }
+
+    #[test]
+    fn causal_signals_capture_error_and_write_metadata() {
+        let session = crate::utils::SessionState {
+            session_id: "ses-1".to_string(),
+            project: "demo".to_string(),
+            project_root: Some("/tmp/demo".to_string()),
+            worktree_id: Some("git:demo".to_string()),
+            legacy_scope: None,
+            started_at: 42,
+        };
+
+        let error_signal = error_causal_signal(
+            "cargo test",
+            "Command failed: cargo test",
+            123,
+            Some(&session),
+        );
+        assert_eq!(error_signal.signal_kind, "error_detected");
+        assert_eq!(error_signal.command.as_deref(), Some("cargo test"));
+        assert_eq!(error_signal.signal_type.as_deref(), Some("tool_error"));
+        assert_eq!(error_signal.session_id.as_deref(), Some("ses-1"));
+
+        let write_signal = write_causal_signal(
+            "src/lib.rs",
+            "Original edit in src/lib.rs: old -> new",
+            456,
+            Some(&session),
+        );
+        assert_eq!(write_signal.signal_kind, "write");
+        assert_eq!(write_signal.file_path.as_deref(), Some("src/lib.rs"));
+        assert_eq!(write_signal.signal_type.as_deref(), Some("file_edit"));
+        assert_eq!(write_signal.project.as_deref(), Some("demo"));
     }
 }

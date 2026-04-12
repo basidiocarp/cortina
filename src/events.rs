@@ -18,4 +18,4 @@ pub use normalized_lifecycle::{
     LifecycleCategory, LifecycleHost, LifecycleStatus, NORMALIZED_LIFECYCLE_EVENT_SCHEMA_VERSION,
     NormalizedLifecycleEvent, is_council_prompt,
 };
-pub use outcome_events::{OutcomeEvent, OutcomeKind};
+pub use outcome_events::{CausalSignal, OutcomeEvent, OutcomeKind};

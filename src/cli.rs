@@ -84,7 +84,7 @@ pub enum Commands {
         cwd: Option<String>,
     },
 
-    /// Output statusline for Claude Code's statusLine.command
+    /// Output statusline for Claude Code (deprecated: use `annulus statusline` instead)
     Statusline {
         /// Disable ANSI color output
         #[arg(long)]
