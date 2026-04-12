@@ -8,6 +8,7 @@ use spore::logging::{SpanContext, subprocess_span, tool_span, workflow_span};
 use tracing::{debug, warn};
 
 use crate::events::OutcomeEvent;
+use crate::outcomes::bridge_signals;
 
 use super::hyphae_client::resolved_command;
 use super::session_scope::scope_identity_for_cwd;
@@ -39,6 +40,15 @@ struct CanopyAgent {
     project_root: String,
     worktree_id: String,
     current_task_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EvidenceRefSpec {
+    source_ref: String,
+    label: String,
+    summary: Option<String>,
+    related_session_id: Option<String>,
+    related_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -90,17 +100,25 @@ pub(crate) fn attach_outcome_evidence(hash: &str, outcome: &OutcomeEvent) {
         return;
     };
 
-    let success = record_outcome_evidence_write(
-        || attempt_outcome_evidence_write(outcome, &task_id),
-        std::thread::sleep,
-    );
+    for evidence in evidence_specs_for_outcome(outcome) {
+        let success = record_outcome_evidence_write(
+            || attempt_outcome_evidence_write(&evidence, outcome, &task_id),
+            std::thread::sleep,
+        );
 
-    if success {
-        note_evidence_write_success(hash);
-    } else {
-        note_evidence_write_failure(hash);
-        warn!("Canopy evidence write failed after retries for scope {hash}");
-        eprintln!("cortina: warn: evidence write failed after retries for scope {hash}");
+        if success {
+            note_evidence_write_success(hash);
+        } else {
+            note_evidence_write_failure(hash);
+            warn!(
+                "Canopy evidence write failed after retries for scope {hash}: {}",
+                evidence.label
+            );
+            eprintln!(
+                "cortina: warn: evidence write failed after retries for scope {hash}: {}",
+                evidence.label
+            );
+        }
     }
 }
 
@@ -155,7 +173,11 @@ fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
     parse_active_task_id(&output.stdout, project_root, worktree_id)
 }
 
-fn attempt_outcome_evidence_write(outcome: &OutcomeEvent, task_id: &str) -> bool {
+fn attempt_outcome_evidence_write(
+    evidence: &EvidenceRefSpec,
+    outcome: &OutcomeEvent,
+    task_id: &str,
+) -> bool {
     let context = span_context(
         outcome.project_root.as_deref(),
         outcome.session_id.as_deref(),
@@ -167,7 +189,7 @@ fn attempt_outcome_evidence_write(outcome: &OutcomeEvent, task_id: &str) -> bool
         return false;
     };
 
-    for arg in evidence_command_args(task_id, outcome) {
+    for arg in evidence_command_args(task_id, evidence) {
         command.arg(arg);
     }
 
@@ -221,7 +243,86 @@ fn source_ref(outcome: &OutcomeEvent) -> String {
     )
 }
 
-fn evidence_command_args(task_id: &str, outcome: &OutcomeEvent) -> Vec<String> {
+fn signal_source_ref(signal_kind: &str, timestamp: u64, session_id: Option<&str>) -> String {
+    let session = session_id.unwrap_or("unscoped");
+    format!("cortina://signal/{signal_kind}/{session}/{timestamp}")
+}
+
+fn describe_causal_signal(
+    relation: &str,
+    summary: &str,
+    signal_kind: &str,
+    signal_type: Option<&str>,
+) -> String {
+    let mut description = summary.trim().to_string();
+    if description.is_empty() {
+        description = signal_kind.to_string();
+    }
+    if let Some(signal_type) = signal_type {
+        description.push_str(" [");
+        description.push_str(signal_type);
+        description.push(']');
+    }
+    if relation.is_empty() {
+        description
+    } else {
+        format!("{relation}: {description}")
+    }
+}
+
+fn evidence_specs_for_outcome(outcome: &OutcomeEvent) -> Vec<EvidenceRefSpec> {
+    let mut specs = Vec::new();
+    specs.push(EvidenceRefSpec {
+        source_ref: source_ref(outcome),
+        label: outcome.kind.label().to_string(),
+        summary: (!outcome.summary.trim().is_empty()).then(|| outcome.summary.clone()),
+        related_session_id: outcome.session_id.clone(),
+        related_file: outcome.file_path.clone(),
+    });
+
+    for signal in bridge_signals(outcome) {
+        let relation = if outcome.caused_by.as_ref() == Some(&signal) {
+            "caused_by"
+        } else {
+            "signal"
+        };
+        let signal_label = if relation == "caused_by" {
+            format!(
+                "caused_by/{}",
+                signal.signal_type.as_deref().unwrap_or(&signal.signal_kind)
+            )
+        } else {
+            format!(
+                "signal/{}",
+                signal.signal_type.as_deref().unwrap_or(&signal.signal_kind)
+            )
+        };
+        let spec = EvidenceRefSpec {
+            source_ref: signal_source_ref(
+                &signal.signal_kind,
+                signal.timestamp,
+                signal.session_id.as_deref(),
+            ),
+            label: signal_label,
+            summary: Some(describe_causal_signal(
+                relation,
+                &signal.summary,
+                &signal.signal_kind,
+                signal.signal_type.as_deref(),
+            )),
+            related_session_id: signal.session_id.clone(),
+            related_file: signal.file_path.clone(),
+        };
+
+        if !specs.iter().any(|existing| existing == &spec) {
+            specs.push(spec);
+        }
+    }
+
+    specs
+}
+
+fn evidence_command_args(task_id: &str, evidence: &EvidenceRefSpec) -> Vec<String> {
     let mut args = vec![
         "evidence".to_string(),
         "add".to_string(),
@@ -230,20 +331,22 @@ fn evidence_command_args(task_id: &str, outcome: &OutcomeEvent) -> Vec<String> {
         "--source-kind".to_string(),
         "cortina_event".to_string(),
         "--source-ref".to_string(),
-        source_ref(outcome),
+        evidence.source_ref.clone(),
         "--label".to_string(),
-        outcome.kind.label().to_string(),
+        evidence.label.clone(),
     ];
 
-    if !outcome.summary.trim().is_empty() {
+    if let Some(summary) = evidence.summary.as_deref()
+        && !summary.trim().is_empty()
+    {
         args.push("--summary".to_string());
-        args.push(outcome.summary.clone());
+        args.push(summary.to_string());
     }
-    if let Some(session_id) = outcome.session_id.as_deref() {
+    if let Some(session_id) = evidence.related_session_id.as_deref() {
         args.push("--related-session-id".to_string());
         args.push(session_id.to_string());
     }
-    if let Some(file_path) = outcome.file_path.as_deref() {
+    if let Some(file_path) = evidence.related_file.as_deref() {
         args.push("--related-file".to_string());
         args.push(file_path.to_string());
     }
@@ -264,11 +367,11 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        evidence_bridge_stats, evidence_command_args, note_evidence_write_failure,
-        note_evidence_write_success, parse_active_task_id, record_outcome_evidence_write,
-        source_ref,
+        evidence_bridge_stats, evidence_command_args, evidence_specs_for_outcome,
+        note_evidence_write_failure, note_evidence_write_success, parse_active_task_id,
+        record_outcome_evidence_write, signal_source_ref, source_ref,
     };
-    use crate::events::{OutcomeEvent, OutcomeKind};
+    use crate::events::{CausalSignal, OutcomeEvent, OutcomeKind};
 
     #[test]
     fn parse_active_task_id_requires_a_unique_match_for_worktree_identity() {
@@ -315,7 +418,16 @@ mod tests {
             .with_session("ses-1", "demo")
             .with_file_path("src/lib.rs");
 
-        let args = evidence_command_args("task-123", &outcome);
+        let args = evidence_command_args(
+            "task-123",
+            &super::EvidenceRefSpec {
+                source_ref: source_ref(&outcome),
+                label: outcome.kind.label().to_string(),
+                summary: Some(outcome.summary.clone()),
+                related_session_id: outcome.session_id.clone(),
+                related_file: outcome.file_path.clone(),
+            },
+        );
 
         assert!(args.contains(&"evidence".to_string()));
         assert!(args.contains(&"add".to_string()));
@@ -332,6 +444,37 @@ mod tests {
         assert!(args.contains(&"ses-1".to_string()));
         assert!(args.contains(&"--related-file".to_string()));
         assert!(args.contains(&"src/lib.rs".to_string()));
+    }
+
+    #[test]
+    fn evidence_specs_include_signal_and_causal_bridge_refs() {
+        let caused_by = CausalSignal::new("error_detected", "Command failed: cargo test", 55)
+            .with_command("cargo test")
+            .with_signal_type("tool_error");
+        let outcome = OutcomeEvent::new(OutcomeKind::ErrorResolved, "Retried after fixing test")
+            .with_session("ses-1", "demo")
+            .with_file_path("src/lib.rs")
+            .with_signal_type("tool_retry")
+            .with_caused_by(caused_by);
+
+        let specs = evidence_specs_for_outcome(&outcome);
+
+        assert_eq!(specs.len(), 3);
+        assert_eq!(specs[0].label, "error_resolved");
+        assert_eq!(specs[1].label, "signal/tool_retry");
+        assert_eq!(specs[2].label, "caused_by/tool_error");
+        assert_eq!(
+            specs[1].source_ref,
+            signal_source_ref("error_resolved", outcome.timestamp, Some("ses-1"))
+        );
+        assert_eq!(
+            specs[2].source_ref,
+            signal_source_ref("error_detected", 55, None)
+        );
+        assert_eq!(
+            specs[2].summary.as_deref(),
+            Some("caused_by: Command failed: cargo test [tool_error]")
+        );
     }
 
     #[test]

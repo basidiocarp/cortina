@@ -86,6 +86,22 @@ pub fn write_causal_signal(
     signal
 }
 
+pub fn bridge_signals(outcome: &OutcomeEvent) -> Vec<CausalSignal> {
+    let mut signals = Vec::new();
+
+    if outcome.signal_type.is_some() {
+        signals.push(CausalSignal::from_outcome(outcome));
+    }
+
+    if let Some(caused_by) = outcome.caused_by.as_ref()
+        && !signals.iter().any(|signal| signal == caused_by)
+    {
+        signals.push(caused_by.clone());
+    }
+
+    signals
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Barrier};
@@ -233,5 +249,56 @@ mod tests {
         assert_eq!(write_signal.file_path.as_deref(), Some("src/lib.rs"));
         assert_eq!(write_signal.signal_type.as_deref(), Some("file_edit"));
         assert_eq!(write_signal.project.as_deref(), Some("demo"));
+    }
+
+    #[test]
+    fn bridge_signals_include_signal_metadata_and_causal_links() {
+        let session = crate::utils::SessionState {
+            session_id: "ses-1".to_string(),
+            project: "demo".to_string(),
+            project_root: Some("/tmp/demo".to_string()),
+            worktree_id: Some("git:demo".to_string()),
+            legacy_scope: None,
+            started_at: 42,
+        };
+
+        let caused_by = CausalSignal::new("error_detected", "Command failed: cargo test", 123)
+            .with_session_state(&session)
+            .with_command("cargo test")
+            .with_signal_type("tool_error");
+
+        let outcome = OutcomeEvent::new(OutcomeKind::ErrorResolved, "Retried after fixing test")
+            .with_session_state(&session)
+            .with_command("cargo test")
+            .with_signal_type("tool_retry")
+            .with_caused_by(caused_by.clone());
+
+        let signals = bridge_signals(&outcome);
+
+        assert_eq!(signals.len(), 2);
+        assert_eq!(signals[0].signal_kind, "error_resolved");
+        assert_eq!(signals[0].signal_type.as_deref(), Some("tool_retry"));
+        assert_eq!(signals[1], caused_by);
+    }
+
+    #[test]
+    fn bridge_signals_dedupe_identical_causal_metadata() {
+        let session = crate::utils::SessionState {
+            session_id: "ses-1".to_string(),
+            project: "demo".to_string(),
+            project_root: Some("/tmp/demo".to_string()),
+            worktree_id: Some("git:demo".to_string()),
+            legacy_scope: None,
+            started_at: 42,
+        };
+
+        let outcome = OutcomeEvent::new(OutcomeKind::ValidationPassed, "cargo test passed")
+            .with_session_state(&session)
+            .with_signal_type("validation_passed");
+        let duplicated = CausalSignal::from_outcome(&outcome);
+        let signals = bridge_signals(&outcome.with_caused_by(duplicated));
+
+        assert_eq!(signals.len(), 1);
+        assert_eq!(signals[0].signal_type.as_deref(), Some("validation_passed"));
     }
 }
