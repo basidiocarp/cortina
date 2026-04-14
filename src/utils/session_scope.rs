@@ -54,6 +54,20 @@ pub struct SessionState {
     pub legacy_scope: Option<String>,
     #[serde(default)]
     pub started_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_protocol: Option<MemoryProtocolState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryProtocolState {
+    pub schema_version: String,
+    pub summary: String,
+    pub passive_resource_uri: String,
+    pub store_tool: String,
+    #[serde(default)]
+    pub project_topics: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol_resource_uri: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +85,11 @@ struct ActiveSessionMatch {
 }
 
 impl SessionState {
-    fn new(session_id: String, identity: &SessionIdentity) -> Self {
+    fn new(
+        session_id: String,
+        identity: &SessionIdentity,
+        memory_protocol: Option<MemoryProtocolState>,
+    ) -> Self {
         Self {
             session_id,
             project: identity.project.clone(),
@@ -79,6 +97,7 @@ impl SessionState {
             worktree_id: Some(identity.worktree_id.clone()),
             legacy_scope: None,
             started_at: current_timestamp_ms(),
+            memory_protocol,
         }
     }
 }
@@ -477,7 +496,73 @@ where
         ));
     }
 
-    Ok(SessionState::new(session_id, identity))
+    let memory_protocol = load_memory_protocol(identity, run_command);
+
+    Ok(SessionState::new(session_id, identity, memory_protocol))
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryProtocolSurface {
+    schema_version: String,
+    summary: String,
+    recall: MemoryProtocolRecall,
+    store: MemoryProtocolStore,
+    #[serde(default)]
+    resources: Vec<MemoryProtocolResource>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryProtocolRecall {
+    passive_resource_uri: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryProtocolStore {
+    tool: String,
+    #[serde(default)]
+    project_topics: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryProtocolResource {
+    uri: String,
+}
+
+fn load_memory_protocol<F>(
+    identity: &SessionIdentity,
+    run_command: &mut F,
+) -> Option<MemoryProtocolState>
+where
+    F: FnMut(&mut Command) -> std::io::Result<Output>,
+{
+    let context = span_context(Some(&identity.project_root), "hyphae_protocol");
+    let _tool_span = tool_span("hyphae_protocol", &context).entered();
+    let mut cmd = resolved_command("hyphae")?;
+    cmd.args(["protocol", "--project", &identity.project]);
+
+    let _subprocess_span = subprocess_span("hyphae protocol", &context).entered();
+    let output = run_command(&mut cmd).ok()?;
+    if !output.status.success() {
+        debug!(
+            "Hyphae protocol returned non-success for project {}",
+            identity.project
+        );
+        return None;
+    }
+
+    let parsed = serde_json::from_slice::<MemoryProtocolSurface>(&output.stdout).ok()?;
+    Some(MemoryProtocolState {
+        schema_version: parsed.schema_version,
+        summary: parsed.summary,
+        passive_resource_uri: parsed.recall.passive_resource_uri,
+        store_tool: parsed.store.tool,
+        project_topics: parsed.store.project_topics,
+        protocol_resource_uri: parsed
+            .resources
+            .into_iter()
+            .find(|resource| resource.uri == "hyphae://protocol/current")
+            .map(|resource| resource.uri),
+    })
 }
 
 fn match_active_session<F>(

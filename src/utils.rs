@@ -26,6 +26,8 @@ pub use session_scope::{
     log_hyphae_feedback_signal_for_session, log_scoped_hyphae_feedback_signal,
     project_name_for_cwd, scoped_session_liveness,
 };
+#[cfg(test)]
+pub use session_scope::MemoryProtocolState;
 pub(crate) use session_scope::scope_identity_for_cwd;
 #[cfg(test)]
 pub use state::save_json_file;

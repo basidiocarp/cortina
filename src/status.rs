@@ -39,6 +39,19 @@ struct SessionStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     worktree_id: Option<String>,
     started_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    memory_protocol: Option<MemoryProtocolStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct MemoryProtocolStatus {
+    schema_version: String,
+    summary: String,
+    passive_resource_uri: String,
+    store_tool: String,
+    project_topics: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    protocol_resource_uri: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -75,36 +88,74 @@ pub fn print_status(json: bool, cwd: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
-    println!("Cortina status");
-    println!("cwd={}", report.cwd);
-    println!("scope_hash={}", report.scope_hash);
-    println!("hyphae_available={}", report.hyphae_available);
-    println!("rhizome_available={}", report.rhizome_available);
-    match report.session {
+    println!("{}", render_status(&report));
+    Ok(())
+}
+
+fn render_status(report: &StatusReport) -> String {
+    let mut lines = vec![
+        "Cortina status".to_string(),
+        format!("cwd={}", report.cwd),
+        format!("scope_hash={}", report.scope_hash),
+        format!("hyphae_available={}", report.hyphae_available),
+        format!("rhizome_available={}", report.rhizome_available),
+    ];
+
+    match report.session.as_ref() {
         Some(session) => {
-            println!("session_active=true");
-            println!("session_id={}", session.session_id);
-            println!("session_project={}", session.project);
+            lines.push("session_active=true".to_string());
+            lines.push(format!("session_id={}", session.session_id));
+            lines.push(format!("session_project={}", session.project));
             if let Some(project_root) = session.project_root.as_deref() {
-                println!("session_project_root={project_root}");
+                lines.push(format!("session_project_root={project_root}"));
             }
             if let Some(worktree_id) = session.worktree_id.as_deref() {
-                println!("session_worktree_id={worktree_id}");
+                lines.push(format!("session_worktree_id={worktree_id}"));
             }
-            println!("session_started_at={}", session.started_at);
+            lines.push(format!("session_started_at={}", session.started_at));
+            if let Some(memory_protocol) = session.memory_protocol.as_ref() {
+                lines.push(format!(
+                    "session_memory_protocol_schema_version={}",
+                    memory_protocol.schema_version
+                ));
+                lines.push(format!(
+                    "session_memory_protocol_passive_resource={}",
+                    memory_protocol.passive_resource_uri
+                ));
+                lines.push(format!(
+                    "session_memory_protocol_store_tool={}",
+                    memory_protocol.store_tool
+                ));
+            }
             if let Some(session_live) = report.session_live {
-                println!("session_live={session_live}");
+                lines.push(format!("session_live={session_live}"));
             }
         }
-        None => println!("session_active=false"),
+        None => lines.push("session_active=false".to_string()),
     }
-    println!("outcome_count={}", report.outcome_count);
-    println!("volva_hook_event_count={}", report.volva_hook_event_count);
-    println!("pending_export_count={}", report.pending_export_count);
-    println!("pending_ingest_count={}", report.pending_ingest_count);
-    println!("evidence_refs_written={}", report.evidence_refs_written);
-    println!("evidence_write_failures={}", report.evidence_write_failures);
-    println!(
+
+    lines.push(format!("outcome_count={}", report.outcome_count));
+    lines.push(format!(
+        "volva_hook_event_count={}",
+        report.volva_hook_event_count
+    ));
+    lines.push(format!(
+        "pending_export_count={}",
+        report.pending_export_count
+    ));
+    lines.push(format!(
+        "pending_ingest_count={}",
+        report.pending_ingest_count
+    ));
+    lines.push(format!(
+        "evidence_refs_written={}",
+        report.evidence_refs_written
+    ));
+    lines.push(format!(
+        "evidence_write_failures={}",
+        report.evidence_write_failures
+    ));
+    lines.push(format!(
         "policy=dedupe:{}ms correction:{}ms cleanup:{}ms export:{} ingest:{} rhizome_suggest:{}lines/{}calls grace:{}ms max_outcomes:{} fallback_on_end_failure:{}",
         report.policy.outcome_dedupe_window_ms,
         report.policy.correction_window_ms,
@@ -116,8 +167,9 @@ pub fn print_status(json: bool, cwd: Option<&str>) -> Result<()> {
         report.policy.outcome_attribution_grace_ms,
         report.policy.max_outcome_events,
         report.policy.fallback_session_memory_on_end_failure
-    );
-    Ok(())
+    ));
+
+    lines.join("\n")
 }
 
 pub fn print_doctor(json: bool, cwd: Option<&str>) -> Result<()> {
@@ -276,6 +328,14 @@ impl From<SessionState> for SessionStatus {
             project_root: session.project_root,
             worktree_id: session.worktree_id,
             started_at: session.started_at,
+            memory_protocol: session.memory_protocol.map(|protocol| MemoryProtocolStatus {
+                schema_version: protocol.schema_version,
+                summary: protocol.summary,
+                passive_resource_uri: protocol.passive_resource_uri,
+                store_tool: protocol.store_tool,
+                project_topics: protocol.project_topics,
+                protocol_resource_uri: protocol.protocol_resource_uri,
+            }),
         }
     }
 }
@@ -389,6 +449,14 @@ mod tests {
                 worktree_id: Some("git:demo".to_string()),
                 legacy_scope: None,
                 started_at: current_timestamp_ms(),
+                memory_protocol: Some(crate::utils::MemoryProtocolState {
+                    schema_version: "1.0".to_string(),
+                    summary: "Recall selectively at task start.".to_string(),
+                    passive_resource_uri: "hyphae://context/current".to_string(),
+                    store_tool: "hyphae_memory_store".to_string(),
+                    project_topics: vec!["context/demo".to_string(), "decisions/demo".to_string()],
+                    protocol_resource_uri: Some("hyphae://protocol/current".to_string()),
+                }),
             },
         )
         .expect("write session");
@@ -419,6 +487,60 @@ mod tests {
                 .and_then(|session| session.worktree_id.as_deref()),
             Some("git:demo")
         );
+        assert_eq!(
+            report
+                .session
+                .as_ref()
+                .and_then(|session| session.memory_protocol.as_ref())
+                .map(|protocol| protocol.schema_version.as_str()),
+            Some("1.0")
+        );
+        assert_eq!(
+            report
+                .session
+                .as_ref()
+                .and_then(|session| session.memory_protocol.as_ref())
+                .and_then(|protocol| protocol.protocol_resource_uri.as_deref()),
+            Some("hyphae://protocol/current")
+        );
+    }
+
+    #[test]
+    fn render_status_includes_memory_protocol_lines() {
+        let report = StatusReport {
+            cwd: "/tmp/demo".to_string(),
+            scope_hash: "scope-demo".to_string(),
+            hyphae_available: true,
+            rhizome_available: true,
+            session: Some(SessionStatus {
+                session_id: "ses_demo".to_string(),
+                project: "demo".to_string(),
+                project_root: Some("/tmp/demo".to_string()),
+                worktree_id: Some("git:demo".to_string()),
+                started_at: 42,
+                memory_protocol: Some(MemoryProtocolStatus {
+                    schema_version: "1.0".to_string(),
+                    summary: "Recall selectively at task start.".to_string(),
+                    passive_resource_uri: "hyphae://context/current".to_string(),
+                    store_tool: "hyphae_memory_store".to_string(),
+                    project_topics: vec!["context/demo".to_string()],
+                    protocol_resource_uri: Some("hyphae://protocol/current".to_string()),
+                }),
+            }),
+            session_live: Some(true),
+            outcome_count: 1,
+            volva_hook_event_count: 0,
+            pending_export_count: 0,
+            pending_ingest_count: 0,
+            evidence_refs_written: 0,
+            evidence_write_failures: 0,
+            policy: capture_policy().clone(),
+        };
+
+        let rendered = render_status(&report);
+        assert!(rendered.contains("session_memory_protocol_schema_version=1.0"));
+        assert!(rendered.contains("session_memory_protocol_passive_resource=hyphae://context/current"));
+        assert!(rendered.contains("session_memory_protocol_store_tool=hyphae_memory_store"));
     }
 
     #[test]
@@ -488,6 +610,7 @@ mod tests {
                 worktree_id: Some("git:demo".to_string()),
                 legacy_scope: Some("legacy-scope".to_string()),
                 started_at: current_timestamp_ms(),
+                memory_protocol: None,
             },
         )
         .expect("write session");

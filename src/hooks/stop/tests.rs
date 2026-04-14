@@ -141,6 +141,7 @@ fn filter_outcomes_for_session_prefers_matching_session_id() {
         worktree_id: Some("git:demo".to_string()),
         legacy_scope: None,
         started_at: 100,
+        memory_protocol: None,
     };
     let mut project_only = OutcomeEvent::new(OutcomeKind::ValidationPassed, "project-only");
     project_only.project = Some("demo".to_string());
@@ -170,6 +171,7 @@ fn filter_outcomes_for_session_ignores_unattributed_outcomes_for_structured_sess
         worktree_id: Some("git:demo".to_string()),
         legacy_scope: None,
         started_at: 100_000,
+        memory_protocol: None,
     };
     let mut old = OutcomeEvent::new(OutcomeKind::ErrorDetected, "old unattributed");
     old.timestamp = 1_000;
@@ -191,6 +193,7 @@ fn filter_outcomes_for_session_accepts_exact_identity_matches_without_session_id
         worktree_id: Some("git:demo".to_string()),
         legacy_scope: None,
         started_at: 1_000,
+        memory_protocol: None,
     };
     let mut identity_scoped = OutcomeEvent::new(OutcomeKind::ValidationPassed, "identity match");
     identity_scoped.project_root = Some("/tmp/demo".to_string());
@@ -213,6 +216,7 @@ fn filter_outcomes_for_session_ignores_clock_skewed_unattributed_outcomes_for_st
         worktree_id: Some("git:demo".to_string()),
         legacy_scope: None,
         started_at: 1_000,
+        memory_protocol: None,
     };
     let mut near_start = OutcomeEvent::new(OutcomeKind::ValidationPassed, "near start");
     near_start.timestamp = 980;
@@ -231,6 +235,7 @@ fn filter_outcomes_for_session_preserves_causal_attribution() {
         worktree_id: Some("git:demo".to_string()),
         legacy_scope: None,
         started_at: 100,
+        memory_protocol: None,
     };
     let caused_by = CausalSignal::new("error_detected", "Command failed: cargo test", 90)
         .with_command("cargo test");

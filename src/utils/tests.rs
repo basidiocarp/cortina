@@ -361,6 +361,7 @@ fn ensure_hyphae_session_with_runner_passes_context_signals_to_start() {
 
     let mut saw_git_branch = false;
     let mut saw_start = false;
+    let mut saw_protocol = false;
     let result = ensure_hyphae_session_with_hash(hash, &identity, Some("task"), |cmd| {
         let args: Vec<String> = cmd
             .get_args()
@@ -398,6 +399,13 @@ fn ensure_hyphae_session_with_runner_passes_context_signals_to_start() {
                 saw_start = true;
                 Ok(output_with_status(0, "ses_context"))
             }
+            ["protocol", "--project", "demo-project"] => {
+                saw_protocol = true;
+                Ok(output_with_status(
+                    0,
+                    r#"{"schema_version":"1.0","summary":"Recall selectively at task start.","recall":{"passive_resource_uri":"hyphae://context/current"},"store":{"tool":"hyphae_memory_store","project_topics":["context/demo-project","decisions/demo-project"]},"resources":[{"uri":"hyphae://protocol/current"}]}"#,
+                ))
+            }
             unexpected => panic!("unexpected command args: {unexpected:?}"),
         }
     });
@@ -408,9 +416,61 @@ fn ensure_hyphae_session_with_runner_passes_context_signals_to_start() {
     );
     assert!(saw_git_branch);
     assert!(saw_start);
+    assert!(saw_protocol);
+    assert_eq!(
+        result.as_ref().and_then(|state| state.memory_protocol.as_ref()).map(|protocol| protocol.schema_version.as_str()),
+        Some("1.0")
+    );
+    assert_eq!(
+        result
+            .as_ref()
+            .and_then(|state| state.memory_protocol.as_ref())
+            .and_then(|protocol| protocol.protocol_resource_uri.as_deref()),
+        Some("hyphae://protocol/current")
+    );
 
     let _ = fs::remove_file(&edits_path);
     let _ = fs::remove_file(&outcomes_path);
+    clear_session_state(hash);
+}
+
+#[test]
+fn ensure_hyphae_session_with_runner_leaves_memory_protocol_empty_on_protocol_failure() {
+    let hash = "ensure-protocol-failure";
+    clear_session_state(hash);
+    let identity = test_identity(hash, "demo-project");
+
+    let result = ensure_hyphae_session_with_hash(hash, &identity, Some("task"), |cmd| {
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+        match args.as_slice() {
+            ["rev-parse", "--abbrev-ref", "HEAD"] => Ok(output_with_status(1, "")),
+            [
+                "session",
+                "start",
+                "--project",
+                "demo-project",
+                "--project-root",
+                "/tmp/demo-project",
+                "--worktree-id",
+                "git:ensure-protocol-failure",
+                "--scope",
+                "ensure-protocol-failure",
+                "--task",
+                "task",
+            ] => Ok(output_with_status(0, "ses_no_protocol")),
+            ["protocol", "--project", "demo-project"] => Ok(output_with_status(1, "failed")),
+            unexpected => panic!("unexpected hyphae command args: {unexpected:?}"),
+        }
+    })
+    .expect("session should still start when protocol fails");
+
+    assert_eq!(result.session_id, "ses_no_protocol");
+    assert!(result.memory_protocol.is_none());
     clear_session_state(hash);
 }
 
@@ -425,6 +485,7 @@ fn ensure_hyphae_session_with_runner_reuses_active_cached_state() {
         worktree_id: Some("git:ensure-active-state".to_string()),
         legacy_scope: None,
         started_at: 1,
+        memory_protocol: None,
     };
     save_json_file(session_state_path(hash), &state).unwrap();
     let identity = test_identity(hash, "demo-project");
@@ -487,6 +548,7 @@ fn ensure_hyphae_session_with_runner_discards_stale_cached_state() {
         worktree_id: None,
         legacy_scope: None,
         started_at: 1,
+        memory_protocol: None,
     };
     save_json_file(session_state_path(hash), &stale).unwrap();
     let identity = test_identity(hash, "demo-project");
@@ -526,6 +588,7 @@ fn ensure_hyphae_session_with_runner_discards_stale_cached_state() {
                 start_calls += 1;
                 Ok(output_with_status(0, "ses_fresh"))
             }
+            ["protocol", "--project", "demo-project"] => Ok(output_with_status(1, "failed")),
             _ => panic!("unexpected hyphae command args: {args:?}"),
         }
     });
@@ -563,6 +626,7 @@ fn ensure_hyphae_session_with_runner_ignores_other_scoped_sessions() {
         worktree_id: None,
         legacy_scope: None,
         started_at: 1,
+        memory_protocol: None,
     };
     save_json_file(session_state_path(hash), &cached).unwrap();
     let identity = test_identity(hash, "demo-project");
@@ -602,6 +666,7 @@ fn ensure_hyphae_session_with_runner_ignores_other_scoped_sessions() {
                 start_calls += 1;
                 Ok(output_with_status(0, "ses_scope_a_fresh"))
             }
+            ["protocol", "--project", "demo-project"] => Ok(output_with_status(1, "failed")),
             _ => panic!("unexpected hyphae command args: {args:?}"),
         }
     });
@@ -658,6 +723,7 @@ fn ensure_hyphae_session_with_runner_serializes_concurrent_starts() {
                         thread::sleep(Duration::from_millis(50));
                         Ok(output_with_status(0, &format!("ses_{call}")))
                     }
+                    ["protocol", "--project", "demo-project"] => Ok(output_with_status(1, "failed")),
                     ["session", "status", "--id", "ses_1"] => Ok(output_with_status(
                         0,
                         r#"{"session_id":"ses_1","project":"demo-project","project_root":"/tmp/demo-project","worktree_id":"git:ensure-concurrent-start","status":"active","active":true}"#,
@@ -692,6 +758,7 @@ fn ensure_hyphae_session_with_runner_upgrades_legacy_cached_state_after_exact_ma
             worktree_id: None,
             legacy_scope: None,
             started_at: 1,
+            memory_protocol: None,
         },
     )
     .unwrap();
@@ -710,6 +777,7 @@ fn ensure_hyphae_session_with_runner_upgrades_legacy_cached_state_after_exact_ma
                     0,
                     r#"{"session_id":"ses_exact","project":"demo-project","project_root":"/tmp/demo-project","worktree_id":"git:ensure-upgrade-legacy-cache","status":"active","active":true}"#,
                 )),
+                ["protocol", "--project", "demo-project"] => Ok(output_with_status(1, "failed")),
                 unexpected => panic!("unexpected hyphae command args: {unexpected:?}"),
             }
         })
@@ -737,6 +805,7 @@ fn ensure_hyphae_session_with_runner_rejects_scope_only_match_for_legacy_cached_
             worktree_id: None,
             legacy_scope: None,
             started_at: 1,
+            memory_protocol: None,
         },
     )
     .unwrap();
@@ -773,6 +842,7 @@ fn ensure_hyphae_session_with_runner_rejects_scope_only_match_for_legacy_cached_
                 start_calls += 1;
                 Ok(output_with_status(0, "ses_fresh"))
             }
+            ["protocol", "--project", "demo-project"] => Ok(output_with_status(1, "failed")),
             unexpected => panic!("unexpected hyphae command args: {unexpected:?}"),
         }
     })
@@ -803,6 +873,7 @@ fn ensure_hyphae_session_with_runner_does_not_accept_scope_only_match_for_identi
             worktree_id: Some("git:stale".to_string()),
             legacy_scope: None,
             started_at: 1,
+            memory_protocol: None,
         },
     )
     .unwrap();
@@ -841,6 +912,7 @@ fn ensure_hyphae_session_with_runner_does_not_accept_scope_only_match_for_identi
                 start_calls += 1;
                 Ok(output_with_status(0, "ses_replacement"))
             }
+            ["protocol", "--project", "demo-project"] => Ok(output_with_status(1, "failed")),
             unexpected => panic!("unexpected hyphae command args: {unexpected:?}"),
         }
     })
@@ -903,6 +975,7 @@ fn end_hyphae_session_with_spawn_failure_keeps_cached_state() {
         worktree_id: Some("git:end-spawn-failure".to_string()),
         legacy_scope: None,
         started_at: 1,
+        memory_protocol: None,
     };
     save_json_file(session_state_path(hash), &state).unwrap();
 
@@ -927,6 +1000,7 @@ fn end_hyphae_session_with_non_zero_exit_keeps_cached_state() {
         worktree_id: Some("git:end-non-zero".to_string()),
         legacy_scope: None,
         started_at: 1,
+        memory_protocol: None,
     };
     save_json_file(session_state_path(hash), &state).unwrap();
 
@@ -951,6 +1025,7 @@ fn end_hyphae_session_with_success_clears_cached_state() {
         worktree_id: Some("git:end-success".to_string()),
         legacy_scope: None,
         started_at: 1,
+        memory_protocol: None,
     };
     save_json_file(session_state_path(hash), &state).unwrap();
 

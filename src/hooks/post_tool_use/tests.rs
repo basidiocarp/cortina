@@ -361,6 +361,7 @@ fn annotate_outcome_with_session_carries_exact_identity_when_available() {
         worktree_id: Some("git:demo".to_string()),
         legacy_scope: None,
         started_at: 1,
+        memory_protocol: None,
     };
 
     let outcome = annotate_outcome_with_session(

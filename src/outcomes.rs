@@ -226,6 +226,7 @@ mod tests {
             worktree_id: Some("git:demo".to_string()),
             legacy_scope: None,
             started_at: 42,
+            memory_protocol: None,
         };
 
         let error_signal = error_causal_signal(
@@ -260,6 +261,7 @@ mod tests {
             worktree_id: Some("git:demo".to_string()),
             legacy_scope: None,
             started_at: 42,
+            memory_protocol: None,
         };
 
         let caused_by = CausalSignal::new("error_detected", "Command failed: cargo test", 123)
@@ -290,6 +292,7 @@ mod tests {
             worktree_id: Some("git:demo".to_string()),
             legacy_scope: None,
             started_at: 42,
+            memory_protocol: None,
         };
 
         let outcome = OutcomeEvent::new(OutcomeKind::ValidationPassed, "cargo test passed")
