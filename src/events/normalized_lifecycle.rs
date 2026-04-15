@@ -158,9 +158,9 @@ impl NormalizedLifecycleEvent {
         let status = match event.phase {
             super::VolvaHookPhase::SessionStart => LifecycleStatus::Started,
             super::VolvaHookPhase::BeforePromptSend => LifecycleStatus::Requested,
-            super::VolvaHookPhase::ResponseComplete => LifecycleStatus::Completed,
+            super::VolvaHookPhase::ResponseComplete
+            | super::VolvaHookPhase::SessionEnd => LifecycleStatus::Completed,
             super::VolvaHookPhase::BackendFailed => LifecycleStatus::Failed,
-            super::VolvaHookPhase::SessionEnd => LifecycleStatus::Completed,
         };
         let mut normalized = Self::new(
             LifecycleCategory::Host,

@@ -38,14 +38,12 @@ struct ToolUsageEventV1 {
 }
 
 fn ms_to_iso8601(ms: u64) -> String {
-    let secs = ms / 1000;
-    let subsec_millis = (ms % 1000) as u32;
-
-    // Unix epoch is 1970-01-01T00:00:00Z
-    // Calculate days since epoch
     const SECS_PER_DAY: u64 = 86_400;
     const SECS_PER_HOUR: u64 = 3_600;
     const SECS_PER_MINUTE: u64 = 60;
+
+    let secs = ms / 1000;
+    let subsec_millis = (ms % 1000) as u32;
 
     let days_since_epoch = secs / SECS_PER_DAY;
     let secs_today = secs % SECS_PER_DAY;
@@ -55,10 +53,9 @@ fn ms_to_iso8601(ms: u64) -> String {
     let minutes = remaining / SECS_PER_MINUTE;
     let seconds = remaining % SECS_PER_MINUTE;
 
-    // Convert days to year/month/day
-    // Simplified calculation: approximate year from days
     let mut year: i32 = 1970;
-    let mut days_remaining: i32 = days_since_epoch.min(i32::MAX as u64) as i32;
+    let mut days_remaining: i32 =
+        i32::try_from(days_since_epoch.min(i32::MAX as u64)).unwrap_or(i32::MAX);
 
     loop {
         let days_in_year = if is_leap_year(year) { 366 } else { 365 };
@@ -87,10 +84,7 @@ fn ms_to_iso8601(ms: u64) -> String {
         month += 1;
     }
 
-    format!(
-        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
-        year, month, day, hours, minutes, seconds, subsec_millis
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{subsec_millis:03}Z")
 }
 
 fn is_leap_year(year: i32) -> bool {
@@ -131,7 +125,7 @@ pub(super) fn emit_tool_usage_event(
         tools_available: Vec::new(),
         tools_called,
         tools_relevant_unused: Vec::new(),
-        task_id: task_id.map(|id| id.to_string()),
+        task_id: task_id.map(str::to_string),
     };
 
     if let Ok(json) = serde_json::to_string(&event) {

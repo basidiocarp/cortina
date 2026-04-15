@@ -9,7 +9,9 @@ use std::process::Command;
 
 use anyhow::Result;
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+#[cfg(test)]
+use serde::Serialize;
 use serde_json::Value;
 
 const DEFAULT_CONTEXT_LIMIT: usize = 200_000;
@@ -53,6 +55,7 @@ impl TokenUsage {
         self.input_tokens + self.cache_read_input_tokens + self.cache_creation_input_tokens
     }
 
+    #[cfg(test)]
     fn total_tokens(self) -> usize {
         self.input_tokens
             + self.output_tokens
@@ -75,6 +78,7 @@ struct TranscriptUsage {
     latest_assistant: Option<TokenUsage>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct UsageEventContext<'a> {
     captured_at_unix: u64,
@@ -92,6 +96,7 @@ struct UsageEventContext<'a> {
     source_ref: &'a str,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 struct UsageEventPayload<'a> {
     schema_version: &'static str,
@@ -104,6 +109,7 @@ struct UsageEventPayload<'a> {
     origin: UsageEventOrigin<'a>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 struct UsageEventScope<'a> {
     project_scope: &'a str,
@@ -112,6 +118,7 @@ struct UsageEventScope<'a> {
     workflow_identity: UsageEventWorkflowIdentity<'a>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 struct UsageEventWorkflowIdentity<'a> {
     schema_version: &'static str,
@@ -124,6 +131,7 @@ struct UsageEventWorkflowIdentity<'a> {
     backend_ref: &'a str,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 struct UsageEventUsage {
     requests: usize,
@@ -135,6 +143,7 @@ struct UsageEventUsage {
     cost_usd: Option<f64>,
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 struct UsageEventOrigin<'a> {
     producer: &'static str,
@@ -287,6 +296,7 @@ fn read_transcript_usage(path: &str) -> Result<TranscriptUsage> {
     Ok(usage)
 }
 
+#[cfg(test)]
 fn build_usage_event_payload(
     usage: TranscriptUsage,
     context: UsageEventContext<'_>,

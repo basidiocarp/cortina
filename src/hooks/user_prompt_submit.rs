@@ -32,7 +32,7 @@ pub fn handle(input: &str) -> anyhow::Result<()> {
         Ok(envelope) => envelope,
         Err(e) => {
             eprintln!("cortina: failed to parse event input: {e}");
-            debug_assert!(FAIL_OPEN_LIFECYCLE_CAPTURE);
+            const { assert!(FAIL_OPEN_LIFECYCLE_CAPTURE) };
             return Ok(());
         }
     };
