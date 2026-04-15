@@ -84,7 +84,9 @@ fn ms_to_iso8601(ms: u64) -> String {
         month += 1;
     }
 
-    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{subsec_millis:03}Z")
+    format!(
+        "{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{subsec_millis:03}Z"
+    )
 }
 
 fn is_leap_year(year: i32) -> bool {
