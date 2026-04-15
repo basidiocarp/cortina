@@ -1,8 +1,10 @@
 use serde_json::json;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
-use crate::events::{NormalizedLifecycleEvent, UserPromptSubmitEvent, is_council_prompt};
+use crate::events::{NormalizedLifecycleEvent, OutcomeEvent, OutcomeKind, UserPromptSubmitEvent, is_council_prompt};
+use crate::outcomes::record_outcome;
 use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 #[cfg(test)]
 use crate::utils::load_json_file;
@@ -47,6 +49,28 @@ fn capture_prompt_submit(event: &UserPromptSubmitEvent) {
     }
 
     let hash = scope_hash(Some(&event.cwd));
+
+    // B2: detect error patterns and store to hyphae when present
+    let error_lines = detect_prompt_error_patterns(&event.prompt);
+    if !error_lines.is_empty() && command_exists("hyphae") {
+        let project = project_name_for_cwd(Some(&event.cwd));
+        let error_content = serde_json::json!({
+            "type": "prompt_error_patterns",
+            "session_id": event.session_id,
+            "cwd": event.cwd,
+            "matched_lines": error_lines,
+        })
+        .to_string();
+        let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(PROMPT_SESSION_TASK));
+        store_in_hyphae("errors/active", &error_content, Importance::Medium, project.as_deref());
+    }
+
+    // B3: extract file references and track them as pending exports
+    let file_refs = extract_file_refs(&event.prompt);
+    if !file_refs.is_empty() {
+        super::post_tool_use::track_prompt_file_refs(&file_refs, &hash);
+    }
+
     let content = prompt_memory_content(event);
     if !remember_prompt_capture(&hash, &content) {
         return;
@@ -74,6 +98,13 @@ fn capture_prompt_submit(event: &UserPromptSubmitEvent) {
             }
         }
     }
+
+    // B4: record lightweight outcome after error detection + file extraction
+    let outcome = OutcomeEvent::new(
+        OutcomeKind::KnowledgeExported,
+        format!("prompt captured ({} chars)", event.prompt.len()),
+    );
+    let _ = record_outcome(&hash, outcome);
 }
 
 fn prompt_memory_content(event: &UserPromptSubmitEvent) -> String {
@@ -131,6 +162,61 @@ fn annotate_task_linkage<SI, TL>(
             .metadata
             .insert("task_linked".to_string(), json!(true));
     }
+}
+
+/// Scan the prompt for lines that look like error output.
+/// Returns up to 5 matching lines, each truncated to 200 chars.
+fn detect_prompt_error_patterns(prompt: &str) -> Vec<String> {
+    const ERROR_PATTERNS: &[&str] = &[
+        "error", "failed", "panicked", "FAILED", "could not", "cannot",
+    ];
+    const MAX_LINE_LEN: usize = 200;
+    const MAX_MATCHES: usize = 5;
+
+    prompt
+        .lines()
+        .filter(|line| ERROR_PATTERNS.iter().any(|pat| line.contains(pat)))
+        .take(MAX_MATCHES)
+        .map(|line| {
+            let truncated: String = line.chars().take(MAX_LINE_LEN).collect();
+            truncated
+        })
+        .collect()
+}
+
+/// Extract tokens from the prompt that look like file paths.
+/// A token qualifies when it contains `/`, has a file extension,
+/// and is between 3 and 512 chars long. Returns at most 10 unique results.
+pub(crate) fn extract_file_refs(prompt: &str) -> Vec<String> {
+    const MIN_LEN: usize = 3;
+    const MAX_LEN: usize = 512;
+    const MAX_REFS: usize = 10;
+
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let mut results: Vec<String> = Vec::new();
+
+    for token in prompt.split_whitespace() {
+        if results.len() >= MAX_REFS {
+            break;
+        }
+        let clean = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-');
+        if clean.len() < MIN_LEN || clean.len() > MAX_LEN {
+            continue;
+        }
+        if !clean.contains('/') {
+            continue;
+        }
+        // Must have a file extension (a dot after the last slash)
+        let after_last_slash = clean.rsplit('/').next().unwrap_or("");
+        if !after_last_slash.contains('.') {
+            continue;
+        }
+        if seen.insert(clean.to_string()) {
+            results.push(clean.to_string());
+        }
+    }
+
+    results
 }
 
 fn prompt_capture_state_path(hash: &str) -> PathBuf {
@@ -259,5 +345,72 @@ mod tests {
         };
 
         assert!(council_lifecycle_content(&event).is_none());
+    }
+
+    #[test]
+    fn detect_prompt_error_patterns_returns_matching_lines() {
+        let prompt = "All good\nerror: compilation failed\ncargo test FAILED\neverything fine";
+        let patterns = detect_prompt_error_patterns(prompt);
+        assert_eq!(patterns.len(), 2);
+        assert!(patterns[0].contains("error:"));
+        assert!(patterns[1].contains("FAILED"));
+    }
+
+    #[test]
+    fn detect_prompt_error_patterns_returns_empty_when_no_matches() {
+        let prompt = "implement the feature\nadd tests\nship it";
+        let patterns = detect_prompt_error_patterns(prompt);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn detect_prompt_error_patterns_truncates_long_lines() {
+        let long_line = "error: ".to_string() + &"x".repeat(300);
+        let patterns = detect_prompt_error_patterns(&long_line);
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].chars().count(), 200);
+    }
+
+    #[test]
+    fn detect_prompt_error_patterns_limits_to_five_matches() {
+        let many_errors = (0..10)
+            .map(|i| format!("error: failure {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let patterns = detect_prompt_error_patterns(&many_errors);
+        assert_eq!(patterns.len(), 5);
+    }
+
+    #[test]
+    fn extract_file_refs_finds_path_like_tokens() {
+        let prompt = "please read src/main.rs and also check tests/integration.rs";
+        let refs = extract_file_refs(prompt);
+        assert!(refs.contains(&"src/main.rs".to_string()));
+        assert!(refs.contains(&"tests/integration.rs".to_string()));
+    }
+
+    #[test]
+    fn extract_file_refs_ignores_tokens_without_extension() {
+        let prompt = "look at src/lib and also /tmp/dir/";
+        let refs = extract_file_refs(prompt);
+        assert!(!refs.contains(&"src/lib".to_string()));
+        assert!(!refs.contains(&"/tmp/dir/".to_string()));
+    }
+
+    #[test]
+    fn extract_file_refs_returns_unique_results() {
+        let prompt = "check src/main.rs and src/main.rs again";
+        let refs = extract_file_refs(prompt);
+        assert_eq!(refs.len(), 1);
+    }
+
+    #[test]
+    fn extract_file_refs_limits_to_ten_results() {
+        let paths: Vec<String> = (0..15)
+            .map(|i| format!("src/file{i}.rs"))
+            .collect();
+        let prompt = paths.join(" ");
+        let refs = extract_file_refs(&prompt);
+        assert!(refs.len() <= 10);
     }
 }

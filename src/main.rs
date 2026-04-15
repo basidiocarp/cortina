@@ -18,6 +18,7 @@ mod status;
 mod statusline;
 #[cfg(test)]
 mod test_support;
+mod tool_usage;
 mod utils;
 
 use adapters::ClaudeCodeEventCommand;

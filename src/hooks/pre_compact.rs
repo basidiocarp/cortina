@@ -3,17 +3,18 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
-use crate::events::NormalizedLifecycleEvent;
+use crate::events::{NormalizedLifecycleEvent, OutcomeEvent, OutcomeKind};
+use crate::outcomes::{load_outcomes, record_outcome};
 use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 use crate::utils::{
-    Importance, command_exists, ensure_scoped_hyphae_session, load_json_file, project_name_for_cwd,
-    scope_hash, store_in_hyphae, temp_state_path, update_json_file,
+    Importance, command_exists, current_task_id_for_cwd, ensure_scoped_hyphae_session,
+    load_json_file, project_name_for_cwd, scope_hash, store_in_hyphae, temp_state_path,
+    update_json_file,
 };
 
 use super::post_tool_use::{get_pending_documents, get_pending_files};
 
 const MAX_RECORDED_SNAPSHOTS: usize = 16;
-const SNAPSHOT_TOPIC: &str = "session/compaction-snapshot";
 const SNAPSHOT_SESSION_TASK: &str = "pre compact snapshot";
 const SUMMARY_REQUEST: &str = "Please summarize the current work before compaction.";
 
@@ -50,7 +51,15 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
     let hash = scope_hash(Some(&event.cwd));
     let active_errors = load_active_errors(&hash);
     let files_modified = collect_modified_files(&hash);
-    let content = compaction_snapshot_content(event, &active_errors, &files_modified);
+    let active_task_id = current_task_id_for_cwd(Some(&event.cwd));
+    let signal_summary = build_signal_summary(&hash);
+    let content = compaction_snapshot_content(
+        event,
+        &active_errors,
+        &files_modified,
+        active_task_id.as_deref(),
+        &signal_summary,
+    );
 
     if !remember_snapshot_capture(&hash, &content) {
         return;
@@ -59,12 +68,15 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
     if command_exists("hyphae") {
         let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(SNAPSHOT_SESSION_TASK));
         let project = project_name_for_cwd(Some(&event.cwd));
-        store_in_hyphae(
-            SNAPSHOT_TOPIC,
-            &content,
-            Importance::High,
-            project.as_deref(),
+        let topic = project
+            .as_deref()
+            .map_or_else(|| "session/compaction-snapshot".to_string(), |name| format!("context/{name}/pre-compact"));
+        store_in_hyphae(&topic, &content, Importance::High, project.as_deref());
+        let outcome = OutcomeEvent::new(
+            OutcomeKind::KnowledgeExported,
+            format!("pre-compact snapshot stored in hyphae ({topic})"),
         );
+        let _ = record_outcome(&hash, outcome);
     }
 }
 
@@ -72,6 +84,8 @@ fn compaction_snapshot_content(
     event: &crate::events::PreCompactEvent,
     active_errors: &BTreeMap<String, ActiveErrorEntry>,
     files_modified: &[String],
+    active_task_id: Option<&str>,
+    signal_summary: &BTreeMap<String, usize>,
 ) -> String {
     let active_errors: Vec<_> = active_errors
         .values()
@@ -91,8 +105,20 @@ fn compaction_snapshot_content(
         "active_errors": active_errors,
         "files_modified": files_modified,
         "transcript_path": event.transcript_path,
+        "active_task_id": active_task_id,
+        "signal_summary": signal_summary,
     })
     .to_string()
+}
+
+/// Count outcomes by kind label for use in compaction snapshots.
+fn build_signal_summary(hash: &str) -> BTreeMap<String, usize> {
+    let outcomes = load_outcomes(hash);
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for outcome in &outcomes {
+        *counts.entry(outcome.kind.label().to_string()).or_insert(0) += 1;
+    }
+    counts
 }
 
 fn collect_modified_files(hash: &str) -> Vec<String> {
@@ -156,6 +182,8 @@ mod tests {
             &event,
             &active_errors,
             &["src/main.rs".to_string(), "README.md".to_string()],
+            Some("task-42"),
+            &BTreeMap::from([("error_detected".to_string(), 2usize)]),
         );
         let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid json");
 
@@ -173,6 +201,8 @@ mod tests {
         ));
         assert!(content.contains(r#""trigger":"manual""#));
         assert!(content.contains(r#""files_modified":["README.md","src/main.rs"]"#));
+        assert_eq!(parsed["active_task_id"].as_str(), Some("task-42"));
+        assert_eq!(parsed["signal_summary"]["error_detected"].as_u64(), Some(2));
     }
 
     #[test]

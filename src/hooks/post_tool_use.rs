@@ -31,8 +31,21 @@ pub fn handle(input: &str) -> Result<()> {
         None => {}
     }
 
+    if let Some(tool_name) = envelope.tool_name() {
+        let hash = crate::utils::scope_hash(envelope.cwd());
+        let source = crate::tool_usage::source_for_tool(tool_name);
+        crate::tool_usage::record_tool_call(tool_name, source, &hash);
+    }
+
     print!("{input}");
     Ok(())
+}
+
+/// Track file paths extracted from a user prompt into the pending-exports state.
+pub(crate) fn track_prompt_file_refs(paths: &[String], hash: &str) {
+    for path in paths {
+        pending::track_pending_file(path, hash);
+    }
 }
 
 pub(super) fn truncate(value: &str, limit: usize) -> String {

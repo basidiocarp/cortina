@@ -105,7 +105,7 @@ impl ClaudeCodeHookEnvelope {
         self.raw.get("session_id").and_then(Value::as_str)
     }
 
-    fn tool_name(&self) -> Option<&str> {
+    pub(crate) fn tool_name(&self) -> Option<&str> {
         self.raw.get("tool_name").and_then(Value::as_str)
     }
 

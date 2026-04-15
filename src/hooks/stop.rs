@@ -1,6 +1,7 @@
 mod summary;
 #[cfg(test)]
 mod tests;
+mod tool_usage_emit;
 mod transcript;
 
 use anyhow::Result;
@@ -59,6 +60,7 @@ pub fn handle(input: &str) -> Result<()> {
 
     if !command_exists("hyphae") {
         clear_outcomes(&hash);
+        crate::tool_usage::clear_tool_calls(&hash);
         return Ok(());
     }
 
@@ -153,6 +155,13 @@ pub fn handle(input: &str) -> Result<()> {
             session_feedback.2,
         );
         clear_outcomes(&hash);
+
+        // Emit tool usage event
+        let tool_calls = crate::tool_usage::load_tool_calls(&hash);
+        if !tool_calls.is_empty() {
+            tool_usage_emit::emit_tool_usage_event(&state.session_id, None, &tool_calls);
+        }
+        crate::tool_usage::clear_tool_calls(&hash);
     } else if !had_cached_session {
         clear_outcomes(&hash);
     }
