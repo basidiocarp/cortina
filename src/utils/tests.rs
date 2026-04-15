@@ -418,7 +418,10 @@ fn ensure_hyphae_session_with_runner_passes_context_signals_to_start() {
     assert!(saw_start);
     assert!(saw_protocol);
     assert_eq!(
-        result.as_ref().and_then(|state| state.memory_protocol.as_ref()).map(|protocol| protocol.schema_version.as_str()),
+        result
+            .as_ref()
+            .and_then(|state| state.memory_protocol.as_ref())
+            .map(|protocol| protocol.schema_version.as_str()),
         Some("1.0")
     );
     assert_eq!(

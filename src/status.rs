@@ -328,14 +328,16 @@ impl From<SessionState> for SessionStatus {
             project_root: session.project_root,
             worktree_id: session.worktree_id,
             started_at: session.started_at,
-            memory_protocol: session.memory_protocol.map(|protocol| MemoryProtocolStatus {
-                schema_version: protocol.schema_version,
-                summary: protocol.summary,
-                passive_resource_uri: protocol.passive_resource_uri,
-                store_tool: protocol.store_tool,
-                project_topics: protocol.project_topics,
-                protocol_resource_uri: protocol.protocol_resource_uri,
-            }),
+            memory_protocol: session
+                .memory_protocol
+                .map(|protocol| MemoryProtocolStatus {
+                    schema_version: protocol.schema_version,
+                    summary: protocol.summary,
+                    passive_resource_uri: protocol.passive_resource_uri,
+                    store_tool: protocol.store_tool,
+                    project_topics: protocol.project_topics,
+                    protocol_resource_uri: protocol.protocol_resource_uri,
+                }),
         }
     }
 }
@@ -539,7 +541,9 @@ mod tests {
 
         let rendered = render_status(&report);
         assert!(rendered.contains("session_memory_protocol_schema_version=1.0"));
-        assert!(rendered.contains("session_memory_protocol_passive_resource=hyphae://context/current"));
+        assert!(
+            rendered.contains("session_memory_protocol_passive_resource=hyphae://context/current")
+        );
         assert!(rendered.contains("session_memory_protocol_store_tool=hyphae_memory_store"));
     }
 

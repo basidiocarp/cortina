@@ -21,14 +21,14 @@ pub use command_signals::{
 };
 pub(crate) use hyphae_client::resolved_command;
 pub use hyphae_client::{Importance, command_exists, spawn_async_checked, store_in_hyphae};
+#[cfg(test)]
+pub use session_scope::MemoryProtocolState;
+pub(crate) use session_scope::scope_identity_for_cwd;
 pub use session_scope::{
     SessionState, end_scoped_hyphae_session, ensure_scoped_hyphae_session, load_session_state,
     log_hyphae_feedback_signal_for_session, log_scoped_hyphae_feedback_signal,
     project_name_for_cwd, scoped_session_liveness,
 };
-#[cfg(test)]
-pub use session_scope::MemoryProtocolState;
-pub(crate) use session_scope::scope_identity_for_cwd;
 #[cfg(test)]
 pub use state::save_json_file;
 pub use state::{

@@ -182,9 +182,11 @@ fn handle_bash_resolution_attaches_causal_error_signal() {
 
     let outcomes = crate::outcomes::load_outcomes(&hash);
     assert_eq!(outcomes.len(), 3);
-    assert!(outcomes
-        .iter()
-        .any(|event| event.kind == OutcomeKind::ValidationPassed));
+    assert!(
+        outcomes
+            .iter()
+            .any(|event| event.kind == OutcomeKind::ValidationPassed)
+    );
     let resolved = outcomes
         .iter()
         .find(|event| event.kind == OutcomeKind::ErrorResolved)

@@ -2,9 +2,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use super::{
-    BashToolEvent, FileEditEvent, PreCompactEvent, UserPromptSubmitEvent, VolvaHookEvent,
-};
+use super::{BashToolEvent, FileEditEvent, PreCompactEvent, UserPromptSubmitEvent, VolvaHookEvent};
 
 pub const NORMALIZED_LIFECYCLE_EVENT_SCHEMA_VERSION: &str = "1.0";
 
@@ -106,7 +104,9 @@ impl NormalizedLifecycleEvent {
         );
         normalized.cwd.clone_from(&event.cwd);
         normalized.tool_name = Some("bash".to_string());
-        normalized.metadata.insert("command".to_string(), json!(event.command));
+        normalized
+            .metadata
+            .insert("command".to_string(), json!(event.command));
         normalized
             .metadata
             .insert("exit_code".to_string(), json!(event.exit_code));
@@ -167,10 +167,15 @@ impl NormalizedLifecycleEvent {
             status,
             LifecycleHost::Volva,
             "volva_hook_event",
-            format!("volva hook lifecycle captured for phase `{}`", phase_label(event)),
+            format!(
+                "volva hook lifecycle captured for phase `{}`",
+                phase_label(event)
+            ),
         );
         normalized.cwd = Some(event.cwd.clone());
-        normalized.metadata.insert("phase".to_string(), json!(event.phase));
+        normalized
+            .metadata
+            .insert("phase".to_string(), json!(event.phase));
         normalized
             .metadata
             .insert("backend_kind".to_string(), json!(event.backend_kind));

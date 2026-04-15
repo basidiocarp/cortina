@@ -68,9 +68,10 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
     if command_exists("hyphae") {
         let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(SNAPSHOT_SESSION_TASK));
         let project = project_name_for_cwd(Some(&event.cwd));
-        let topic = project
-            .as_deref()
-            .map_or_else(|| "session/compaction-snapshot".to_string(), |name| format!("context/{name}/pre-compact"));
+        let topic = project.as_deref().map_or_else(
+            || "session/compaction-snapshot".to_string(),
+            |name| format!("context/{name}/pre-compact"),
+        );
         store_in_hyphae(&topic, &content, Importance::High, project.as_deref());
         let outcome = OutcomeEvent::new(
             OutcomeKind::KnowledgeExported,

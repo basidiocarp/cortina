@@ -3,15 +3,17 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
-use crate::events::{NormalizedLifecycleEvent, OutcomeEvent, OutcomeKind, UserPromptSubmitEvent, is_council_prompt};
+use crate::events::{
+    NormalizedLifecycleEvent, OutcomeEvent, OutcomeKind, UserPromptSubmitEvent, is_council_prompt,
+};
 use crate::outcomes::record_outcome;
 use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 #[cfg(test)]
 use crate::utils::load_json_file;
 use crate::utils::{
     Importance, command_exists, current_task_id_for_cwd, ensure_scoped_hyphae_session,
-    project_name_for_cwd, scope_hash, scope_identity_for_cwd, store_in_hyphae,
-    temp_state_path, update_json_file,
+    project_name_for_cwd, scope_hash, scope_identity_for_cwd, store_in_hyphae, temp_state_path,
+    update_json_file,
 };
 
 const MAX_RECORDED_PROMPTS: usize = 32;
@@ -62,7 +64,12 @@ fn capture_prompt_submit(event: &UserPromptSubmitEvent) {
         })
         .to_string();
         let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(PROMPT_SESSION_TASK));
-        store_in_hyphae("errors/active", &error_content, Importance::Medium, project.as_deref());
+        store_in_hyphae(
+            "errors/active",
+            &error_content,
+            Importance::Medium,
+            project.as_deref(),
+        );
     }
 
     // B3: extract file references and track them as pending exports
@@ -169,7 +176,12 @@ fn annotate_task_linkage<SI, TL>(
 /// Patterns must appear at line start or followed by `:` or `[` to avoid false positives.
 fn detect_prompt_error_patterns(prompt: &str) -> Vec<String> {
     const ERROR_PATTERNS: &[&str] = &[
-        "error", "failed", "panicked", "FAILED", "could not", "cannot",
+        "error",
+        "failed",
+        "panicked",
+        "FAILED",
+        "could not",
+        "cannot",
     ];
     const MAX_LINE_LEN: usize = 200;
     const MAX_MATCHES: usize = 5;
@@ -208,7 +220,9 @@ pub(crate) fn extract_file_refs(prompt: &str) -> Vec<String> {
         if results.len() >= MAX_REFS {
             break;
         }
-        let clean = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-');
+        let clean = token.trim_matches(|c: char| {
+            !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
+        });
         if clean.len() < MIN_LEN || clean.len() > MAX_LEN {
             continue;
         }
@@ -418,9 +432,7 @@ mod tests {
 
     #[test]
     fn extract_file_refs_limits_to_ten_results() {
-        let paths: Vec<String> = (0..15)
-            .map(|i| format!("src/file{i}.rs"))
-            .collect();
+        let paths: Vec<String> = (0..15).map(|i| format!("src/file{i}.rs")).collect();
         let prompt = paths.join(" ");
         let refs = extract_file_refs(&prompt);
         assert!(refs.len() <= 10);

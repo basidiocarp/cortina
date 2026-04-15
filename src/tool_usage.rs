@@ -1,4 +1,6 @@
-use crate::utils::{current_timestamp_ms, load_json_file, remove_file_with_lock, temp_state_path, update_json_file};
+use crate::utils::{
+    current_timestamp_ms, load_json_file, remove_file_with_lock, temp_state_path, update_json_file,
+};
 
 pub const TOOL_USAGE_STATE_NAME: &str = "tool-usage";
 
