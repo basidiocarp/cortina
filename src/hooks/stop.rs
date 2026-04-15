@@ -164,6 +164,7 @@ pub fn handle(input: &str) -> Result<()> {
         crate::tool_usage::clear_tool_calls(&hash);
     } else if !had_cached_session {
         clear_outcomes(&hash);
+        crate::tool_usage::clear_tool_calls(&hash);
     }
 
     Ok(())
