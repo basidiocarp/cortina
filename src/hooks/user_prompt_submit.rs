@@ -166,6 +166,7 @@ fn annotate_task_linkage<SI, TL>(
 
 /// Scan the prompt for lines that look like error output.
 /// Returns up to 5 matching lines, each truncated to 200 chars.
+/// Patterns must appear at line start or followed by `:` or `[` to avoid false positives.
 fn detect_prompt_error_patterns(prompt: &str) -> Vec<String> {
     const ERROR_PATTERNS: &[&str] = &[
         "error", "failed", "panicked", "FAILED", "could not", "cannot",
@@ -173,9 +174,16 @@ fn detect_prompt_error_patterns(prompt: &str) -> Vec<String> {
     const MAX_LINE_LEN: usize = 200;
     const MAX_MATCHES: usize = 5;
 
+    fn matches_pattern(line: &str, pattern: &str) -> bool {
+        if line.starts_with(pattern) {
+            return true;
+        }
+        line.contains(&format!("{pattern}:")) || line.contains(&format!("{pattern}["))
+    }
+
     prompt
         .lines()
-        .filter(|line| ERROR_PATTERNS.iter().any(|pat| line.contains(pat)))
+        .filter(|line| ERROR_PATTERNS.iter().any(|pat| matches_pattern(line, pat)))
         .take(MAX_MATCHES)
         .map(|line| {
             let truncated: String = line.chars().take(MAX_LINE_LEN).collect();
@@ -187,6 +195,7 @@ fn detect_prompt_error_patterns(prompt: &str) -> Vec<String> {
 /// Extract tokens from the prompt that look like file paths.
 /// A token qualifies when it contains `/`, has a file extension,
 /// and is between 3 and 512 chars long. Returns at most 10 unique results.
+/// URLs are filtered out.
 pub(crate) fn extract_file_refs(prompt: &str) -> Vec<String> {
     const MIN_LEN: usize = 3;
     const MAX_LEN: usize = 512;
@@ -201,6 +210,9 @@ pub(crate) fn extract_file_refs(prompt: &str) -> Vec<String> {
         }
         let clean = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-');
         if clean.len() < MIN_LEN || clean.len() > MAX_LEN {
+            continue;
+        }
+        if clean.starts_with("http://") || clean.starts_with("https://") {
             continue;
         }
         if !clean.contains('/') {
@@ -349,11 +361,11 @@ mod tests {
 
     #[test]
     fn detect_prompt_error_patterns_returns_matching_lines() {
-        let prompt = "All good\nerror: compilation failed\ncargo test FAILED\neverything fine";
+        let prompt = "All good\nerror: compilation failed\nFAILED: cargo test\neverything fine";
         let patterns = detect_prompt_error_patterns(prompt);
         assert_eq!(patterns.len(), 2);
         assert!(patterns[0].contains("error:"));
-        assert!(patterns[1].contains("FAILED"));
+        assert!(patterns[1].contains("FAILED:"));
     }
 
     #[test]
@@ -412,5 +424,12 @@ mod tests {
         let prompt = paths.join(" ");
         let refs = extract_file_refs(&prompt);
         assert!(refs.len() <= 10);
+    }
+
+    #[test]
+    fn extract_file_refs_ignores_urls() {
+        let prompt = "see https://docs.rs/serde/latest/serde.html for docs";
+        let refs = extract_file_refs(prompt);
+        assert!(refs.is_empty());
     }
 }

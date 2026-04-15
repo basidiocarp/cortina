@@ -28,8 +28,10 @@ struct ToolUsageEventV1 {
     session_id: String,
     host: String,
     timestamp: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     tools_available: Vec<ToolAvailableItem>,
     tools_called: Vec<ToolCalledItem>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     tools_relevant_unused: Vec<ToolRelevantUnusedItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     task_id: Option<String>,
@@ -143,7 +145,6 @@ mod tests {
 
     #[test]
     fn ms_to_iso8601_produces_valid_format() {
-        // 2026-04-14T10:00:00Z in milliseconds
         let ms = 1776245200000u64;
         let iso = ms_to_iso8601(ms);
 
@@ -151,6 +152,12 @@ mod tests {
         assert!(iso.contains("T"), "should contain T separator");
         assert!(iso.ends_with("Z"), "should end with Z for UTC");
         assert!(iso.contains('-'), "should contain date separators");
+    }
+
+    #[test]
+    fn ms_to_iso8601_known_values() {
+        assert_eq!(ms_to_iso8601(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(ms_to_iso8601(946684800000), "2000-01-01T00:00:00.000Z");
     }
 
     #[test]
