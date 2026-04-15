@@ -717,10 +717,15 @@ mod tests {
         .expect("serialize usage event payload");
         let fixture_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../septa/fixtures/usage-event-v1.example.json");
-        let fixture: Value = serde_json::from_str(
-            &fs::read_to_string(&fixture_path).expect("read Septa usage-event fixture"),
-        )
-        .expect("parse Septa usage-event fixture");
+        let Ok(fixture_raw) = fs::read_to_string(&fixture_path) else {
+            eprintln!(
+                "skipping septa fixture comparison: {} not found (standalone checkout)",
+                fixture_path.display()
+            );
+            return;
+        };
+        let fixture: Value =
+            serde_json::from_str(&fixture_raw).expect("parse Septa usage-event fixture");
 
         assert_eq!(payload, fixture);
     }
