@@ -7,9 +7,9 @@ use crate::events::{NormalizedLifecycleEvent, OutcomeEvent, OutcomeKind};
 use crate::outcomes::{load_outcomes, record_outcome};
 use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 use crate::utils::{
-    Importance, command_exists, current_task_id_for_cwd, ensure_scoped_hyphae_session,
-    load_json_file, project_name_for_cwd, scope_hash, store_in_hyphae, temp_state_path,
-    update_json_file,
+    Importance, command_exists, current_task_id_for_cwd, current_timestamp_ms,
+    ensure_scoped_hyphae_session, load_json_file, project_name_for_cwd, scope_hash,
+    store_compact_summary_artifact, store_in_hyphae, temp_state_path, update_json_file,
 };
 
 use super::post_tool_use::{get_pending_documents, get_pending_files};
@@ -78,6 +78,17 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
             format!("pre-compact snapshot stored in hyphae ({topic})"),
         );
         let _ = record_outcome(&hash, outcome);
+
+        // Emit a typed compact_summary artifact alongside the snapshot. Failures
+        // are isolated — the artifact path logs and continues independently of
+        // the snapshot store above.
+        let artifact = compact_summary_artifact_payload(
+            event,
+            &files_modified,
+            active_task_id.as_deref(),
+            &signal_summary,
+        );
+        store_compact_summary_artifact(&artifact, project.as_deref());
     }
 }
 
@@ -108,6 +119,31 @@ fn compaction_snapshot_content(
         "transcript_path": event.transcript_path,
         "active_task_id": active_task_id,
         "signal_summary": signal_summary,
+    })
+    .to_string()
+}
+
+/// Build a typed `compact_summary` artifact payload for Hyphae.
+///
+/// The topic used by [`store_compact_summary_artifact`] is
+/// `artifact/compact_summary/{session_id}`, making it queryable by convention.
+fn compact_summary_artifact_payload(
+    event: &crate::events::PreCompactEvent,
+    files_modified: &[String],
+    active_task_id: Option<&str>,
+    signal_summary: &BTreeMap<String, usize>,
+) -> String {
+    let mut files_modified = files_modified.to_vec();
+    files_modified.sort();
+    json!({
+        "artifact_type": "compact_summary",
+        "session_id": event.session_id,
+        "project": project_name_for_cwd(Some(&event.cwd)),
+        "files_modified": files_modified,
+        "active_task_id": active_task_id,
+        "signal_summary": signal_summary,
+        "summary_request": SUMMARY_REQUEST,
+        "created_at": current_timestamp_ms(),
     })
     .to_string()
 }
@@ -204,6 +240,42 @@ mod tests {
         assert!(content.contains(r#""files_modified":["README.md","src/main.rs"]"#));
         assert_eq!(parsed["active_task_id"].as_str(), Some("task-42"));
         assert_eq!(parsed["signal_summary"]["error_detected"].as_u64(), Some(2));
+    }
+
+    #[test]
+    fn compact_summary_artifact_payload_has_required_fields() {
+        let event = PreCompactEvent {
+            session_id: "ses_artifact".to_string(),
+            cwd: "/tmp/demo".to_string(),
+            trigger: "manual".to_string(),
+            custom_instructions: None,
+            transcript_path: None,
+        };
+        let signal_summary =
+            BTreeMap::from([("knowledge_exported".to_string(), 1usize)]);
+        let payload = compact_summary_artifact_payload(
+            &event,
+            &["src/lib.rs".to_string(), "src/main.rs".to_string()],
+            Some("task-7"),
+            &signal_summary,
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&payload).expect("valid json");
+
+        assert_eq!(parsed["artifact_type"].as_str(), Some("compact_summary"));
+        assert_eq!(parsed["session_id"].as_str(), Some("ses_artifact"));
+        assert_eq!(
+            parsed["summary_request"].as_str(),
+            Some(SUMMARY_REQUEST)
+        );
+        assert_eq!(parsed["active_task_id"].as_str(), Some("task-7"));
+        assert_eq!(
+            parsed["signal_summary"]["knowledge_exported"].as_u64(),
+            Some(1)
+        );
+        assert!(parsed["created_at"].as_u64().is_some());
+        let files = parsed["files_modified"].as_array().expect("array");
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].as_str(), Some("src/lib.rs"));
     }
 
     #[test]

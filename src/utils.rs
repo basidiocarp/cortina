@@ -20,7 +20,10 @@ pub use command_signals::{
     session_outcome_feedback, successful_validation_feedback,
 };
 pub(crate) use hyphae_client::resolved_command;
-pub use hyphae_client::{Importance, command_exists, spawn_async_checked, store_in_hyphae};
+pub use hyphae_client::{
+    Importance, command_exists, spawn_async_checked, store_compact_summary_artifact,
+    store_in_hyphae,
+};
 #[cfg(test)]
 pub use session_scope::MemoryProtocolState;
 pub(crate) use session_scope::scope_identity_for_cwd;

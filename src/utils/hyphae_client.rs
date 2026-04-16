@@ -91,6 +91,47 @@ pub fn store_in_hyphae(topic: &str, content: &str, importance: Importance, proje
     }
 }
 
+/// Store a typed `compact_summary` artifact in Hyphae.
+///
+/// Uses topic `artifact/compact_summary/{session_id}` so the artifact is
+/// queryable by convention. Failures are logged and swallowed so they cannot
+/// break the existing pre-compact capture flow.
+pub fn store_compact_summary_artifact(payload: &str, project: Option<&str>) {
+    let span_ctx = span_context("hyphae_store_artifact");
+    let _tool_span = tool_span("hyphae_store_artifact", &span_ctx).entered();
+    let Some(mut cmd) = resolved_command("hyphae") else {
+        debug!("Hyphae binary is not discoverable; skipping compact_summary artifact store");
+        return;
+    };
+
+    // Extract session_id from the payload for the topic, falling back to
+    // "unknown" so the store still lands under a queryable prefix.
+    let session_id = serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|v| v["session_id"].as_str().map(ToString::to_string))
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let topic = format!("artifact/compact_summary/{session_id}");
+
+    cmd.args(["store", "--topic", &topic])
+        .args(["--content", payload])
+        .args(["--importance", Importance::High.as_str()])
+        .args(["--keywords", "cortina,hook,compact_summary,artifact"]);
+
+    if let Some(proj) = project {
+        cmd.args(["-P", proj]);
+    }
+
+    let _spawn_span = subprocess_span("hyphae store artifact", &span_ctx).entered();
+    if let Err(err) = cmd
+        .stdout(std::process::Stdio::null())
+        .stderr(diagnostic_stderr())
+        .spawn()
+    {
+        warn!("Failed to spawn hyphae store for compact_summary artifact: {err}");
+    }
+}
+
 pub fn spawn_async_checked(cmd: &str, args: &[&str]) -> bool {
     let context = span_context(cmd);
     let _tool_span = tool_span("spawn_async_checked", &context).entered();
