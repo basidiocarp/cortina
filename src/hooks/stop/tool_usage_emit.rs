@@ -141,19 +141,19 @@ mod tests {
 
     #[test]
     fn ms_to_iso8601_produces_valid_format() {
-        let ms = 1776245200000u64;
+        let ms = 1_776_245_200_000u64;
         let iso = ms_to_iso8601(ms);
 
         // Should be ISO 8601 format
-        assert!(iso.contains("T"), "should contain T separator");
-        assert!(iso.ends_with("Z"), "should end with Z for UTC");
+        assert!(iso.contains('T'), "should contain T separator");
+        assert!(iso.ends_with('Z'), "should end with Z for UTC");
         assert!(iso.contains('-'), "should contain date separators");
     }
 
     #[test]
     fn ms_to_iso8601_known_values() {
         assert_eq!(ms_to_iso8601(0), "1970-01-01T00:00:00.000Z");
-        assert_eq!(ms_to_iso8601(946684800000), "2000-01-01T00:00:00.000Z");
+        assert_eq!(ms_to_iso8601(946_684_800_000), "2000-01-01T00:00:00.000Z");
     }
 
     #[test]
