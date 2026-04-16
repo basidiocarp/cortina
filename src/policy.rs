@@ -22,6 +22,13 @@ pub struct CapturePolicy {
     pub max_outcome_events: usize,
     pub fallback_session_memory_on_end_failure: bool,
     pub fail_open_lifecycle_capture: bool,
+    /// Hook names that are disabled for this session.
+    ///
+    /// Set via `CORTINA_DISABLED_HOOKS` as a comma-separated list, e.g.
+    /// `pre_tool_use,pre_compact`.  Valid names: `pre_tool_use`,
+    /// `post_tool_use`, `user_prompt_submit`, `pre_compact`, `stop`,
+    /// `session_end`.
+    pub disabled_hooks: Vec<String>,
 }
 
 pub fn capture_policy() -> &'static CapturePolicy {
@@ -74,6 +81,7 @@ impl CapturePolicy {
                 false,
             ),
             fail_open_lifecycle_capture: FAIL_OPEN_LIFECYCLE_CAPTURE,
+            disabled_hooks: read_disabled_hooks(&read_env, "CORTINA_DISABLED_HOOKS"),
         }
     }
 }
@@ -88,6 +96,21 @@ fn read_usize(read_env: &impl Fn(&str) -> Option<String>, name: &str, default: u
     read_env(name)
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(default)
+}
+
+fn read_disabled_hooks(
+    read_env: &impl Fn(&str) -> Option<String>,
+    name: &str,
+) -> Vec<String> {
+    read_env(name)
+        .map(|val| {
+            val.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_lowercase)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn read_bool(read_env: &impl Fn(&str) -> Option<String>, name: &str, default: bool) -> bool {
@@ -136,6 +159,18 @@ mod tests {
         assert_eq!(policy.max_outcome_events, 55);
         assert!(policy.fallback_session_memory_on_end_failure);
         assert!(policy.fail_open_lifecycle_capture);
+        assert!(policy.disabled_hooks.is_empty());
+    }
+
+    #[test]
+    fn parses_disabled_hooks_from_env() {
+        let policy = CapturePolicy::from_reader(|name| match name {
+            "CORTINA_DISABLED_HOOKS" => Some("pre_tool_use, stop".to_string()),
+            _ => None,
+        });
+        assert!(policy.disabled_hooks.contains(&"pre_tool_use".to_string()));
+        assert!(policy.disabled_hooks.contains(&"stop".to_string()));
+        assert_eq!(policy.disabled_hooks.len(), 2);
     }
 
     #[test]
@@ -161,5 +196,6 @@ mod tests {
         assert!(policy.rhizome_suggest_enabled);
         assert!(!policy.fallback_session_memory_on_end_failure);
         assert!(policy.fail_open_lifecycle_capture);
+        assert!(policy.disabled_hooks.is_empty());
     }
 }
