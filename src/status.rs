@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -5,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde::Serialize;
 
+use crate::hooks::pre_tool_use::ADVISORY_STATE_NAME;
 use crate::policy::{CapturePolicy, capture_policy};
 #[cfg(test)]
 use crate::utils::save_json_file;
@@ -27,6 +29,8 @@ pub struct StatusReport {
     pending_ingest_count: usize,
     evidence_refs_written: usize,
     evidence_write_failures: usize,
+    advisory_read_fire_count: usize,
+    advisory_grep_fire_count: usize,
     policy: CapturePolicy,
 }
 
@@ -156,6 +160,14 @@ fn render_status(report: &StatusReport) -> String {
         report.evidence_write_failures
     ));
     lines.push(format!(
+        "advisory_read_fire_count={}",
+        report.advisory_read_fire_count
+    ));
+    lines.push(format!(
+        "advisory_grep_fire_count={}",
+        report.advisory_grep_fire_count
+    ));
+    lines.push(format!(
         "policy=dedupe:{}ms correction:{}ms cleanup:{}ms export:{} ingest:{} rhizome_suggest:{}lines/{}calls grace:{}ms max_outcomes:{} fallback_on_end_failure:{}",
         report.policy.outcome_dedupe_window_ms,
         report.policy.correction_window_ms,
@@ -212,6 +224,7 @@ pub fn collect_status(cwd: Option<&str>) -> StatusReport {
     let hash = scope_hash(Some(&cwd));
     let session_live = scoped_session_liveness(Some(&cwd));
     let evidence_bridge = evidence_bridge_stats(&hash);
+    let (advisory_read_fire_count, advisory_grep_fire_count) = advisory_counts(&hash);
     StatusReport {
         cwd,
         scope_hash: hash.clone(),
@@ -225,8 +238,26 @@ pub fn collect_status(cwd: Option<&str>) -> StatusReport {
         pending_ingest_count: json_vec_len(&pending_ingest_path(&hash)),
         evidence_refs_written: evidence_bridge.evidence_refs_written,
         evidence_write_failures: evidence_bridge.evidence_write_failures,
+        advisory_read_fire_count,
+        advisory_grep_fire_count,
         policy: capture_policy().clone(),
     }
+}
+
+fn advisory_counts(hash: &str) -> (usize, usize) {
+    let path = temp_state_path(ADVISORY_STATE_NAME, hash, "json");
+    let entries = load_json_file::<HashMap<String, usize>>(&path).unwrap_or_default();
+    let read_count = entries
+        .iter()
+        .filter(|(key, _)| key.starts_with("read:"))
+        .map(|(_, &count)| count)
+        .sum();
+    let grep_count = entries
+        .iter()
+        .filter(|(key, _)| key.starts_with("grep:"))
+        .map(|(_, &count)| count)
+        .sum();
+    (read_count, grep_count)
 }
 
 pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
@@ -536,6 +567,8 @@ mod tests {
             pending_ingest_count: 0,
             evidence_refs_written: 0,
             evidence_write_failures: 0,
+            advisory_read_fire_count: 0,
+            advisory_grep_fire_count: 0,
             policy: capture_policy().clone(),
         };
 
@@ -626,5 +659,37 @@ mod tests {
             .expect("session object");
 
         assert!(!session.contains_key("_legacy_scope"));
+    }
+
+    #[test]
+    fn collect_status_reports_advisory_counts() {
+        // Case 1: advisory state file with a mix of read:* and grep:* keys
+        let cwd = test_cwd("status-advisory");
+        let hash = scope_hash(Some(&cwd));
+        let advisory_path = temp_state_path(ADVISORY_STATE_NAME, &hash, "json");
+
+        let mut advisory_entries: HashMap<String, usize> = HashMap::new();
+        advisory_entries.insert("read:rs".to_string(), 3);
+        advisory_entries.insert("read:py".to_string(), 2);
+        advisory_entries.insert("grep:type".to_string(), 4);
+        advisory_entries.insert("grep:symbol".to_string(), 1);
+        update_json_file::<HashMap<String, usize>, _, _>(&advisory_path, |entries| {
+            *entries = advisory_entries;
+        })
+        .expect("write advisory state");
+
+        let report = collect_status(Some(&cwd));
+        assert_eq!(report.advisory_read_fire_count, 5);
+        assert_eq!(report.advisory_grep_fire_count, 5);
+
+        let rendered = render_status(&report);
+        assert!(rendered.contains("advisory_read_fire_count=5"));
+        assert!(rendered.contains("advisory_grep_fire_count=5"));
+
+        // Case 2: missing advisory file → both counts default to 0
+        let cwd2 = test_cwd("status-advisory-missing");
+        let report2 = collect_status(Some(&cwd2));
+        assert_eq!(report2.advisory_read_fire_count, 0);
+        assert_eq!(report2.advisory_grep_fire_count, 0);
     }
 }

@@ -23,7 +23,7 @@ const CODE_EXTENSIONS: &[&str] = &[
     "rs", "py", "js", "ts", "tsx", "jsx", "go", "java", "c", "cpp", "h", "hpp", "rb", "php",
     "swift", "zig", "ex", "exs", "lua", "hs", "cs", "kt", "dart", "vue", "svelte", "astro",
 ];
-const ADVISORY_STATE_NAME: &str = "advisories";
+pub const ADVISORY_STATE_NAME: &str = "advisories";
 const READ_ADVISORY_MESSAGE: &str = "[cortina] Large code file - consider: \
 mcp__rhizome__get_symbols or mcp__rhizome__get_structure for structure, or \
 mcp__rhizome__get_symbol_body for a specific function";
