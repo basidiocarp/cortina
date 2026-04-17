@@ -1,6 +1,7 @@
 use std::fmt::Write as _;
 use std::fs;
 
+use crate::tool_usage::{ToolSource, clear_tool_calls, record_tool_call};
 use crate::utils::remove_file_with_lock;
 
 use super::*;
@@ -150,6 +151,101 @@ fn tool_suggestion_respects_rate_limit_per_scope_and_pattern_type() {
 
     let _ = remove_file_with_lock(&path);
     let _ = fs::remove_dir_all(&temp_dir);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// pre_write advisory tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn pre_write_test_cwd(label: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("cortina-pre-write-{}-{}", std::process::id(), label))
+}
+
+#[test]
+fn pre_write_advisory_emitted_for_rs_file_without_rhizome_calls() {
+    let cwd = pre_write_test_cwd("no-rhizome");
+    let _ = fs::remove_dir_all(&cwd);
+    fs::create_dir_all(&cwd).unwrap();
+    let cwd_str = cwd.to_str().unwrap();
+
+    // Seed session with a non-rhizome call so session is not empty
+    let hash = scope_hash(Some(cwd_str));
+    record_tool_call("Read", ToolSource::Other, &hash);
+
+    let advisory = write_advisory(Some(cwd_str), "Write", Some("src/lib.rs"));
+    assert!(
+        advisory.is_some(),
+        "expected advisory when no rhizome tool called"
+    );
+    let advisory = advisory.unwrap();
+    assert!(
+        advisory.message.contains("[cortina]"),
+        "message should start with cortina tag"
+    );
+    assert!(
+        advisory.rate_limit_key.starts_with("pre_write:Write:"),
+        "rate limit key should include operation"
+    );
+
+    clear_tool_calls(&hash);
+    let _ = fs::remove_dir_all(&cwd);
+}
+
+#[test]
+fn pre_write_advisory_suppressed_when_rhizome_already_called() {
+    let cwd = pre_write_test_cwd("with-rhizome");
+    let _ = fs::remove_dir_all(&cwd);
+    fs::create_dir_all(&cwd).unwrap();
+    let cwd_str = cwd.to_str().unwrap();
+
+    let hash = scope_hash(Some(cwd_str));
+    record_tool_call("mcp__rhizome__get_symbols", ToolSource::Rhizome, &hash);
+
+    let advisory = write_advisory(Some(cwd_str), "Edit", Some("src/main.rs"));
+    assert!(
+        advisory.is_none(),
+        "no advisory expected when rhizome tool was called"
+    );
+
+    clear_tool_calls(&hash);
+    let _ = fs::remove_dir_all(&cwd);
+}
+
+#[test]
+fn pre_write_advisory_not_emitted_for_markdown_files() {
+    let cwd = pre_write_test_cwd("md-file");
+    let _ = fs::remove_dir_all(&cwd);
+    fs::create_dir_all(&cwd).unwrap();
+    let cwd_str = cwd.to_str().unwrap();
+
+    let hash = scope_hash(Some(cwd_str));
+    record_tool_call("Bash", ToolSource::Other, &hash);
+
+    let advisory = write_advisory(Some(cwd_str), "Write", Some("README.md"));
+    assert!(
+        advisory.is_none(),
+        "no advisory expected for markdown files"
+    );
+
+    clear_tool_calls(&hash);
+    let _ = fs::remove_dir_all(&cwd);
+}
+
+#[test]
+fn pre_write_advisory_not_emitted_when_session_has_no_tool_calls() {
+    let cwd = pre_write_test_cwd("empty-session");
+    let _ = fs::remove_dir_all(&cwd);
+    fs::create_dir_all(&cwd).unwrap();
+    let cwd_str = cwd.to_str().unwrap();
+
+    // Do NOT record any tool calls — fresh session
+    let advisory = write_advisory(Some(cwd_str), "Write", Some("src/lib.rs"));
+    assert!(
+        advisory.is_none(),
+        "no advisory expected when session just started"
+    );
+
+    let _ = fs::remove_dir_all(&cwd);
 }
 
 #[test]

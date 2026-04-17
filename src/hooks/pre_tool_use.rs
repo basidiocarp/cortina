@@ -10,6 +10,8 @@ use tracing::{debug, warn};
 use crate::adapters::claude_code::{ClaudeCodeHookEnvelope, rewrite_response};
 use crate::hooks::pre_commit::handoff_pre_commit_warnings;
 use crate::policy::{CapturePolicy, capture_policy};
+use crate::rules::{DEFAULT_RULES, any_recommended_called, matching_rules};
+use crate::tool_usage::load_tool_calls;
 use crate::utils::{
     command_exists, resolved_command, scope_hash, temp_state_path, update_json_file,
 };
@@ -167,6 +169,13 @@ fn tool_suggestion_message_with_availability(
         envelope
             .tool_input_string("pattern")
             .and_then(grep_advisory_for_pattern)
+    } else if envelope.tool_name_is("Write")
+        || envelope.tool_name_is("Edit")
+        || envelope.tool_name_is("MultiEdit")
+    {
+        let file_path = envelope.tool_input_string("file_path");
+        let operation = envelope.tool_name()?;
+        write_advisory(envelope.cwd(), operation, file_path)
     } else {
         None
     }?;
@@ -176,12 +185,12 @@ fn tool_suggestion_message_with_availability(
         &advisory.rate_limit_key,
         policy.rhizome_suggest_every,
     )
-    .then_some(advisory.message.to_string())
+    .then_some(advisory.message)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ToolAdvisory {
-    message: &'static str,
+    message: String,
     rate_limit_key: String,
 }
 
@@ -202,7 +211,7 @@ fn read_advisory_for_path(
 
     let extension = code_extension(file_path)?;
     Some(ToolAdvisory {
-        message: READ_ADVISORY_MESSAGE,
+        message: READ_ADVISORY_MESSAGE.to_string(),
         rate_limit_key: format!("read:{extension}"),
     })
 }
@@ -210,8 +219,42 @@ fn read_advisory_for_path(
 fn grep_advisory_for_pattern(pattern: &str) -> Option<ToolAdvisory> {
     let symbol_kind = symbol_like_grep_kind(pattern)?;
     Some(ToolAdvisory {
-        message: GREP_ADVISORY_MESSAGE,
+        message: GREP_ADVISORY_MESSAGE.to_string(),
         rate_limit_key: format!("grep:{symbol_kind}"),
+    })
+}
+
+fn write_advisory(
+    cwd: Option<&str>,
+    operation: &str,
+    file_path: Option<&str>,
+) -> Option<ToolAdvisory> {
+    let hash = scope_hash(cwd);
+    let tool_calls = load_tool_calls(&hash);
+
+    // No advisory when session just started and no tool calls have been made yet.
+    if tool_calls.is_empty() {
+        return None;
+    }
+
+    let called_names: Vec<&str> = tool_calls.iter().map(|e| e.tool_name.as_str()).collect();
+    let rules = matching_rules(DEFAULT_RULES, operation, file_path);
+
+    let rule = rules
+        .into_iter()
+        .find(|rule| !any_recommended_called(rule, &called_names))?;
+
+    let extension = file_path.and_then(code_extension).unwrap_or_default();
+    let tools_list = rule.recommended_tools.join(", ");
+    let file_label = file_path.unwrap_or("this file");
+    let message = format!(
+        "[cortina] Consider calling {tools_list} before editing {file_label} — \
+        rhizome tools can help with structure and symbol navigation"
+    );
+
+    Some(ToolAdvisory {
+        message,
+        rate_limit_key: format!("pre_write:{operation}:{extension}"),
     })
 }
 

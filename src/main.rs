@@ -15,6 +15,7 @@ mod hooks;
 mod outcomes;
 mod policy;
 mod risk;
+mod rules;
 mod status;
 mod statusline;
 #[cfg(test)]
