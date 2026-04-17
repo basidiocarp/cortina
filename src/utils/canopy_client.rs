@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use spore::logging::{SpanContext, subprocess_span, tool_span, workflow_span};
+use spore::telemetry::TraceContextCarrier;
 use tracing::{debug, warn};
 
 use crate::events::OutcomeEvent;
@@ -154,6 +155,14 @@ fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
     );
     let _tool_span = tool_span("canopy_agent_list", &context).entered();
     let mut command = resolved_command("canopy")?;
+
+    if let Some(carrier) = TraceContextCarrier::from_current() {
+        command.env("TRACEPARENT", &carrier.traceparent);
+        if let Some(ref ts) = carrier.tracestate {
+            command.env("TRACESTATE", ts);
+        }
+    }
+
     let _subprocess_span = subprocess_span("canopy agent list", &context).entered();
     let output = command.arg("agent").arg("list").output().ok()?;
     if !output.status.success() {
@@ -188,6 +197,13 @@ fn attempt_outcome_evidence_write(
     let Some(mut command) = resolved_command("canopy") else {
         return false;
     };
+
+    if let Some(carrier) = TraceContextCarrier::from_current() {
+        command.env("TRACEPARENT", &carrier.traceparent);
+        if let Some(ref ts) = carrier.tracestate {
+            command.env("TRACESTATE", ts);
+        }
+    }
 
     for arg in evidence_command_args(task_id, evidence) {
         command.arg(arg);

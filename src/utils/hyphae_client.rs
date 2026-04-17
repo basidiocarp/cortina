@@ -158,6 +158,13 @@ pub fn spawn_async_checked(cmd: &str, args: &[&str]) -> bool {
         command.arg(arg);
     }
 
+    if let Some(carrier) = TraceContextCarrier::from_current() {
+        command.env("TRACEPARENT", &carrier.traceparent);
+        if let Some(ref ts) = carrier.tracestate {
+            command.env("TRACESTATE", ts);
+        }
+    }
+
     let _spawn_span = subprocess_span(cmd, &context).entered();
     match command
         .stdout(std::process::Stdio::null())

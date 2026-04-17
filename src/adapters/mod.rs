@@ -59,9 +59,13 @@ pub enum VolvaEventCommand {
 }
 
 pub fn handle_adapter_command(adapter: &AdapterCommand, input: &str) -> Result<()> {
+    let event_id = match adapter {
+        AdapterCommand::ClaudeCode { event } => format!("claude-code.{event:?}"),
+        AdapterCommand::Volva { event } => format!("volva.{event:?}"),
+    };
     let span = tracing::info_span!("cortina.event_dispatch",
         adapter = ?adapter,
-        event_id = tracing::field::Empty,
+        event_id = %event_id,
     );
     let _enter = span.enter();
 
