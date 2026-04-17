@@ -1,5 +1,4 @@
 /// A single pre-write relevance rule.
-#[allow(dead_code)]
 pub struct RelevanceRule {
     /// Tool operation: `"Write"`, `"Edit"`, `"MultiEdit"`
     pub operation: &'static str,
@@ -7,9 +6,11 @@ pub struct RelevanceRule {
     pub file_pattern: Option<&'static str>,
     /// Tools that should have been called before this operation
     pub recommended_tools: &'static [&'static str],
-    /// "required" or "recommended"
+    /// "required" or "recommended" — reserved for future tiered advisory wording
+    #[allow(dead_code)] // TODO: use to vary advisory message strength
     pub severity: &'static str,
-    /// How far back to check: "session" = all calls this session
+    /// How far back to check: "session" = all calls this session — reserved for windowed checks
+    #[allow(dead_code)] // TODO: use to implement recent_10/recent_5 check windows
     pub check_window: &'static str,
 }
 

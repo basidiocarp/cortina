@@ -249,6 +249,47 @@ fn pre_write_advisory_not_emitted_when_session_has_no_tool_calls() {
 }
 
 #[test]
+fn write_advisory_emitted_through_full_suggestion_path_for_rs_file() {
+    let temp_dir = std::env::temp_dir().join(format!(
+        "cortina-advisory-write-full-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&temp_dir);
+    fs::create_dir_all(&temp_dir).unwrap();
+    let cwd = temp_dir.to_string_lossy().into_owned();
+
+    // Seed a non-rhizome tool call so the session is not empty
+    let hash = scope_hash(Some(&cwd));
+    record_tool_call("Read", ToolSource::Other, &hash);
+
+    let envelope = ClaudeCodeHookEnvelope::parse(
+        &serde_json::json!({
+            "tool_name": "Write",
+            "tool_input": {"file_path": "src/lib.rs", "content": "fn main() {}"},
+            "cwd": cwd,
+        })
+        .to_string(),
+    )
+    .expect("valid envelope");
+
+    let policy = CapturePolicy::from_reader(|_| None);
+
+    let suggestion = tool_suggestion_message_with_availability(&policy, &envelope, true);
+    assert!(
+        suggestion.is_some(),
+        "expected advisory when writing a .rs file without prior rhizome calls"
+    );
+    let message = suggestion.unwrap();
+    assert!(
+        message.contains("[cortina]"),
+        "advisory message should contain cortina tag"
+    );
+
+    clear_tool_calls(&hash);
+    let _ = fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
 fn span_context_includes_session_id_when_present() {
     let envelope = ClaudeCodeHookEnvelope::parse(
         r#"{
