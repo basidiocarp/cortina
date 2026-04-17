@@ -298,13 +298,12 @@ fn query_hyphae_recall(query: &str, project: Option<&str>) -> Vec<RecalledMemory
         cmd.args(["-P", proj]);
     }
 
-    let output = match cmd
+    let Ok(output) = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()
-    {
-        Ok(out) => out,
-        Err(_) => return Vec::new(),
+    else {
+        return Vec::new();
     };
 
     if !output.status.success() {
@@ -663,10 +662,17 @@ mod tests {
 
     #[test]
     fn recall_query_trims_to_sentence_boundary() {
-        let prompt = "Fix the bug in src/main.rs. Also check the tests.";
-        let q = recall_query(prompt);
-        // Should end at a sentence boundary.
-        assert!(q.ends_with('.') || q.ends_with('!') || q.ends_with('?') || !q.is_empty());
+        // Prompt longer than RECALL_QUERY_MAX_CHARS with a sentence boundary before
+        // the cut point — the query must trim at the boundary, not mid-string.
+        let mut prompt = "First sentence ends here. ".to_string();
+        prompt.push_str(&"x".repeat(300)); // total > RECALL_QUERY_MAX_CHARS
+        let q = recall_query(&prompt);
+        assert!(
+            q.ends_with('.'),
+            "expected trim at sentence boundary, got: {q:?}"
+        );
+        assert!(q.chars().count() <= RECALL_QUERY_MAX_CHARS);
+        assert!(q.contains("First sentence ends here"));
     }
 
     #[test]
@@ -741,6 +747,21 @@ mod tests {
         }];
         let budgeted = budget_memories(memories);
         assert_eq!(budgeted.len(), 1);
+    }
+
+    #[test]
+    fn budget_memories_drops_all_when_first_exceeds_budget() {
+        // When the first memory alone exceeds RECALL_CHAR_BUDGET, budget_memories
+        // returns empty. This documents the silent-drop behavior so callers are aware.
+        let memories = vec![RecalledMemory {
+            id: "big".to_string(),
+            content: "x".repeat(RECALL_CHAR_BUDGET + 1),
+        }];
+        let budgeted = budget_memories(memories);
+        assert!(
+            budgeted.is_empty(),
+            "oversized first memory should be excluded by budget"
+        );
     }
 
     #[test]
