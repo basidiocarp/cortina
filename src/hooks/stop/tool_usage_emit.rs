@@ -97,6 +97,7 @@ pub(super) fn emit_tool_usage_event(
     session_id: &str,
     task_id: Option<&str>,
     tool_calls: &[crate::tool_usage::ToolCallEntry],
+    gaps: &[(String, String, String)],
 ) {
     if tool_calls.is_empty() {
         return;
@@ -119,6 +120,15 @@ pub(super) fn emit_tool_usage_event(
         })
         .collect::<Vec<_>>();
 
+    let tools_relevant_unused = gaps
+        .iter()
+        .map(|(tool_name, source, reason)| ToolRelevantUnusedItem {
+            tool_name: tool_name.clone(),
+            source: source.clone(),
+            relevance_reason: reason.clone(),
+        })
+        .collect::<Vec<_>>();
+
     let event = ToolUsageEventV1 {
         schema_version: "1.0".to_string(),
         session_id: session_id.to_string(),
@@ -126,7 +136,7 @@ pub(super) fn emit_tool_usage_event(
         timestamp,
         tools_available: Vec::new(),
         tools_called,
-        tools_relevant_unused: Vec::new(),
+        tools_relevant_unused,
         task_id: task_id.map(str::to_string),
     };
 
@@ -138,6 +148,18 @@ pub(super) fn emit_tool_usage_event(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hooks::stop::compute_tool_adoption_gaps;
+    use crate::tool_usage::{ToolCallEntry, ToolSource};
+
+    fn make_tool_call(tool_name: &str) -> ToolCallEntry {
+        ToolCallEntry {
+            tool_name: tool_name.to_string(),
+            source: ToolSource::Other,
+            call_count: 1,
+            first_call_at_ms: 0,
+            last_call_at_ms: 0,
+        }
+    }
 
     #[test]
     fn ms_to_iso8601_produces_valid_format() {
@@ -180,5 +202,127 @@ mod tests {
         assert!(json.contains("\"session_id\":\"01ARZ3NDEKTSV4RRFFQ69G5FAV\""));
         assert!(json.contains("\"tools_called\""));
         assert!(json.contains("\"call_count\":2"));
+    }
+
+    #[test]
+    fn gaps_populate_tools_relevant_unused_in_serialized_event() {
+        let gaps = [(
+            "mcp__rhizome__get_structure".to_string(),
+            "rules".to_string(),
+            "recommended for Write on src/lib.rs".to_string(),
+        )];
+
+        let tools_relevant_unused = gaps
+            .iter()
+            .map(|(tool_name, source, reason)| ToolRelevantUnusedItem {
+                tool_name: tool_name.clone(),
+                source: source.clone(),
+                relevance_reason: reason.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        let event = ToolUsageEventV1 {
+            schema_version: "1.0".to_string(),
+            session_id: "ses_test".to_string(),
+            host: "claude_code".to_string(),
+            timestamp: "2026-04-16T00:00:00.000Z".to_string(),
+            tools_available: Vec::new(),
+            tools_called: vec![ToolCalledItem {
+                tool_name: "Bash".to_string(),
+                source: "other".to_string(),
+                call_count: 1,
+                first_call_at: "1970-01-01T00:00:00.000Z".to_string(),
+                last_call_at: "1970-01-01T00:00:00.000Z".to_string(),
+            }],
+            tools_relevant_unused,
+            task_id: None,
+        };
+
+        let json = serde_json::to_string(&event).expect("should serialize");
+        assert!(json.contains("\"tools_relevant_unused\""));
+        assert!(json.contains("\"mcp__rhizome__get_structure\""));
+        assert!(json.contains("\"relevance_reason\""));
+    }
+
+    #[test]
+    fn empty_gaps_omit_tools_relevant_unused_from_serialized_event() {
+        let event = ToolUsageEventV1 {
+            schema_version: "1.0".to_string(),
+            session_id: "ses_clean".to_string(),
+            host: "claude_code".to_string(),
+            timestamp: "2026-04-16T00:00:00.000Z".to_string(),
+            tools_available: Vec::new(),
+            tools_called: vec![ToolCalledItem {
+                tool_name: "Bash".to_string(),
+                source: "other".to_string(),
+                call_count: 1,
+                first_call_at: "1970-01-01T00:00:00.000Z".to_string(),
+                last_call_at: "1970-01-01T00:00:00.000Z".to_string(),
+            }],
+            tools_relevant_unused: Vec::new(),
+            task_id: None,
+        };
+
+        let json = serde_json::to_string(&event).expect("should serialize");
+        assert!(!json.contains("tools_relevant_unused"), "empty vec should be skipped");
+    }
+
+    #[test]
+    fn gap_detection_returns_gaps_when_no_rhizome_calls_on_rs_files() {
+        let files = vec!["src/lib.rs".to_string()];
+        let tool_calls = vec![
+            make_tool_call("Bash"),
+            make_tool_call("Read"),
+        ];
+
+        let gaps = compute_tool_adoption_gaps(&files, &tool_calls);
+        assert!(!gaps.is_empty(), "expected gaps for .rs file without rhizome tools");
+
+        let tool_names: Vec<&str> = gaps.iter().map(|(name, _, _)| name.as_str()).collect();
+        assert!(
+            tool_names.contains(&"mcp__rhizome__get_structure"),
+            "should flag mcp__rhizome__get_structure"
+        );
+    }
+
+    #[test]
+    fn gap_detection_returns_no_gaps_when_rhizome_called_on_rs_files() {
+        let files = vec!["src/main.rs".to_string()];
+        let tool_calls = vec![
+            make_tool_call("mcp__rhizome__get_structure"),
+            make_tool_call("Bash"),
+        ];
+
+        let gaps = compute_tool_adoption_gaps(&files, &tool_calls);
+        assert!(gaps.is_empty(), "rhizome call satisfies the rule; no gaps expected");
+    }
+
+    #[test]
+    fn gap_detection_returns_no_gaps_for_clean_session_with_no_files() {
+        let files: Vec<String> = vec![];
+        let tool_calls = vec![make_tool_call("Bash")];
+
+        let gaps = compute_tool_adoption_gaps(&files, &tool_calls);
+        assert!(gaps.is_empty(), "no files modified; no gaps expected");
+    }
+
+    #[test]
+    fn gap_detection_deduplicates_same_tool_across_multiple_files() {
+        let files = vec![
+            "src/a.rs".to_string(),
+            "src/b.rs".to_string(),
+        ];
+        let tool_calls = vec![make_tool_call("Bash")];
+
+        let gaps = compute_tool_adoption_gaps(&files, &tool_calls);
+        let get_structure_count = gaps
+            .iter()
+            .filter(|(name, _, _)| name == "mcp__rhizome__get_structure")
+            .count();
+        assert_eq!(
+            get_structure_count,
+            1,
+            "same tool should appear only once even across multiple files"
+        );
     }
 }

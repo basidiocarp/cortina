@@ -13,6 +13,7 @@ use crate::handoff_lint::audit_handoff as lint_handoff;
 use crate::handoff_paths::{ChecklistItem, extract_paths, extract_paths_from_text};
 use crate::outcomes::{clear_outcomes, load_outcomes};
 use crate::policy::capture_policy;
+use crate::rules::{DEFAULT_RULES, any_recommended_called, matching_rules};
 use crate::utils::{
     command_exists, end_scoped_hyphae_session, load_session_state,
     log_hyphae_feedback_signal_for_session, project_name_for_cwd, scope_hash,
@@ -159,7 +160,14 @@ pub fn handle(input: &str) -> Result<()> {
         // Emit tool usage event
         let tool_calls = crate::tool_usage::load_tool_calls(&hash);
         if !tool_calls.is_empty() {
-            tool_usage_emit::emit_tool_usage_event(&state.session_id, None, &tool_calls);
+            let gaps = compute_tool_adoption_gaps(&summary.files_modified, &tool_calls);
+            if !gaps.is_empty() {
+                eprintln!("cortina: tool adoption gaps detected:");
+                for (tool_name, _source, reason) in &gaps {
+                    eprintln!("  - {tool_name} ({reason})");
+                }
+            }
+            tool_usage_emit::emit_tool_usage_event(&state.session_id, None, &tool_calls, &gaps);
         }
         crate::tool_usage::clear_tool_calls(&hash);
     } else if !had_cached_session {
@@ -168,6 +176,42 @@ pub fn handle(input: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Computes tool adoption gaps by checking which recommended tools were not called
+/// for the files modified this session.
+///
+/// Returns a list of `(tool_name, source, reason)` triples, deduplicated by `tool_name`.
+pub(super) fn compute_tool_adoption_gaps(
+    files_modified: &[String],
+    tool_calls: &[crate::tool_usage::ToolCallEntry],
+) -> Vec<(String, String, String)> {
+    let called_names: Vec<&str> = tool_calls
+        .iter()
+        .map(|e| e.tool_name.as_str())
+        .collect();
+
+    let mut gaps: Vec<(String, String, String)> = Vec::new();
+
+    for file in files_modified {
+        for operation in &["Write", "Edit"] {
+            for rule in matching_rules(DEFAULT_RULES, operation, Some(file.as_str())) {
+                if !any_recommended_called(rule, &called_names) {
+                    for &recommended in rule.recommended_tools {
+                        if !gaps.iter().any(|(name, _, _)| name == recommended) {
+                            gaps.push((
+                                recommended.to_string(),
+                                "rules".to_string(),
+                                format!("recommended for {operation} on {file}"),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    gaps
 }
 
 fn check_handoff_staleness(
