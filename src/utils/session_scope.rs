@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use spore::logging::{SpanContext, subprocess_span, tool_span};
+use spore::telemetry::TraceContextCarrier;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -258,6 +259,14 @@ where
 
         cmd.args(["--errors", &errors_encountered.to_string()]);
 
+        // Propagate trace context to hyphae subprocess
+        if let Some(carrier) = TraceContextCarrier::from_current() {
+            cmd.env("TRACEPARENT", &carrier.traceparent);
+            if let Some(tracestate) = &carrier.tracestate {
+                cmd.env("TRACESTATE", tracestate);
+            }
+        }
+
         let _subprocess_span = subprocess_span("hyphae session end", &context).entered();
         let Ok(output) = run_command(&mut cmd) else {
             warn!("Failed to execute hyphae session end");
@@ -328,6 +337,14 @@ pub fn log_hyphae_feedback_signal_for_session(
         .args(["--value", &signal_value.to_string()])
         .args(["--source", source])
         .args(["--project", &state.project]);
+
+    // Propagate trace context to hyphae subprocess
+    if let Some(carrier) = TraceContextCarrier::from_current() {
+        cmd.env("TRACEPARENT", &carrier.traceparent);
+        if let Some(tracestate) = &carrier.tracestate {
+            cmd.env("TRACESTATE", tracestate);
+        }
+    }
 
     let _spawn_span = subprocess_span("hyphae feedback signal", &context).entered();
     if let Err(err) = cmd
@@ -477,6 +494,14 @@ where
     }
     if let Some(branch) = &context_signals.git_branch {
         cmd.args(["--git-branch", branch]);
+    }
+
+    // Propagate trace context to hyphae subprocess
+    if let Some(carrier) = TraceContextCarrier::from_current() {
+        cmd.env("TRACEPARENT", &carrier.traceparent);
+        if let Some(tracestate) = &carrier.tracestate {
+            cmd.env("TRACESTATE", tracestate);
+        }
     }
 
     let _subprocess_span = subprocess_span("hyphae session start", &context).entered();

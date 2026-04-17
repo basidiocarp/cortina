@@ -28,6 +28,14 @@ use cli::{Cli, Commands};
 
 fn main() -> Result<()> {
     spore::logging::init_app("cortina", Level::WARN);
+
+    // Initialize OTel tracer — no-op when OTEL_EXPORTER_OTLP_ENDPOINT is not set
+    let _telemetry = spore::telemetry::init_tracer("cortina")
+        .unwrap_or_else(|e| {
+            tracing::debug!("OTel init skipped: {}", e);
+            spore::telemetry::TelemetryInit::disabled("cortina")
+        });
+
     let _runtime_span = root_span(&span_context_for_cwd(std::env::current_dir().ok())).entered();
     let cli = Cli::parse();
 

@@ -7,7 +7,7 @@ use crate::policy::{capture_policy, CapturePolicy};
 pub mod claude_code;
 pub mod volva;
 
-#[derive(Subcommand)]
+#[derive(Debug, Subcommand)]
 pub enum AdapterCommand {
     /// Handle Claude Code hook adapter events
     #[command(name = "claude-code")]
@@ -24,7 +24,7 @@ pub enum AdapterCommand {
     },
 }
 
-#[derive(Clone, Copy, Subcommand)]
+#[derive(Clone, Copy, Debug, Subcommand)]
 pub enum ClaudeCodeEventCommand {
     /// Handle `PreToolUse` adapter events (command rewriting)
     #[command(name = "pre-tool-use")]
@@ -51,7 +51,7 @@ pub enum ClaudeCodeEventCommand {
     SessionEnd,
 }
 
-#[derive(Clone, Copy, Subcommand)]
+#[derive(Clone, Copy, Debug, Subcommand)]
 pub enum VolvaEventCommand {
     /// Handle a normalized Volva hook event
     #[command(name = "hook-event")]
@@ -59,6 +59,12 @@ pub enum VolvaEventCommand {
 }
 
 pub fn handle_adapter_command(adapter: &AdapterCommand, input: &str) -> Result<()> {
+    let span = tracing::info_span!("cortina.event_dispatch",
+        adapter = ?adapter,
+        event_id = tracing::field::Empty,
+    );
+    let _enter = span.enter();
+
     match adapter {
         AdapterCommand::ClaudeCode { event } => handle_claude_code_event(*event, input),
         AdapterCommand::Volva { event } => handle_volva_event(*event, input),
@@ -123,6 +129,10 @@ fn run_hook_with_policy(policy: &CapturePolicy, hook_name: &str, f: impl FnOnce(
         tracing::trace!("cortina: hook {} is disabled, skipping", hook_name);
         return;
     }
+
+    let span = tracing::info_span!("cortina.hook", hook_name = hook_name);
+    let _enter = span.enter();
+
     if let Err(e) = f() {
         tracing::warn!("cortina: hook {} failed: {:#}", hook_name, e);
     }
