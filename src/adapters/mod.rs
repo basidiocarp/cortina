@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 
 use crate::hooks;
-use crate::policy::capture_policy;
+use crate::policy::{capture_policy, CapturePolicy};
 
 pub mod claude_code;
 pub mod volva;
@@ -111,8 +111,15 @@ fn handle_volva_event(event: VolvaEventCommand, input: &str) -> Result<()> {
 /// is skipped and a `trace`-level message is emitted.  The return type is `()`
 /// so callers can use `run_hook(...);` without propagating errors.
 fn run_hook(hook_name: &str, f: impl FnOnce() -> Result<()>) {
-    let policy = capture_policy();
-    if policy.disabled_hooks.contains(&hook_name.to_string()) {
+    run_hook_with_policy(capture_policy(), hook_name, f);
+}
+
+/// Core hook dispatch logic parameterized over a `CapturePolicy`.
+///
+/// Separated from `run_hook` so tests can supply a constructed policy directly
+/// without touching the global `OnceLock`-backed `capture_policy()`.
+fn run_hook_with_policy(policy: &CapturePolicy, hook_name: &str, f: impl FnOnce() -> Result<()>) {
+    if policy.disabled_hooks.iter().any(|h| h == hook_name) {
         tracing::trace!("cortina: hook {} is disabled, skipping", hook_name);
         return;
     }
@@ -125,7 +132,7 @@ fn run_hook(hook_name: &str, f: impl FnOnce() -> Result<()>) {
 mod tests {
     use anyhow::anyhow;
 
-    use super::run_hook;
+    use super::{run_hook_with_policy};
     use crate::policy::CapturePolicy;
 
     // Helper: build a policy with specific disabled_hooks without touching
@@ -137,17 +144,25 @@ mod tests {
         })
     }
 
+    // A clean policy with no disabled hooks, isolated from the ambient
+    // CORTINA_DISABLED_HOOKS environment variable.
+    fn open_policy() -> CapturePolicy {
+        policy_with_disabled(&[])
+    }
+
     #[test]
     fn run_hook_silent_fail_does_not_panic_on_error() {
         // A hook closure that always fails must not surface the error.
-        // run_hook returns () so the absence of panic is the proof.
-        run_hook("pre_tool_use", || Err(anyhow!("simulated hook failure")));
+        // run_hook_with_policy returns () so the absence of panic is the proof.
+        run_hook_with_policy(&open_policy(), "pre_tool_use", || {
+            Err(anyhow!("simulated hook failure"))
+        });
     }
 
     #[test]
     fn run_hook_passes_through_ok() {
         let mut called = false;
-        run_hook("post_tool_use", || {
+        run_hook_with_policy(&open_policy(), "post_tool_use", || {
             called = true;
             Ok(())
         });
