@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use spore::logging::{SpanContext, subprocess_span, tool_span};
+use spore::telemetry::TraceContextCarrier;
 use spore::{Tool, discover};
 use tracing::{debug, warn};
 
@@ -81,6 +82,13 @@ pub fn store_in_hyphae(topic: &str, content: &str, importance: Importance, proje
         cmd.args(["-P", proj]);
     }
 
+    if let Some(carrier) = TraceContextCarrier::from_current() {
+        cmd.env("TRACEPARENT", &carrier.traceparent);
+        if let Some(ref ts) = carrier.tracestate {
+            cmd.env("TRACESTATE", ts);
+        }
+    }
+
     let _spawn_span = subprocess_span("hyphae store", &span_ctx).entered();
     if let Err(err) = cmd
         .stdout(std::process::Stdio::null())
@@ -120,6 +128,13 @@ pub fn store_compact_summary_artifact(payload: &str, project: Option<&str>) {
 
     if let Some(proj) = project {
         cmd.args(["-P", proj]);
+    }
+
+    if let Some(carrier) = TraceContextCarrier::from_current() {
+        cmd.env("TRACEPARENT", &carrier.traceparent);
+        if let Some(ref ts) = carrier.tracestate {
+            cmd.env("TRACESTATE", ts);
+        }
     }
 
     let _spawn_span = subprocess_span("hyphae store artifact", &span_ctx).entered();
