@@ -35,6 +35,18 @@ pub fn handle(input: &str) -> Result<()> {
         let hash = crate::utils::scope_hash(envelope.cwd());
         let source = crate::tool_usage::source_for_tool(tool_name);
         crate::tool_usage::record_tool_call(tool_name, source, &hash);
+
+        // Classify risk and emit as a structured debug event on the lifecycle signal.
+        // Cortina is advisory only — it never blocks based on this score.
+        let file_path = envelope.tool_input_string("file_path");
+        let (risk, level) = crate::risk::classify_tool_call(tool_name, file_path);
+        tracing::debug!(
+            tool = tool_name,
+            risk_score = risk.composite(),
+            risk_level = ?level,
+            // signal keyword kept for downstream grep / log correlation
+            "tool call risk signal emitted"
+        );
     }
 
     print!("{input}");

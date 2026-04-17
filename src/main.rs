@@ -14,6 +14,7 @@ mod handoff_paths;
 mod hooks;
 mod outcomes;
 mod policy;
+mod risk;
 mod status;
 mod statusline;
 #[cfg(test)]
