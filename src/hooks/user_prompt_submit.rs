@@ -1,5 +1,6 @@
 use serde_json::json;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::BTreeSet;
+use std::io::Write;
 use std::path::PathBuf;
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
@@ -26,10 +27,6 @@ const RECALL_TOPIC: &str = "session/recall";
 
 /// Maximum characters for the hyphae search query extracted from the prompt.
 const RECALL_QUERY_MAX_CHARS: usize = 200;
-/// Approximate char budget for recalled content (2000 chars ≈ 500 tokens).
-const RECALL_CHAR_BUDGET: usize = 2_000;
-/// Maximum number of memories to request from hyphae.
-const RECALL_LIMIT: usize = 5;
 
 #[allow(
     clippy::unnecessary_wraps,
@@ -256,11 +253,6 @@ pub(crate) fn extract_file_refs(prompt: &str) -> Vec<String> {
     results
 }
 
-/// Return the path used to persist the set of memory IDs already surfaced this session.
-fn recall_seen_state_path(hash: &str) -> PathBuf {
-    temp_state_path("recall-seen", hash, "json")
-}
-
 /// Extract a recall query from the prompt: up to `RECALL_QUERY_MAX_CHARS` characters,
 /// trimmed to the last sentence boundary when possible.
 fn recall_query(prompt: &str) -> String {
@@ -276,131 +268,15 @@ fn recall_query(prompt: &str) -> String {
     excerpt.trim().to_string()
 }
 
-/// A memory entry parsed from `hyphae search --json` output.
-#[derive(Debug)]
-struct RecalledMemory {
-    id: String,
-    content: String,
-}
-
-/// Call `hyphae search --json` and parse the returned memories.
-/// Returns an empty list if hyphae is unavailable or the call fails.
-fn query_hyphae_recall(query: &str, project: Option<&str>) -> Vec<RecalledMemory> {
-    let Some(mut cmd) = resolved_command("hyphae") else {
-        return Vec::new();
-    };
-
-    cmd.args(["search", "--query", query])
-        .args(["--limit", &RECALL_LIMIT.to_string()])
-        .arg("--json");
-
-    if let Some(proj) = project {
-        cmd.args(["-P", proj]);
-    }
-
-    let Ok(output) = cmd
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
-    else {
-        return Vec::new();
-    };
-
-    if !output.status.success() {
-        return Vec::new();
-    }
-
-    let Ok(text) = std::str::from_utf8(&output.stdout) else {
-        return Vec::new();
-    };
-
-    parse_recall_json(text)
-}
-
-/// Parse the JSON emitted by `hyphae search --json` into a list of recalled memories.
-fn parse_recall_json(text: &str) -> Vec<RecalledMemory> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
-        return Vec::new();
-    };
-
-    let Some(results) = value.get("results").and_then(|v| v.as_array()) else {
-        return Vec::new();
-    };
-
-    results
-        .iter()
-        .filter_map(|entry| {
-            let id = entry.get("id")?.as_str()?.to_string();
-            // Prefer `summary` for a compact view; fall back to the raw excerpt.
-            let content = entry
-                .get("summary")
-                .and_then(|v| v.as_str())
-                .or_else(|| entry.get("raw_excerpt").and_then(|v| v.as_str()))
-                .unwrap_or("")
-                .to_string();
-            if content.is_empty() {
-                return None;
-            }
-            Some(RecalledMemory { id, content })
-        })
-        .collect()
-}
-
-/// Load the set of already-seen memory IDs from the scoped state file.
-fn load_recall_seen(hash: &str) -> HashSet<String> {
-    let path = recall_seen_state_path(hash);
-    crate::utils::load_json_file::<Vec<String>>(&path)
-        .unwrap_or_default()
-        .into_iter()
-        .collect()
-}
-
-/// Persist new memory IDs to the seen-set state file, merging with existing entries.
-fn save_recall_seen(hash: &str, new_ids: &[String]) {
-    if new_ids.is_empty() {
-        return;
-    }
-    let path = recall_seen_state_path(hash);
-    let _ = update_json_file::<Vec<String>, _, _>(&path, |seen| {
-        let existing: HashSet<_> = seen.iter().cloned().collect();
-        for id in new_ids {
-            if existing.contains(id) {
-                continue;
-            }
-            seen.push(id.clone());
-        }
-    });
-}
-
-/// Apply the character budget: accumulate memories until `RECALL_CHAR_BUDGET` is reached.
+/// Delegate memory recall to `hyphae auto-recall`.
 ///
-/// The first memory is always included, truncated to the budget if it exceeds it,
-/// so a single oversized entry does not silently produce zero recall output.
-fn budget_memories(memories: Vec<RecalledMemory>) -> Vec<RecalledMemory> {
-    let mut total = 0usize;
-    let mut out = Vec::new();
-    for (i, mut m) in memories.into_iter().enumerate() {
-        let len = m.content.len();
-        if total + len > RECALL_CHAR_BUDGET {
-            if i == 0 {
-                // Truncate the first entry to the full budget rather than dropping it.
-                m.content = m.content.chars().take(RECALL_CHAR_BUDGET).collect();
-                out.push(m);
-            }
-            break;
-        }
-        total += len;
-        out.push(m);
-    }
-    out
-}
-
-/// Query hyphae for memories relevant to the incoming prompt, deduplicate within the
-/// session window, apply the token budget, and surface the results to stderr.
+/// Shells out to `hyphae auto-recall` which owns all ranking, dedup, budget,
+/// and session-scoped seen-set logic. Whatever it writes to stdout is forwarded
+/// to stderr so the agent can see the recalled memories.
 ///
 /// Gracefully degrades: if hyphae is unavailable or any step fails the handler
 /// continues normally without recall.
-fn inject_recall(event: &UserPromptSubmitEvent, hash: &str) {
+fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
     if !command_exists("hyphae") {
         return;
     }
@@ -410,43 +286,42 @@ fn inject_recall(event: &UserPromptSubmitEvent, hash: &str) {
         return;
     }
 
+    let Some(mut cmd) = resolved_command("hyphae") else {
+        return;
+    };
+
+    cmd.args(["auto-recall", "--query", &query, "--session-id", &event.session_id]);
+
     let project = project_name_for_cwd(Some(&event.cwd));
-    let memories = query_hyphae_recall(&query, project.as_deref());
-    if memories.is_empty() {
+    if let Some(ref p) = project {
+        cmd.args(["--project", p]);
+    }
+
+    let Ok(output) = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    else {
+        return;
+    };
+
+    if output.stdout.is_empty() {
         return;
     }
 
-    // Deduplicate against memories already surfaced this session.
-    let seen = load_recall_seen(hash);
-    let fresh: Vec<RecalledMemory> = memories
-        .into_iter()
-        .filter(|m| !seen.contains(&m.id))
-        .collect();
+    // Write the recall block to stderr so the agent can see it.
+    let _ = std::io::stderr().write_all(&output.stdout);
 
-    if fresh.is_empty() {
+    // Count lines that start with "[cortina-recall]" as a proxy for injected count.
+    let text = String::from_utf8_lossy(&output.stdout);
+    let n = text
+        .lines()
+        .filter(|l| l.starts_with("[cortina-recall]"))
+        .count();
+
+    if n == 0 {
         return;
     }
-
-    // Apply the token budget.
-    let budgeted = budget_memories(fresh);
-    if budgeted.is_empty() {
-        return;
-    }
-
-    let injected_ids: Vec<String> = budgeted.iter().map(|m| m.id.clone()).collect();
-    let n = budgeted.len();
-
-    // Surface the recall block to stderr so the agent can see it.
-    eprintln!(
-        "[cortina-recall] {} memories injected for session {}",
-        n, event.session_id
-    );
-    for memory in &budgeted {
-        eprintln!("[cortina-recall] id={} content={}", memory.id, memory.content);
-    }
-
-    // Persist the seen IDs to avoid re-surfacing them in future turns.
-    save_recall_seen(hash, &injected_ids);
 
     // Store the recall event in hyphae using the fire-and-forget pattern.
     let recall_payload = json!({
@@ -455,7 +330,6 @@ fn inject_recall(event: &UserPromptSubmitEvent, hash: &str) {
         "cwd": event.cwd,
         "query_excerpt": query,
         "injected_count": n,
-        "injected_ids": injected_ids,
     })
     .to_string();
     store_in_hyphae(
@@ -696,102 +570,4 @@ mod tests {
         assert!(q.is_empty());
     }
 
-    #[test]
-    fn parse_recall_json_extracts_memories() {
-        let json = r#"{
-            "schema_version": "1.0",
-            "results": [
-                {"id": "AAA", "summary": "first memory", "raw_excerpt": "raw one"},
-                {"id": "BBB", "summary": "second memory", "raw_excerpt": "raw two"}
-            ]
-        }"#;
-        let memories = parse_recall_json(json);
-        assert_eq!(memories.len(), 2);
-        assert_eq!(memories[0].id, "AAA");
-        assert_eq!(memories[0].content, "first memory");
-        assert_eq!(memories[1].id, "BBB");
-    }
-
-    #[test]
-    fn parse_recall_json_falls_back_to_raw_excerpt_when_no_summary() {
-        let json = r#"{"results": [{"id": "CCC", "raw_excerpt": "the excerpt"}]}"#;
-        let memories = parse_recall_json(json);
-        assert_eq!(memories.len(), 1);
-        assert_eq!(memories[0].content, "the excerpt");
-    }
-
-    #[test]
-    fn parse_recall_json_skips_entries_with_empty_content() {
-        let json = r#"{"results": [{"id": "DDD", "summary": ""}, {"id": "EEE", "summary": "ok"}]}"#;
-        let memories = parse_recall_json(json);
-        assert_eq!(memories.len(), 1);
-        assert_eq!(memories[0].id, "EEE");
-    }
-
-    #[test]
-    fn parse_recall_json_returns_empty_for_invalid_json() {
-        let memories = parse_recall_json("not json at all");
-        assert!(memories.is_empty());
-    }
-
-    #[test]
-    fn budget_memories_respects_char_limit() {
-        let memories: Vec<RecalledMemory> = (0..10)
-            .map(|i| RecalledMemory {
-                id: format!("ID{i}"),
-                content: "x".repeat(600),
-            })
-            .collect();
-        let budgeted = budget_memories(memories);
-        let total_chars: usize = budgeted.iter().map(|m| m.content.len()).sum();
-        assert!(total_chars <= RECALL_CHAR_BUDGET);
-    }
-
-    #[test]
-    fn budget_memories_includes_first_entry_even_at_limit() {
-        let memories = vec![RecalledMemory {
-            id: "ID0".to_string(),
-            content: "x".repeat(100),
-        }];
-        let budgeted = budget_memories(memories);
-        assert_eq!(budgeted.len(), 1);
-    }
-
-    #[test]
-    fn budget_memories_truncates_first_when_it_exceeds_budget() {
-        // When the first memory alone exceeds RECALL_CHAR_BUDGET, budget_memories
-        // truncates it to the budget rather than dropping it entirely, so recall
-        // always produces at least one result.
-        let memories = vec![RecalledMemory {
-            id: "big".to_string(),
-            content: "x".repeat(RECALL_CHAR_BUDGET + 1),
-        }];
-        let budgeted = budget_memories(memories);
-        assert_eq!(budgeted.len(), 1, "oversized first memory should be truncated, not dropped");
-        assert_eq!(
-            budgeted[0].content.len(),
-            RECALL_CHAR_BUDGET,
-            "first memory content should be capped to RECALL_CHAR_BUDGET"
-        );
-    }
-
-    #[test]
-    fn save_and_load_recall_seen_persists_ids() {
-        let hash = scope_hash(Some("/tmp/recall-test"));
-        let path = recall_seen_state_path(&hash);
-        let _ = remove_file_with_lock(&path);
-
-        save_recall_seen(&hash, &["AAA".to_string(), "BBB".to_string()]);
-        let seen = load_recall_seen(&hash);
-        assert!(seen.contains("AAA"));
-        assert!(seen.contains("BBB"));
-
-        // Adding again should not duplicate.
-        save_recall_seen(&hash, &["AAA".to_string(), "CCC".to_string()]);
-        let seen2 = load_recall_seen(&hash);
-        assert_eq!(seen2.len(), 3);
-        assert!(seen2.contains("CCC"));
-
-        let _ = remove_file_with_lock(&path);
-    }
 }
