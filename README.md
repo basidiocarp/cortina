@@ -64,7 +64,7 @@ cargo install --git https://github.com/basidiocarp/cortina
 cortina policy
 cortina status
 cortina doctor
-cortina statusline
+annulus statusline
 ```
 
 ---
@@ -165,7 +165,7 @@ cortina adapter claude-code session-end
 cortina adapter volva hook-event
 cortina status
 cortina doctor
-cortina statusline
+annulus statusline
 ```
 
 ---
