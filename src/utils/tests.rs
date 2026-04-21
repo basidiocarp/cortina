@@ -954,9 +954,8 @@ fn identity_hash_for_test(project_root: &str, git_dir: &str) -> String {
         .unwrap_or(project_root.as_str());
     let worktree_id = format!("git:{}", stable_identity_hash(&git_dir));
     let key = format!("{project}\n{project_root}\n{worktree_id}");
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    std::hash::Hash::hash(&key, &mut hasher);
-    format!("{:x}", std::hash::Hasher::finish(&hasher))
+    // Mirror the production `scope_hash_with` which uses stable_identity_hash (FNV-1a).
+    stable_identity_hash(&key)
 }
 
 fn legacy_scope_hash_for_test(cwd: &str) -> String {

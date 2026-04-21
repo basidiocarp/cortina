@@ -373,12 +373,20 @@ fn save_recall_seen(hash: &str, new_ids: &[String]) {
 }
 
 /// Apply the character budget: accumulate memories until `RECALL_CHAR_BUDGET` is reached.
+///
+/// The first memory is always included, truncated to the budget if it exceeds it,
+/// so a single oversized entry does not silently produce zero recall output.
 fn budget_memories(memories: Vec<RecalledMemory>) -> Vec<RecalledMemory> {
     let mut total = 0usize;
     let mut out = Vec::new();
-    for m in memories {
+    for (i, mut m) in memories.into_iter().enumerate() {
         let len = m.content.len();
         if total + len > RECALL_CHAR_BUDGET {
+            if i == 0 {
+                // Truncate the first entry to the full budget rather than dropping it.
+                m.content = m.content.chars().take(RECALL_CHAR_BUDGET).collect();
+                out.push(m);
+            }
             break;
         }
         total += len;
@@ -750,17 +758,20 @@ mod tests {
     }
 
     #[test]
-    fn budget_memories_drops_all_when_first_exceeds_budget() {
+    fn budget_memories_truncates_first_when_it_exceeds_budget() {
         // When the first memory alone exceeds RECALL_CHAR_BUDGET, budget_memories
-        // returns empty. This documents the silent-drop behavior so callers are aware.
+        // truncates it to the budget rather than dropping it entirely, so recall
+        // always produces at least one result.
         let memories = vec![RecalledMemory {
             id: "big".to_string(),
             content: "x".repeat(RECALL_CHAR_BUDGET + 1),
         }];
         let budgeted = budget_memories(memories);
-        assert!(
-            budgeted.is_empty(),
-            "oversized first memory should be excluded by budget"
+        assert_eq!(budgeted.len(), 1, "oversized first memory should be truncated, not dropped");
+        assert_eq!(
+            budgeted[0].content.len(),
+            RECALL_CHAR_BUDGET,
+            "first memory content should be capped to RECALL_CHAR_BUDGET"
         );
     }
 

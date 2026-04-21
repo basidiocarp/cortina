@@ -360,5 +360,7 @@ fn advisory_allowed(scope_cwd: Option<&str>, key: &str, cadence: usize) -> bool 
         *counter += 1;
         should_emit
     })
-    .unwrap_or(true)
+    // Fall back to false on IO failure: silently allowing every call would
+    // disable rate-limiting entirely when the state file is unwritable.
+    .unwrap_or(false)
 }

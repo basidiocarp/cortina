@@ -94,6 +94,13 @@ pub(super) fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
     summary
 }
 
+/// Exit codes that are non-zero but non-fatal for common tools:
+///
+/// - 1: grep (no match), diff (differences found), many POSIX utilities
+///
+/// These produce false-positive error counts that misclassify valid sessions.
+const NON_FATAL_EXIT_CODES: &[i32] = &[1];
+
 fn transcript_tool_result_has_error(entry: &Value) -> bool {
     let exit_code = entry
         .get("exit_code")
@@ -102,6 +109,11 @@ fn transcript_tool_result_has_error(entry: &Value) -> bool {
     let content = entry.get("content").and_then(Value::as_str).unwrap_or("");
 
     if let Some(code) = exit_code {
+        // Skip non-fatal exit codes that tools like grep and diff use for
+        // "no match" / "differences found" — not errors from our perspective.
+        if NON_FATAL_EXIT_CODES.contains(&code) {
+            return false;
+        }
         return has_error(content, Some(code));
     }
 

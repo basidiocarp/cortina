@@ -170,8 +170,8 @@ fn store_correction_in_hyphae(
         file_name,
         corrected_edit.old_string,
         corrected_edit.new_string,
-        &new_old_str[..new_old_str.len().min(200)],
-        &new_new_str[..new_new_str.len().min(200)]
+        truncate(new_old_str, 200),
+        truncate(new_new_str, 200)
     );
 
     let project = project_name_for_cwd(scope_cwd);

@@ -37,6 +37,14 @@ struct ToolUsageEventV1 {
     task_id: Option<String>,
 }
 
+/// Convert a Unix-epoch millisecond timestamp to an ISO 8601 string.
+///
+/// NOTE: The `is_leap_year` helper below uses the standard Gregorian rule
+/// (divisible by 4, except centuries unless also divisible by 400). This is
+/// correct through at least 2100 — the next century-year that *is not* a leap
+/// year. Code that runs past 2100 will produce off-by-one day errors for dates
+/// in leap-century years (2200, 2300, …). Replace this with `chrono` or
+/// `humantime` when either becomes available as a project dependency.
 fn ms_to_iso8601(ms: u64) -> String {
     const SECS_PER_DAY: u64 = 86_400;
     const SECS_PER_HOUR: u64 = 3_600;

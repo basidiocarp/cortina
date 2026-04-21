@@ -52,7 +52,9 @@ where
 {
     let scope_key =
         effective_scope_key(cwd, &mut run_command).unwrap_or_else(|| normalize_scope_cwd(cwd));
-    hash_value(&scope_key)
+    // Use FNV-1a (stable across Rust versions) so the hash used in temp-state
+    // filenames does not change after a toolchain upgrade and orphan in-flight files.
+    stable_identity_hash(&scope_key)
 }
 
 pub fn temp_state_path(name: &str, hash: &str, extension: &str) -> PathBuf {

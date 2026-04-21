@@ -204,8 +204,8 @@ fn resolve_error(
         if inserted && command_exists("hyphae") {
             let content = format!(
                 "Fixed: {}\nPrevious error: {}",
-                &command[..command.len().min(200)],
-                &prev_error.error[..prev_error.error.len().min(300)]
+                truncate(command, 200),
+                truncate(&prev_error.error, 300)
             );
             let project = project_name_for_cwd(scope_cwd);
             store_in_hyphae(
@@ -228,8 +228,8 @@ fn resolve_error(
 fn store_error_in_hyphae(command: &str, output: &str, scope_cwd: Option<&str>) {
     let content = format!(
         "Command: {}\nError: {}",
-        &command[..command.len().min(200)],
-        &output[..output.len().min(500)]
+        truncate(command, 200),
+        truncate(output, 500)
     );
     store_in_hyphae(
         "errors/active",
