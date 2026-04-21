@@ -128,7 +128,7 @@ pub fn handle(input: &str) -> Result<()> {
     }
 
     if let Some(suggestion) = tool_suggestion_message(&envelope) {
-        eprintln!("{suggestion}");
+        debug!("Pre-write relevance advisory: {suggestion}");
     }
 
     Ok(())

@@ -84,12 +84,6 @@ pub enum Commands {
         cwd: Option<String>,
     },
 
-    /// Output statusline for Claude Code (deprecated: use `annulus statusline` instead)
-    Statusline {
-        /// Disable ANSI color output
-        #[arg(long)]
-        no_color: bool,
-    },
 }
 
 #[cfg(test)]
@@ -202,20 +196,12 @@ mod tests {
                 cwd: Some(_)
             }
         ));
-
-        let cli = Cli::try_parse_from(["cortina", "statusline", "--no-color"])
-            .expect("expected statusline command");
-        assert!(matches!(
-            cli.command,
-            Commands::Statusline { no_color: true }
-        ));
     }
 
     #[test]
     fn help_includes_policy_command() {
         let help = Cli::command().render_long_help().to_string();
         assert!(help.contains("policy"));
-        assert!(help.contains("statusline"));
         assert!(help.contains("audit-handoff"));
     }
 }

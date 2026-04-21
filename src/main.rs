@@ -17,7 +17,6 @@ mod policy;
 mod risk;
 mod rules;
 mod status;
-mod statusline;
 #[cfg(test)]
 mod test_support;
 mod tool_usage;
@@ -114,10 +113,6 @@ fn main() -> Result<()> {
             )
             .entered();
             status::print_doctor(json, cwd.as_deref())
-        }
-        Commands::Statusline { no_color } => {
-            let _workflow_span = workflow_span("statusline", &span_context_for_cwd(None)).entered();
-            statusline::handle_stdin(no_color)
         }
     }
 }
