@@ -5,10 +5,10 @@ use crate::events::{BashToolEvent, OutcomeEvent, OutcomeKind};
 use crate::outcomes::{error_causal_signal, record_outcome};
 use crate::policy::capture_policy;
 use crate::utils::{
-    Importance, command_exists, current_timestamp_ms, ensure_scoped_hyphae_session, has_error,
-    is_build_command, is_significant_command, log_scoped_hyphae_feedback_signal, normalize_command,
-    project_name_for_cwd, scope_hash, store_in_hyphae, successful_validation_feedback,
-    update_json_file,
+    Importance, command_exists, current_agent_id_for_cwd, current_timestamp_ms,
+    ensure_scoped_hyphae_session, has_error, is_build_command, is_significant_command,
+    log_scoped_hyphae_feedback_signal, normalize_command, project_name_for_cwd, scope_hash,
+    store_in_hyphae, successful_validation_feedback, update_json_file,
 };
 
 use super::{annotate_outcome_with_session, pending, truncate};
@@ -208,11 +208,13 @@ fn resolve_error(
                 truncate(&prev_error.error, 300)
             );
             let project = project_name_for_cwd(scope_cwd);
+            let agent_id = current_agent_id_for_cwd(scope_cwd);
             store_in_hyphae(
                 "errors/resolved",
                 &content,
                 Importance::High,
                 project.as_deref(),
+                agent_id.as_deref(),
             );
             log_scoped_hyphae_feedback_signal(
                 scope_cwd,
@@ -231,11 +233,13 @@ fn store_error_in_hyphae(command: &str, output: &str, scope_cwd: Option<&str>) {
         truncate(command, 200),
         truncate(output, 500)
     );
+    let agent_id = current_agent_id_for_cwd(scope_cwd);
     store_in_hyphae(
         "errors/active",
         &content,
         Importance::Medium,
         project_name_for_cwd(scope_cwd).as_deref(),
+        agent_id.as_deref(),
     );
 }
 

@@ -41,6 +41,7 @@ struct CanopyAgent {
     project_root: String,
     worktree_id: String,
     current_task_id: Option<String>,
+    agent_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,6 +129,11 @@ pub(crate) fn current_task_id_for_cwd(cwd: Option<&str>) -> Option<String> {
     active_task_id(&project_root, &worktree_id)
 }
 
+pub(crate) fn current_agent_id_for_cwd(cwd: Option<&str>) -> Option<String> {
+    let (project_root, worktree_id) = scope_identity_for_cwd(cwd)?;
+    active_agent_id(&project_root, &worktree_id)
+}
+
 pub(crate) fn record_outcome_evidence_write<F, S>(mut attempt: F, mut sleep: S) -> bool
 where
     F: FnMut() -> bool,
@@ -180,6 +186,42 @@ fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
     }
 
     parse_active_task_id(&output.stdout, project_root, worktree_id)
+}
+
+fn active_agent_id(project_root: &str, worktree_id: &str) -> Option<String> {
+    let context = span_context(
+        Some(project_root),
+        None,
+        Some(worktree_id),
+        "canopy_agent_list",
+    );
+    let _tool_span = tool_span("canopy_agent_list", &context).entered();
+    let mut command = resolved_command("canopy")?;
+
+    if let Some(carrier) = TraceContextCarrier::from_current() {
+        command.env("TRACEPARENT", &carrier.traceparent);
+        if let Some(ref ts) = carrier.tracestate {
+            command.env("TRACESTATE", ts);
+        }
+    }
+
+    let _subprocess_span = subprocess_span("canopy agent list", &context).entered();
+    let output = command.arg("agent").arg("list").output().ok()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.trim().is_empty() {
+            debug!("canopy agent list returned non-success for worktree {worktree_id}");
+        } else {
+            warn!(
+                "canopy agent list returned non-success for worktree {worktree_id}: {}",
+                stderr.trim()
+            );
+            eprint!("{stderr}");
+        }
+        return None;
+    }
+
+    parse_active_agent_id(&output.stdout, project_root, worktree_id)
 }
 
 fn attempt_outcome_evidence_write(
@@ -247,6 +289,19 @@ fn parse_active_task_id(payload: &[u8], project_root: &str, worktree_id: &str) -
 
     (task_ids.len() == 1)
         .then(|| task_ids.into_iter().next())
+        .flatten()
+}
+
+fn parse_active_agent_id(payload: &[u8], project_root: &str, worktree_id: &str) -> Option<String> {
+    let agents: Vec<CanopyAgent> = serde_json::from_slice(payload).ok()?;
+    let agent_ids: BTreeSet<_> = agents
+        .into_iter()
+        .filter(|agent| agent.project_root == project_root && agent.worktree_id == worktree_id)
+        .map(|agent| agent.agent_id)
+        .collect();
+
+    (agent_ids.len() == 1)
+        .then(|| agent_ids.into_iter().next())
         .flatten()
 }
 
@@ -384,16 +439,16 @@ mod tests {
 
     use super::{
         evidence_bridge_stats, evidence_command_args, evidence_specs_for_outcome,
-        note_evidence_write_failure, note_evidence_write_success, parse_active_task_id,
-        record_outcome_evidence_write, signal_source_ref, source_ref,
+        note_evidence_write_failure, note_evidence_write_success, parse_active_agent_id,
+        parse_active_task_id, record_outcome_evidence_write, signal_source_ref, source_ref,
     };
     use crate::events::{CausalSignal, OutcomeEvent, OutcomeKind};
 
     #[test]
     fn parse_active_task_id_requires_a_unique_match_for_worktree_identity() {
         let payload = br#"[
-          {"project_root":"/repo/demo","worktree_id":"git:alpha","current_task_id":"task-1"},
-          {"project_root":"/repo/demo","worktree_id":"git:beta","current_task_id":"task-2"}
+          {"project_root":"/repo/demo","worktree_id":"git:alpha","current_task_id":"task-1","agent_id":"agent-1"},
+          {"project_root":"/repo/demo","worktree_id":"git:beta","current_task_id":"task-2","agent_id":"agent-2"}
         ]"#;
 
         assert_eq!(
@@ -409,12 +464,42 @@ mod tests {
     #[test]
     fn parse_active_task_id_rejects_ambiguous_matches() {
         let payload = br#"[
-          {"project_root":"/repo/demo","worktree_id":"git:alpha","current_task_id":"task-1"},
-          {"project_root":"/repo/demo","worktree_id":"git:alpha","current_task_id":"task-2"}
+          {"project_root":"/repo/demo","worktree_id":"git:alpha","current_task_id":"task-1","agent_id":"agent-1"},
+          {"project_root":"/repo/demo","worktree_id":"git:alpha","current_task_id":"task-2","agent_id":"agent-1"}
         ]"#;
 
         assert_eq!(
             parse_active_task_id(payload, "/repo/demo", "git:alpha"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_active_agent_id_requires_a_unique_match_for_worktree_identity() {
+        let payload = br#"[
+          {"project_root":"/repo/demo","worktree_id":"git:alpha","current_task_id":"task-1","agent_id":"agent-1"},
+          {"project_root":"/repo/demo","worktree_id":"git:beta","current_task_id":"task-2","agent_id":"agent-2"}
+        ]"#;
+
+        assert_eq!(
+            parse_active_agent_id(payload, "/repo/demo", "git:alpha").as_deref(),
+            Some("agent-1")
+        );
+        assert_eq!(
+            parse_active_agent_id(payload, "/repo/demo", "git:missing"),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_active_agent_id_rejects_ambiguous_matches() {
+        let payload = br#"[
+          {"project_root":"/repo/demo","worktree_id":"git:alpha","current_task_id":"task-1","agent_id":"agent-1"},
+          {"project_root":"/repo/demo","worktree_id":"git:alpha","current_task_id":"task-2","agent_id":"agent-2"}
+        ]"#;
+
+        assert_eq!(
+            parse_active_agent_id(payload, "/repo/demo", "git:alpha"),
             None
         );
     }

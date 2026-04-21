@@ -7,9 +7,9 @@ use crate::events::{NormalizedLifecycleEvent, OutcomeEvent, OutcomeKind};
 use crate::outcomes::{load_outcomes, record_outcome};
 use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 use crate::utils::{
-    Importance, command_exists, current_task_id_for_cwd, current_timestamp_ms,
-    ensure_scoped_hyphae_session, load_json_file, project_name_for_cwd, scope_hash,
-    store_compact_summary_artifact, store_in_hyphae, temp_state_path, update_json_file,
+    Importance, command_exists, current_agent_id_for_cwd, current_task_id_for_cwd,
+    current_timestamp_ms, ensure_scoped_hyphae_session, load_json_file, project_name_for_cwd,
+    scope_hash, store_compact_summary_artifact, store_in_hyphae, temp_state_path, update_json_file,
 };
 
 use super::post_tool_use::{get_pending_documents, get_pending_files};
@@ -72,7 +72,8 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
             || "session/compaction-snapshot".to_string(),
             |name| format!("context/{name}/pre-compact"),
         );
-        store_in_hyphae(&topic, &content, Importance::High, project.as_deref());
+        let agent_id = current_agent_id_for_cwd(Some(&event.cwd));
+        store_in_hyphae(&topic, &content, Importance::High, project.as_deref(), agent_id.as_deref());
         let outcome = OutcomeEvent::new(
             OutcomeKind::KnowledgeExported,
             format!("pre-compact snapshot stored in hyphae ({topic})"),

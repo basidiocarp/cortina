@@ -4,9 +4,10 @@ use crate::events::{FileEditEvent, OutcomeEvent, OutcomeKind};
 use crate::outcomes::{record_outcome, write_causal_signal};
 use crate::policy::capture_policy;
 use crate::utils::{
-    Importance, command_exists, current_timestamp_ms, ensure_scoped_hyphae_session,
-    is_document_file, load_json_file, log_scoped_hyphae_feedback_signal, project_name_for_cwd,
-    scope_hash, store_in_hyphae, update_json_file,
+    Importance, command_exists, current_agent_id_for_cwd, current_timestamp_ms,
+    ensure_scoped_hyphae_session, is_document_file, load_json_file,
+    log_scoped_hyphae_feedback_signal, project_name_for_cwd, scope_hash, store_in_hyphae,
+    update_json_file,
 };
 
 use super::{annotate_outcome_with_session, pending, truncate};
@@ -175,11 +176,13 @@ fn store_correction_in_hyphae(
     );
 
     let project = project_name_for_cwd(scope_cwd);
+    let agent_id = current_agent_id_for_cwd(scope_cwd);
     store_in_hyphae(
         "corrections",
         &content,
         Importance::High,
         project.as_deref(),
+        agent_id.as_deref(),
     );
     log_scoped_hyphae_feedback_signal(
         scope_cwd,

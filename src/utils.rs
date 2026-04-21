@@ -9,7 +9,8 @@ mod tests;
 #[cfg(not(test))]
 pub(crate) use canopy_client::attach_outcome_evidence;
 pub(crate) use canopy_client::{
-    current_task_id_for_cwd, evidence_bridge_stats, evidence_bridge_stats_path,
+    current_agent_id_for_cwd, current_task_id_for_cwd, evidence_bridge_stats,
+    evidence_bridge_stats_path,
 };
 #[cfg(test)]
 pub(crate) use canopy_client::{note_evidence_write_failure, note_evidence_write_success};

@@ -12,9 +12,9 @@ use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 #[cfg(test)]
 use crate::utils::load_json_file;
 use crate::utils::{
-    Importance, command_exists, current_task_id_for_cwd, ensure_scoped_hyphae_session,
-    project_name_for_cwd, resolved_command, scope_hash, scope_identity_for_cwd, store_in_hyphae,
-    temp_state_path, update_json_file,
+    Importance, command_exists, current_agent_id_for_cwd, current_task_id_for_cwd,
+    ensure_scoped_hyphae_session, project_name_for_cwd, resolved_command, scope_hash,
+    scope_identity_for_cwd, store_in_hyphae, temp_state_path, update_json_file,
 };
 
 const MAX_RECORDED_PROMPTS: usize = 32;
@@ -69,11 +69,13 @@ fn capture_prompt_submit(event: &UserPromptSubmitEvent) {
         })
         .to_string();
         let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(PROMPT_SESSION_TASK));
+        let agent_id = current_agent_id_for_cwd(Some(&event.cwd));
         store_in_hyphae(
             "errors/active",
             &error_content,
             Importance::Medium,
             project.as_deref(),
+            agent_id.as_deref(),
         );
     }
 
@@ -94,11 +96,13 @@ fn capture_prompt_submit(event: &UserPromptSubmitEvent) {
     if command_exists("hyphae") {
         let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(PROMPT_SESSION_TASK));
         let project = project_name_for_cwd(Some(&event.cwd));
+        let agent_id = current_agent_id_for_cwd(Some(&event.cwd));
         store_in_hyphae(
             PROMPT_TOPIC,
             &content,
             Importance::Medium,
             project.as_deref(),
+            agent_id.as_deref(),
         );
 
         if let Some(council_content) = council_lifecycle_content(event) {
@@ -109,6 +113,7 @@ fn capture_prompt_submit(event: &UserPromptSubmitEvent) {
                     &council_content,
                     Importance::High,
                     project.as_deref(),
+                    agent_id.as_deref(),
                 );
             }
         }
@@ -332,11 +337,13 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
         "injected_count": n,
     })
     .to_string();
+    let agent_id = current_agent_id_for_cwd(Some(&event.cwd));
     store_in_hyphae(
         RECALL_TOPIC,
         &recall_payload,
         Importance::Medium,
         project.as_deref(),
+        agent_id.as_deref(),
     );
 }
 
