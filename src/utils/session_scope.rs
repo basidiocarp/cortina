@@ -3,17 +3,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use spore::logging::{SpanContext, subprocess_span, tool_span};
 use spore::telemetry::TraceContextCarrier;
-use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Output};
 use tracing::{debug, warn};
 
 use super::hyphae_client::{command_exists, resolved_command};
 use super::state::{
-    canonicalize_path, current_runtime_session_id, current_timestamp_ms, load_json_file,
-    save_json_file, scope_hash, stable_identity_hash, temp_state_path, with_file_lock,
-    with_lock_path,
+    canonicalize_path, current_runtime_session_id, current_timestamp_ms, git_command_output,
+    load_json_file, project_name_from_root, resolved_cwd, save_json_file, scope_hash,
+    stable_identity_hash, temp_state_path, with_file_lock, with_lock_path,
 };
 use crate::events::OutcomeKind;
 use crate::outcomes::load_outcomes;
@@ -700,32 +699,3 @@ where
     })
 }
 
-fn resolved_cwd(cwd: Option<&str>) -> Option<PathBuf> {
-    cwd.map(PathBuf::from)
-        .or_else(|| env::current_dir().ok())
-        .map(canonicalize_path)
-}
-
-fn project_name_from_root(root: &Path) -> Option<String> {
-    root.file_name()
-        .map(|name| name.to_string_lossy().to_string())
-        .or_else(|| {
-            let text = root.to_string_lossy();
-            (!text.trim().is_empty()).then_some(text.to_string())
-        })
-}
-
-fn git_command_output<F>(cwd: &Path, args: &[&str], run_command: &mut F) -> Option<String>
-where
-    F: FnMut(&mut Command) -> std::io::Result<Output>,
-{
-    let mut cmd = Command::new("git");
-    cmd.current_dir(cwd).args(args);
-    let output = run_command(&mut cmd).ok()?;
-    if !output.status.success() {
-        return None;
-    }
-
-    let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!output.is_empty()).then_some(output)
-}

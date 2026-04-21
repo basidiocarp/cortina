@@ -26,17 +26,6 @@ const LOCK_WAIT_ATTEMPTS: usize = 1_000;
 const LOCK_WAIT_MS: u64 = 10;
 const LOCK_HEARTBEAT_MS: u64 = 5_000;
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
-// Offline migration helpers retained for manual repair work.
-// They are intentionally not called from `scope_hash_with`.
-#[allow(dead_code)]
-const MIGRATABLE_STATE_NAMES: &[&str] = &[
-    "session",
-    "outcomes",
-    "pending-exports",
-    "pending-ingest",
-    "errors",
-    "edits",
-];
 
 pub fn scope_hash(cwd: Option<&str>) -> String {
     scope_hash_with(cwd, Command::output)
@@ -87,19 +76,7 @@ pub(super) fn stable_identity_hash(value: &str) -> String {
     format!("{hash:016x}")
 }
 
-#[allow(dead_code)]
-pub(super) fn legacy_scope_hash(cwd: Option<&str>) -> String {
-    hash_value(&normalize_scope_cwd(cwd))
-}
 
-fn hash_value(value: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    value.hash(&mut hasher);
-    format!("{:x}", hasher.finish())
-}
 
 fn effective_scope_key<F>(cwd: Option<&str>, run_command: &mut F) -> Option<String>
 where
@@ -130,13 +107,13 @@ where
     })
 }
 
-fn resolved_cwd(cwd: Option<&str>) -> Option<PathBuf> {
+pub(crate) fn resolved_cwd(cwd: Option<&str>) -> Option<PathBuf> {
     cwd.map(PathBuf::from)
         .or_else(|| env::current_dir().ok())
         .map(canonicalize_path)
 }
 
-fn project_name_from_root(root: &Path) -> Option<String> {
+pub(crate) fn project_name_from_root(root: &Path) -> Option<String> {
     root.file_name()
         .map(|name| name.to_string_lossy().to_string())
         .or_else(|| {
@@ -145,7 +122,7 @@ fn project_name_from_root(root: &Path) -> Option<String> {
         })
 }
 
-fn git_command_output<F>(cwd: &Path, args: &[&str], run_command: &mut F) -> Option<String>
+pub(crate) fn git_command_output<F>(cwd: &Path, args: &[&str], run_command: &mut F) -> Option<String>
 where
     F: FnMut(&mut Command) -> std::io::Result<Output>,
 {
@@ -160,131 +137,20 @@ where
     (!output.is_empty()).then_some(output)
 }
 
-#[allow(dead_code)]
-fn migrate_legacy_scope_state(legacy_hash: &str, current_hash: &str) {
-    if legacy_hash.is_empty() || legacy_hash == current_hash {
-        return;
+
+
+
+
+
+
+fn normalize_scope_cwd(cwd: Option<&str>) -> String {
+    match cwd.filter(|value| !value.trim().is_empty()) {
+        Some(path) => path.to_string(),
+        None => env::current_dir().map_or_else(
+            |_| env::temp_dir().to_string_lossy().to_string(),
+            |p| p.to_string_lossy().to_string(),
+        ),
     }
-
-    for name in MIGRATABLE_STATE_NAMES {
-        migrate_state_file(name, legacy_hash, current_hash);
-    }
-}
-
-#[allow(dead_code)]
-fn migrate_state_file(name: &str, legacy_hash: &str, current_hash: &str) {
-    let legacy_path = temp_state_path(name, legacy_hash, "json");
-    if !legacy_path.exists() {
-        return;
-    }
-
-    let current_path = temp_state_path(name, current_hash, "json");
-    if !current_path.exists() && fs::rename(&legacy_path, &current_path).is_ok() {
-        let _ = fs::remove_file(lock_path_for(&legacy_path));
-        return;
-    }
-
-    if merge_state_file(name, &legacy_path, &current_path).is_ok() {
-        let _ = fs::remove_file(&legacy_path);
-        let _ = fs::remove_file(lock_path_for(&legacy_path));
-    }
-}
-
-#[allow(dead_code)]
-fn merge_state_file(name: &str, legacy_path: &Path, current_path: &Path) -> Result<()> {
-    let legacy_value = fs::read_to_string(legacy_path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-        .ok_or_else(|| anyhow::anyhow!("failed to parse legacy state"))?;
-    let current_value = fs::read_to_string(current_path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-        .ok_or_else(|| anyhow::anyhow!("failed to parse current state"))?;
-
-    let merged = match name {
-        "session" => merge_session_state(&legacy_value, current_value),
-        "errors" => merge_object_state(&legacy_value, current_value),
-        _ => merge_array_state(&legacy_value, current_value),
-    };
-
-    save_json_file(current_path, &merged)
-}
-
-#[allow(dead_code)]
-fn merge_session_state(
-    legacy: &serde_json::Value,
-    mut current: serde_json::Value,
-) -> serde_json::Value {
-    let Some(current_object) = current.as_object_mut() else {
-        return current;
-    };
-    let Some(legacy_object) = legacy.as_object() else {
-        return current;
-    };
-
-    for key in ["session_id", "project", "project_root", "worktree_id"] {
-        if current_object
-            .get(key)
-            .is_none_or(serde_json::Value::is_null)
-            && let Some(value) = legacy_object.get(key)
-        {
-            current_object.insert(key.to_string(), value.clone());
-        }
-    }
-
-    if current_object
-        .get("started_at")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0)
-        == 0
-        && let Some(value) = legacy_object.get("started_at")
-    {
-        current_object.insert("started_at".to_string(), value.clone());
-    }
-
-    current
-}
-
-#[allow(dead_code)]
-fn merge_object_state(
-    legacy: &serde_json::Value,
-    mut current: serde_json::Value,
-) -> serde_json::Value {
-    let Some(current_object) = current.as_object_mut() else {
-        return current;
-    };
-    let Some(legacy_object) = legacy.as_object() else {
-        return current;
-    };
-
-    for (key, value) in legacy_object {
-        current_object
-            .entry(key.clone())
-            .or_insert_with(|| value.clone());
-    }
-
-    current
-}
-
-#[allow(dead_code)]
-fn merge_array_state(
-    legacy: &serde_json::Value,
-    mut current: serde_json::Value,
-) -> serde_json::Value {
-    let Some(current_array) = current.as_array_mut() else {
-        return current;
-    };
-    let Some(legacy_array) = legacy.as_array() else {
-        return current;
-    };
-
-    for value in legacy_array {
-        if !current_array.iter().any(|existing| existing == value) {
-            current_array.push(value.clone());
-        }
-    }
-
-    current
 }
 
 pub fn current_timestamp_ms() -> u64 {
@@ -385,16 +251,6 @@ fn lock_path_for(path: &Path) -> PathBuf {
     ))
 }
 
-#[allow(dead_code)]
-fn normalize_scope_cwd(cwd: Option<&str>) -> String {
-    match cwd.filter(|value| !value.trim().is_empty()) {
-        Some(path) => path.to_string(),
-        None => env::current_dir().map_or_else(
-            |_| env::temp_dir().to_string_lossy().to_string(),
-            |p| p.to_string_lossy().to_string(),
-        ),
-    }
-}
 
 struct FileLockGuard {
     lock_path: PathBuf,
