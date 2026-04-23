@@ -252,4 +252,100 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_multiple_sessions_isolated() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("test.db");
+        let store = SessionStore::open_at(&db_path)?;
+
+        // Create two active sessions for the same project, different worktrees
+        store.create("sess-1", "myproject", Some("wt-123"))?;
+        store.create("sess-2", "myproject", Some("wt-456"))?;
+
+        // Each should find its own session
+        let found1 = store.find_active("myproject", Some("wt-123"))?;
+        assert_eq!(found1, Some("sess-1".to_string()));
+
+        let found2 = store.find_active("myproject", Some("wt-456"))?;
+        assert_eq!(found2, Some("sess-2".to_string()));
+
+        // End one cleanly; the other should still be findable
+        store.end_clean("sess-1")?;
+        let found1_after = store.find_active("myproject", Some("wt-123"))?;
+        assert_eq!(found1_after, None);
+
+        let found2_after = store.find_active("myproject", Some("wt-456"))?;
+        assert_eq!(found2_after, Some("sess-2".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_latest_created_session_is_returned() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("test.db");
+        let store = SessionStore::open_at(&db_path)?;
+
+        // Create first session, end it
+        store.create("sess-1", "myproject", None)?;
+        store.end_clean("sess-1")?;
+
+        // Create second session for the same project/worktree
+        store.create("sess-2", "myproject", None)?;
+
+        // Should find the new active session
+        let found = store.find_active("myproject", None)?;
+        assert_eq!(found, Some("sess-2".to_string()));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_heartbeat_on_nonexistent_session_does_not_error() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("test.db");
+        let store = SessionStore::open_at(&db_path)?;
+
+        // Heartbeat on a session that doesn't exist should succeed (no rows updated)
+        store.heartbeat("nonexistent-sess")?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_heartbeat_does_not_revive_ended_session() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("test.db");
+        let store = SessionStore::open_at(&db_path)?;
+
+        store.create("sess-1", "myproject", Some("wt-123"))?;
+        store.end_clean("sess-1")?;
+
+        // Heartbeat on ended session should not revive it
+        store.heartbeat("sess-1")?;
+
+        let found = store.find_active("myproject", Some("wt-123"))?;
+        assert_eq!(found, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_end_clean_idempotent() -> Result<()> {
+        let tmp = tempdir()?;
+        let db_path = tmp.path().join("test.db");
+        let store = SessionStore::open_at(&db_path)?;
+
+        store.create("sess-1", "myproject", Some("wt-123"))?;
+        store.end_clean("sess-1")?;
+
+        // Second end_clean should succeed without error
+        store.end_clean("sess-1")?;
+
+        let found = store.find_active("myproject", Some("wt-123"))?;
+        assert_eq!(found, None);
+
+        Ok(())
+    }
 }
