@@ -76,8 +76,6 @@ pub(super) fn stable_identity_hash(value: &str) -> String {
     format!("{hash:016x}")
 }
 
-
-
 fn effective_scope_key<F>(cwd: Option<&str>, run_command: &mut F) -> Option<String>
 where
     F: FnMut(&mut Command) -> std::io::Result<Output>,
@@ -122,7 +120,11 @@ pub(crate) fn project_name_from_root(root: &Path) -> Option<String> {
         })
 }
 
-pub(crate) fn git_command_output<F>(cwd: &Path, args: &[&str], run_command: &mut F) -> Option<String>
+pub(crate) fn git_command_output<F>(
+    cwd: &Path,
+    args: &[&str],
+    run_command: &mut F,
+) -> Option<String>
 where
     F: FnMut(&mut Command) -> std::io::Result<Output>,
 {
@@ -136,12 +138,6 @@ where
     let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
     (!output.is_empty()).then_some(output)
 }
-
-
-
-
-
-
 
 fn normalize_scope_cwd(cwd: Option<&str>) -> String {
     match cwd.filter(|value| !value.trim().is_empty()) {
@@ -250,7 +246,6 @@ fn lock_path_for(path: &Path) -> PathBuf {
             .unwrap_or("lock")
     ))
 }
-
 
 struct FileLockGuard {
     lock_path: PathBuf,

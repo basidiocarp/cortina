@@ -272,19 +272,22 @@ mod tests {
         };
 
         let json = serde_json::to_string(&event).expect("should serialize");
-        assert!(!json.contains("tools_relevant_unused"), "empty vec should be skipped");
+        assert!(
+            !json.contains("tools_relevant_unused"),
+            "empty vec should be skipped"
+        );
     }
 
     #[test]
     fn gap_detection_returns_gaps_when_no_rhizome_calls_on_rs_files() {
         let files = vec!["src/lib.rs".to_string()];
-        let tool_calls = vec![
-            make_tool_call("Bash"),
-            make_tool_call("Read"),
-        ];
+        let tool_calls = vec![make_tool_call("Bash"), make_tool_call("Read")];
 
         let gaps = compute_tool_adoption_gaps(&files, &tool_calls);
-        assert!(!gaps.is_empty(), "expected gaps for .rs file without rhizome tools");
+        assert!(
+            !gaps.is_empty(),
+            "expected gaps for .rs file without rhizome tools"
+        );
 
         let tool_names: Vec<&str> = gaps.iter().map(|(name, _, _)| name.as_str()).collect();
         assert!(
@@ -302,7 +305,10 @@ mod tests {
         ];
 
         let gaps = compute_tool_adoption_gaps(&files, &tool_calls);
-        assert!(gaps.is_empty(), "rhizome call satisfies the rule; no gaps expected");
+        assert!(
+            gaps.is_empty(),
+            "rhizome call satisfies the rule; no gaps expected"
+        );
     }
 
     #[test]
@@ -316,10 +322,7 @@ mod tests {
 
     #[test]
     fn gap_detection_deduplicates_same_tool_across_multiple_files() {
-        let files = vec![
-            "src/a.rs".to_string(),
-            "src/b.rs".to_string(),
-        ];
+        let files = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
         let tool_calls = vec![make_tool_call("Bash")];
 
         let gaps = compute_tool_adoption_gaps(&files, &tool_calls);
@@ -328,8 +331,7 @@ mod tests {
             .filter(|(name, _, _)| name == "mcp__rhizome__get_structure")
             .count();
         assert_eq!(
-            get_structure_count,
-            1,
+            get_structure_count, 1,
             "same tool should appear only once even across multiple files"
         );
     }

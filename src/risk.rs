@@ -118,7 +118,10 @@ fn score_file_sensitivity(path: &str) -> f32 {
         }
 
         // Source files — medium.
-        if matches!(ext, "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "go" | "c" | "cpp" | "h") {
+        if matches!(
+            ext,
+            "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "go" | "c" | "cpp" | "h"
+        ) {
             return 0.3;
         }
     }
@@ -195,7 +198,11 @@ mod tests {
             risk.composite()
         );
         // All axes should be the unknown-tool defaults.
-        assert!(approx_eq(risk.base_risk, 0.2), "base_risk={}", risk.base_risk);
+        assert!(
+            approx_eq(risk.base_risk, 0.2),
+            "base_risk={}",
+            risk.base_risk
+        );
         assert!(
             approx_eq(risk.irreversibility, 0.2),
             "irreversibility={}",
@@ -211,7 +218,11 @@ mod tests {
     #[test]
     fn write_tool_is_in_write_category() {
         let (risk, _) = classify_tool_call("Write", None);
-        assert!(approx_eq(risk.base_risk, 0.3), "base_risk={}", risk.base_risk);
+        assert!(
+            approx_eq(risk.base_risk, 0.3),
+            "base_risk={}",
+            risk.base_risk
+        );
         assert!(
             approx_eq(risk.irreversibility, 0.7),
             "irreversibility={}",

@@ -18,13 +18,9 @@ impl SessionStore {
     ///
     /// Returns an error if the database cannot be opened or schema creation fails.
     pub fn open() -> Result<Self> {
-        let db_path = spore::paths::db_path(
-            "cortina",
-            SESSIONS_DB_FILENAME,
-            SESSIONS_DB_ENV_VAR,
-            None,
-        )
-        .context("resolve cortina sessions database path")?;
+        let db_path =
+            spore::paths::db_path("cortina", SESSIONS_DB_FILENAME, SESSIONS_DB_ENV_VAR, None)
+                .context("resolve cortina sessions database path")?;
 
         Self::open_at(&db_path)
     }
@@ -128,11 +124,7 @@ impl SessionStore {
     ///
     /// Returns an error if the database query fails.
     #[allow(dead_code)]
-    pub fn find_active(
-        &self,
-        project: &str,
-        worktree_id: Option<&str>,
-    ) -> Result<Option<String>> {
+    pub fn find_active(&self, project: &str, worktree_id: Option<&str>) -> Result<Option<String>> {
         let threshold_ms = now_ms() - SESSION_ORPHAN_THRESHOLD_HOURS * 3_600_000;
 
         // Mark stale 'active' sessions as orphaned first

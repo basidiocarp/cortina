@@ -295,7 +295,13 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
         return;
     };
 
-    cmd.args(["auto-recall", "--query", &query, "--session-id", &event.session_id]);
+    cmd.args([
+        "auto-recall",
+        "--query",
+        &query,
+        "--session-id",
+        &event.session_id,
+    ]);
 
     let project = project_name_for_cwd(Some(&event.cwd));
     if let Some(ref p) = project {
@@ -576,5 +582,4 @@ mod tests {
         let q = recall_query("   ");
         assert!(q.is_empty());
     }
-
 }

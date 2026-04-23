@@ -73,7 +73,13 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
             |name| format!("context/{name}/pre-compact"),
         );
         let agent_id = current_agent_id_for_cwd(Some(&event.cwd));
-        store_in_hyphae(&topic, &content, Importance::High, project.as_deref(), agent_id.as_deref());
+        store_in_hyphae(
+            &topic,
+            &content,
+            Importance::High,
+            project.as_deref(),
+            agent_id.as_deref(),
+        );
         let outcome = OutcomeEvent::new(
             OutcomeKind::KnowledgeExported,
             format!("pre-compact snapshot stored in hyphae ({topic})"),
@@ -252,8 +258,7 @@ mod tests {
             custom_instructions: None,
             transcript_path: None,
         };
-        let signal_summary =
-            BTreeMap::from([("knowledge_exported".to_string(), 1usize)]);
+        let signal_summary = BTreeMap::from([("knowledge_exported".to_string(), 1usize)]);
         let payload = compact_summary_artifact_payload(
             &event,
             &["src/lib.rs".to_string(), "src/main.rs".to_string()],
@@ -264,10 +269,7 @@ mod tests {
 
         assert_eq!(parsed["artifact_type"].as_str(), Some("compact_summary"));
         assert_eq!(parsed["session_id"].as_str(), Some("ses_artifact"));
-        assert_eq!(
-            parsed["summary_request"].as_str(),
-            Some(SUMMARY_REQUEST)
-        );
+        assert_eq!(parsed["summary_request"].as_str(), Some(SUMMARY_REQUEST));
         assert_eq!(parsed["active_task_id"].as_str(), Some("task-7"));
         assert_eq!(
             parsed["signal_summary"]["knowledge_exported"].as_u64(),

@@ -554,11 +554,7 @@ where
 
     // Record the new session in SQLite for orphan detection
     if let Ok(store) = SessionStore::open() {
-        let _ = store.create(
-            &session_id,
-            &identity.project,
-            Some(&identity.worktree_id),
-        );
+        let _ = store.create(&session_id, &identity.project, Some(&identity.worktree_id));
     }
 
     Ok(new_state)
@@ -737,4 +733,3 @@ where
         scope,
     })
 }
-

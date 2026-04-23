@@ -83,7 +83,6 @@ pub enum Commands {
         #[arg(long)]
         cwd: Option<String>,
     },
-
 }
 
 #[cfg(test)]

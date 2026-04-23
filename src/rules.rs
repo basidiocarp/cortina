@@ -52,30 +52,21 @@ pub const DEFAULT_RULES: &[RelevanceRule] = &[
     RelevanceRule {
         operation: "Write",
         file_pattern: Some("*.ts"),
-        recommended_tools: &[
-            "mcp__rhizome__get_structure",
-            "mcp__rhizome__get_symbols",
-        ],
+        recommended_tools: &["mcp__rhizome__get_structure", "mcp__rhizome__get_symbols"],
         severity: "recommended",
         check_window: "session",
     },
     RelevanceRule {
         operation: "Edit",
         file_pattern: Some("*.ts"),
-        recommended_tools: &[
-            "mcp__rhizome__get_structure",
-            "mcp__rhizome__get_symbols",
-        ],
+        recommended_tools: &["mcp__rhizome__get_structure", "mcp__rhizome__get_symbols"],
         severity: "recommended",
         check_window: "session",
     },
     RelevanceRule {
         operation: "MultiEdit",
         file_pattern: Some("*.ts"),
-        recommended_tools: &[
-            "mcp__rhizome__get_structure",
-            "mcp__rhizome__get_symbols",
-        ],
+        recommended_tools: &["mcp__rhizome__get_structure", "mcp__rhizome__get_symbols"],
         severity: "recommended",
         check_window: "session",
     },

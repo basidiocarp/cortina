@@ -98,10 +98,7 @@ fn read_usize(read_env: &impl Fn(&str) -> Option<String>, name: &str, default: u
         .unwrap_or(default)
 }
 
-fn read_disabled_hooks(
-    read_env: &impl Fn(&str) -> Option<String>,
-    name: &str,
-) -> Vec<String> {
+fn read_disabled_hooks(read_env: &impl Fn(&str) -> Option<String>, name: &str) -> Vec<String> {
     read_env(name)
         .map(|val| {
             val.split(',')

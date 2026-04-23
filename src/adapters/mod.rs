@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 
 use crate::hooks;
-use crate::policy::{capture_policy, CapturePolicy};
+use crate::policy::{CapturePolicy, capture_policy};
 
 pub mod claude_code;
 pub mod volva;
@@ -146,7 +146,7 @@ fn run_hook_with_policy(policy: &CapturePolicy, hook_name: &str, f: impl FnOnce(
 mod tests {
     use anyhow::anyhow;
 
-    use super::{run_hook_with_policy};
+    use super::run_hook_with_policy;
     use crate::policy::CapturePolicy;
 
     // Helper: build a policy with specific disabled_hooks without touching
@@ -213,10 +213,7 @@ mod tests {
         let policy = policy_with_disabled(&["pre_tool_use"]);
         let mut called = false;
         // post_tool_use is not disabled — simulate the run_hook check.
-        if !policy
-            .disabled_hooks
-            .contains(&"post_tool_use".to_string())
-        {
+        if !policy.disabled_hooks.contains(&"post_tool_use".to_string()) {
             called = true;
         }
         assert!(called, "non-disabled hook must be executed");

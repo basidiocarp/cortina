@@ -158,7 +158,11 @@ fn tool_suggestion_respects_rate_limit_per_scope_and_pattern_type() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn pre_write_test_cwd(label: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!("cortina-pre-write-{}-{}", std::process::id(), label))
+    std::env::temp_dir().join(format!(
+        "cortina-pre-write-{}-{}",
+        std::process::id(),
+        label
+    ))
 }
 
 #[test]

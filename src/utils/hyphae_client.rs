@@ -66,7 +66,13 @@ pub fn command_exists(name: &str) -> bool {
     command_path(name).is_some()
 }
 
-pub fn store_in_hyphae(topic: &str, content: &str, importance: Importance, project: Option<&str>, agent_id: Option<&str>) {
+pub fn store_in_hyphae(
+    topic: &str,
+    content: &str,
+    importance: Importance,
+    project: Option<&str>,
+    agent_id: Option<&str>,
+) {
     let span_ctx = span_context("hyphae_store");
     let _tool_span = tool_span("hyphae_store", &span_ctx).entered();
     let Some(mut cmd) = resolved_command("hyphae") else {

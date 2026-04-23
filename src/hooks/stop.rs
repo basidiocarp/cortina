@@ -186,10 +186,7 @@ pub(super) fn compute_tool_adoption_gaps(
     files_modified: &[String],
     tool_calls: &[crate::tool_usage::ToolCallEntry],
 ) -> Vec<(String, String, String)> {
-    let called_names: Vec<&str> = tool_calls
-        .iter()
-        .map(|e| e.tool_name.as_str())
-        .collect();
+    let called_names: Vec<&str> = tool_calls.iter().map(|e| e.tool_name.as_str()).collect();
 
     let mut gaps: Vec<(String, String, String)> = Vec::new();
 
