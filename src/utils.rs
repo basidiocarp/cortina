@@ -2,6 +2,7 @@ mod canopy_client;
 mod command_signals;
 mod hyphae_client;
 mod session_scope;
+mod session_store;
 mod state;
 #[cfg(test)]
 mod tests;

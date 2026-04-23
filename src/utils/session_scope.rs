@@ -9,6 +9,7 @@ use std::process::{Command, Output};
 use tracing::{debug, warn};
 
 use super::hyphae_client::{command_exists, resolved_command};
+use super::session_store::SessionStore;
 use super::state::{
     canonicalize_path, current_runtime_session_id, current_timestamp_ms, git_command_output,
     load_json_file, project_name_from_root, resolved_cwd, save_json_file, scope_hash,
@@ -269,6 +270,11 @@ where
         let _subprocess_span = subprocess_span("hyphae session end", &context).entered();
         let Ok(output) = run_command(&mut cmd) else {
             warn!("Failed to execute hyphae session end");
+            // Mark session orphaned in SQLite instead of leaving file behind
+            let db_store = SessionStore::open().ok();
+            if let Some(store) = db_store {
+                let _ = store.end_orphaned(&state.session_id);
+            }
             return Ok(None);
         };
 
@@ -277,7 +283,18 @@ where
                 "Hyphae session end exited non-zero for session {}",
                 state.session_id
             );
+            // Mark session orphaned in SQLite instead of leaving file behind
+            let db_store = SessionStore::open().ok();
+            if let Some(store) = db_store {
+                let _ = store.end_orphaned(&state.session_id);
+            }
             return Ok(None);
+        }
+
+        // Mark clean end in SQLite and remove file
+        let db_store = SessionStore::open().ok();
+        if let Some(store) = db_store {
+            let _ = store.end_clean(&state.session_id);
         }
 
         with_file_lock(&path, || {
@@ -521,8 +538,18 @@ where
     }
 
     let memory_protocol = load_memory_protocol(identity, run_command);
+    let new_state = SessionState::new(session_id.clone(), identity, memory_protocol);
 
-    Ok(SessionState::new(session_id, identity, memory_protocol))
+    // Record the new session in SQLite for orphan detection
+    if let Ok(store) = SessionStore::open() {
+        let _ = store.create(
+            &session_id,
+            &identity.project,
+            Some(&identity.worktree_id),
+        );
+    }
+
+    Ok(new_state)
 }
 
 #[derive(Debug, Deserialize)]
