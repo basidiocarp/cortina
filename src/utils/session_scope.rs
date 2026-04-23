@@ -273,6 +273,10 @@ where
             // Mark session orphaned in SQLite instead of leaving file behind
             let db_store = SessionStore::open().ok();
             if let Some(store) = db_store {
+                tracing::info!(
+                    session_id = %state.session_id,
+                    "cortina: session ended orphaned (command execution failed)"
+                );
                 let _ = store.end_orphaned(&state.session_id);
             }
             return Ok(None);
@@ -286,6 +290,10 @@ where
             // Mark session orphaned in SQLite instead of leaving file behind
             let db_store = SessionStore::open().ok();
             if let Some(store) = db_store {
+                tracing::info!(
+                    session_id = %state.session_id,
+                    "cortina: session ended orphaned (command exit non-zero)"
+                );
                 let _ = store.end_orphaned(&state.session_id);
             }
             return Ok(None);
@@ -294,6 +302,10 @@ where
         // Mark clean end in SQLite and remove file
         let db_store = SessionStore::open().ok();
         if let Some(store) = db_store {
+            tracing::info!(
+                session_id = %state.session_id,
+                "cortina: session ended cleanly"
+            );
             let _ = store.end_clean(&state.session_id);
         }
 
