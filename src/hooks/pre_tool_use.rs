@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
@@ -7,7 +8,10 @@ use anyhow::Result;
 use spore::logging::{SpanContext, subprocess_span, tool_span};
 use tracing::{debug, warn};
 
-use crate::adapters::claude_code::{ClaudeCodeHookEnvelope, rewrite_response};
+use crate::adapters::claude_code::{ClaudeCodeHookEnvelope, block_response, rewrite_response};
+use crate::hooks::gate_guard::{
+    GateDecision, GateKey, GateMap, evaluate_gate, is_destructive_bash, is_readonly_git,
+};
 use crate::hooks::pre_commit::handoff_pre_commit_warnings;
 use crate::policy::{CapturePolicy, capture_policy};
 use crate::rules::{DEFAULT_RULES, any_recommended_called, matching_rules};
@@ -30,6 +34,10 @@ mcp__rhizome__get_symbol_body for a specific function";
 const GREP_ADVISORY_MESSAGE: &str = "[cortina] Symbol search - consider: mcp__rhizome__search_symbols or \
 mcp__rhizome__find_references";
 
+thread_local! {
+    static GATE_MAP: RefCell<GateMap> = RefCell::new(HashMap::new());
+}
+
 /// Handle `PreToolUse` adapter events: rewrite commands through Mycelium.
 ///
 /// Replaces mycelium-rewrite.sh. Reads the tool input, checks if the
@@ -51,6 +59,22 @@ pub fn handle(input: &str) -> Result<()> {
 
     let context = span_context(&envelope);
     let _tool_span = tool_span("pre_tool_use", &context).entered();
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GateGuard: Check for blocked Edit, Write, MultiEdit, and destructive Bash
+    // ─────────────────────────────────────────────────────────────────────────
+    if let Some(gate_decision) = check_gate_guard(&envelope) {
+        match gate_decision {
+            GateDecision::Block { message } => {
+                let response = block_response(&message);
+                println!("{response}");
+                return Ok(());
+            }
+            GateDecision::Allow => {
+                // Gate allowed; continue to other checks
+            }
+        }
+    }
 
     if let Some(event) = envelope.command_rewrite_request() {
         if event.command.is_empty() {
@@ -363,4 +387,114 @@ fn advisory_allowed(scope_cwd: Option<&str>, key: &str, cadence: usize) -> bool 
     // Fall back to false on IO failure: silently allowing every call would
     // disable rate-limiting entirely when the state file is unwritable.
     .unwrap_or(false)
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// GateGuard integration
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Check if the tool invocation should be gated. Returns Some(GateDecision)
+/// if the tool is covered by the gate, None otherwise.
+fn check_gate_guard(envelope: &ClaudeCodeHookEnvelope) -> Option<GateDecision> {
+    let tool_name = envelope.tool_name()?;
+
+    match tool_name {
+        "Edit" | "MultiEdit" | "Write" => {
+            let file_path = envelope.tool_input_string("file_path")?;
+            let gate_key = GateKey {
+                tool: tool_name.to_string(),
+                target: file_path.to_string(),
+            };
+
+            let has_investigation = detect_investigation_content(envelope);
+
+            let decision = GATE_MAP
+                .with(|map| evaluate_gate(&gate_key, &mut map.borrow_mut(), has_investigation));
+
+            Some(decision)
+        }
+        "Bash" => {
+            let command = envelope.tool_input_string("command")?;
+
+            // Read-only git commands bypass the gate entirely.
+            if is_readonly_git(command) {
+                return None;
+            }
+
+            let gate_key = if is_destructive_bash(command) {
+                // Destructive commands always gate (no TTL bypass).
+                GateKey {
+                    tool: "Bash:Destructive".to_string(),
+                    target: destructive_command_hash(command),
+                }
+            } else {
+                // Routine bash commands gate once per session.
+                GateKey {
+                    tool: "Bash:Routine".to_string(),
+                    target: "routine".to_string(),
+                }
+            };
+
+            let has_investigation = detect_investigation_content(envelope);
+
+            let decision = GATE_MAP.with(|map| {
+                let mut gate_map = map.borrow_mut();
+                // For destructive bash, we need to override the template.
+                let mut decision = evaluate_gate(&gate_key, &mut gate_map, has_investigation);
+
+                if is_destructive_bash(command) {
+                    if let GateDecision::Block { .. } = &decision {
+                        decision = GateDecision::Block {
+                            message: crate::hooks::gate_guard::DESTRUCTIVE_BASH_TEMPLATE
+                                .to_string(),
+                        };
+                    }
+                }
+
+                decision
+            });
+
+            Some(decision)
+        }
+        _ => None,
+    }
+}
+
+/// Detect if the model has provided investigation content.
+/// Simple heuristic: check if the context or input has grown significantly
+/// or contains investigation-related keywords.
+fn detect_investigation_content(envelope: &ClaudeCodeHookEnvelope) -> bool {
+    // Check tool input for keywords or substantial content.
+    let tool_input = envelope
+        .raw_value()
+        .get("tool_input")
+        .and_then(|v| v.as_object())
+        .map_or(0, serde_json::Map::len);
+
+    // If multiple fields are present (beyond just the basic ones),
+    // assume investigation is happening.
+    if tool_input > 2 {
+        return true;
+    }
+
+    // Check for investigation keywords in any string fields.
+    let raw_str = serde_json::to_string(envelope.raw_value()).unwrap_or_default();
+    let investigation_keywords = [
+        "grep", "glob", "import", "caller", "schema", "api", "targets", "rollback", "purpose",
+        "fact",
+    ];
+
+    investigation_keywords
+        .iter()
+        .any(|keyword| raw_str.to_ascii_lowercase().contains(keyword))
+}
+
+/// Hash a destructive command to a stable target identifier.
+fn destructive_command_hash(command: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    command.hash(&mut hasher);
+    format!("destructive_{:x}", hasher.finish())
 }

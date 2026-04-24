@@ -138,6 +138,10 @@ impl ClaudeCodeHookEnvelope {
     fn transcript_path(&self) -> Option<&str> {
         self.raw.get("transcript_path").and_then(Value::as_str)
     }
+
+    pub(crate) fn raw_value(&self) -> &Value {
+        &self.raw
+    }
 }
 
 pub fn rewrite_response(updated_input: &Value) -> Value {
@@ -151,13 +155,23 @@ pub fn rewrite_response(updated_input: &Value) -> Value {
     })
 }
 
+pub fn block_response(message: &str) -> Value {
+    json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "block",
+            "permissionDecisionReason": message
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use crate::events::ToolResultEvent;
 
-    use super::{ClaudeCodeHookEnvelope, rewrite_response};
+    use super::{ClaudeCodeHookEnvelope, block_response, rewrite_response};
 
     #[test]
     fn parses_tool_fields_from_claude_code_envelope() {
@@ -341,5 +355,32 @@ mod tests {
         .expect("valid envelope");
 
         assert_eq!(envelope.session_id(), Some("abc123"));
+    }
+
+    #[test]
+    fn builds_gate_guard_block_response() {
+        let response = block_response("Please provide investigation facts before proceeding");
+
+        assert_eq!(
+            response
+                .get("hookSpecificOutput")
+                .and_then(|value| value.get("hookEventName"))
+                .and_then(serde_json::Value::as_str),
+            Some("PreToolUse")
+        );
+        assert_eq!(
+            response
+                .get("hookSpecificOutput")
+                .and_then(|value| value.get("permissionDecision"))
+                .and_then(serde_json::Value::as_str),
+            Some("block")
+        );
+        assert_eq!(
+            response
+                .get("hookSpecificOutput")
+                .and_then(|value| value.get("permissionDecisionReason"))
+                .and_then(serde_json::Value::as_str),
+            Some("Please provide investigation facts before proceeding")
+        );
     }
 }
