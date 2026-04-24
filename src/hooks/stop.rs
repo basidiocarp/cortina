@@ -175,6 +175,21 @@ pub fn handle(input: &str) -> Result<()> {
         crate::tool_usage::clear_tool_calls(&hash);
     }
 
+    // Run FP marker check processor
+    let transcript_text = read_transcript_text(event.transcript_path.as_deref());
+    if let Some(fp_summary) = crate::hooks::fp_check::FpCheckProcessor::process(&transcript_text) {
+        tracing::info!("cortina stop: {fp_summary}");
+    }
+
+    // Run trigger word processor
+    let final_message = extract_final_message(&transcript_text);
+    let tw_config = crate::hooks::trigger_word::TriggerWordConfig::default();
+    let tw_processor = crate::hooks::trigger_word::TriggerWordProcessor::new(tw_config);
+    let payloads = tw_processor.scan(&final_message);
+    if !payloads.is_empty() {
+        crate::hooks::trigger_word::TriggerWordProcessor::store(&payloads);
+    }
+
     Ok(())
 }
 
@@ -412,4 +427,38 @@ fn resolve_modified_handoff_path(
                 .components()
                 .any(|component| component.as_os_str() == ".handoffs")
     })
+}
+
+/// Read transcript file text. Returns empty string on any error.
+fn read_transcript_text(path: Option<&str>) -> String {
+    let path = match path {
+        Some(p) if !p.is_empty() => p,
+        _ => return String::new(),
+    };
+
+    std::fs::read_to_string(path).unwrap_or_else(|e| {
+        tracing::warn!("cortina: could not read transcript at {path}: {e}");
+        String::new()
+    })
+}
+
+/// Extract the final assistant message from transcript text.
+/// Scans backwards through JSONL lines to find the last assistant entry.
+fn extract_final_message(transcript_text: &str) -> String {
+    for line in transcript_text.lines().rev() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Ok(entry) = serde_json::from_str::<serde_json::Value>(trimmed) {
+            if let Some("assistant") = entry.get("type").and_then(serde_json::Value::as_str) {
+                if let Some(text) = entry.get("text").and_then(serde_json::Value::as_str) {
+                    return text.to_string();
+                }
+            }
+        }
+    }
+
+    String::new()
 }
