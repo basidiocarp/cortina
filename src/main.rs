@@ -13,6 +13,7 @@ mod handoff_lint;
 mod handoff_paths;
 mod hooks;
 mod outcomes;
+mod permissions;
 mod policy;
 mod risk;
 mod rules;

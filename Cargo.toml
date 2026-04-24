@@ -19,6 +19,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "0.8"
 spore = { git = "https://github.com/basidiocarp/spore", tag = "v0.4.11", features = ["otel"] }
 tracing = "0.1"
 
