@@ -14,6 +14,7 @@ mod handoff_paths;
 mod hooks;
 mod outcomes;
 mod permissions;
+mod pipeline;
 mod policy;
 mod risk;
 mod rules;

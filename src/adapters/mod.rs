@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 
 use crate::hooks;
+use crate::pipeline::{LoggingHandler, Pipeline, PipelineContext, PipelineStage};
 use crate::policy::{CapturePolicy, capture_policy};
 
 pub mod claude_code;
@@ -79,29 +80,116 @@ pub fn handle_legacy_claude_command(event: ClaudeCodeEventCommand, input: &str) 
     handle_claude_code_event(event, input)
 }
 
+/// Initialize the pipeline with default logging handlers.
+/// This enables free DEBUG-level observability for operators.
+///
+/// Pipeline is constructed per event; cortina is invoked once per hook call.
+/// Do not convert this to a singleton — cortina has no persistent process state.
+fn init_pipeline() -> Pipeline {
+    let mut pipeline = Pipeline::new();
+    // Register logging handlers for key observable stages
+    pipeline.register(Box::new(LoggingHandler::new(
+        PipelineStage::ToolCallReceived,
+    )));
+    pipeline.register(Box::new(LoggingHandler::new(
+        PipelineStage::ToolCallCompleted,
+    )));
+    pipeline.register(Box::new(LoggingHandler::new(
+        PipelineStage::SessionSignalEmitted,
+    )));
+    pipeline
+}
+
 // run_hook always succeeds; the Result<()> return here keeps the public
 // handle_adapter_command / handle_legacy_claude_command signatures stable.
 #[allow(clippy::unnecessary_wraps)]
 fn handle_claude_code_event(event: ClaudeCodeEventCommand, input: &str) -> Result<()> {
+    let pipeline = init_pipeline();
+    let payload = serde_json::from_str::<serde_json::Value>(input).unwrap_or_default();
+
     match event {
         ClaudeCodeEventCommand::PreToolUse => {
+            // Extract tool_name from the Claude Code envelope for useful debug output.
+            let tool_name = payload.get("tool_name").and_then(|v| v.as_str());
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallReceived,
+                tool_name,
+                agent_id: None,
+                payload: &payload,
+            });
             run_hook("pre_tool_use", || hooks::pre_tool_use::handle(input));
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallCompleted,
+                tool_name,
+                agent_id: None,
+                payload: &payload,
+            });
         }
         ClaudeCodeEventCommand::PostToolUse => {
+            // Extract tool_name from the Claude Code envelope for useful debug output.
+            let tool_name = payload.get("tool_name").and_then(|v| v.as_str());
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallReceived,
+                tool_name,
+                agent_id: None,
+                payload: &payload,
+            });
             run_hook("post_tool_use", || hooks::post_tool_use::handle(input));
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallCompleted,
+                tool_name,
+                agent_id: None,
+                payload: &payload,
+            });
         }
         ClaudeCodeEventCommand::UserPromptSubmit => {
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallReceived,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
             run_hook("user_prompt_submit", || {
                 hooks::user_prompt_submit::handle(input)
             });
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallCompleted,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
         }
         ClaudeCodeEventCommand::PreCompact => {
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallReceived,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
             run_hook("pre_compact", || hooks::pre_compact::handle(input));
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallCompleted,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
         }
         ClaudeCodeEventCommand::Stop => {
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::SessionSignalEmitted,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
             run_hook("stop", || hooks::stop::handle(input));
         }
         ClaudeCodeEventCommand::SessionEnd => {
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::SessionSignalEmitted,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
             run_hook("session_end", || hooks::stop::handle(input));
         }
     }
