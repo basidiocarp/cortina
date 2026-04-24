@@ -309,3 +309,187 @@ fn span_context_includes_session_id_when_present() {
     assert_eq!(context.session_id.as_deref(), Some("abc123"));
     assert_eq!(context.workspace_root.as_deref(), Some("/tmp/demo"));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GateGuard integration tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Destructive Bash must re-gate on every call even after an initial allow.
+/// The gate entry must be removed after allow so the next invocation blocks again.
+#[test]
+fn destructive_bash_re_gates_after_allow() {
+    // Use a command that encodes the current nanosecond timestamp so the gate
+    // key is unique per test execution even within the same process (thread-local
+    // GATE_MAP persists across tests in the same thread).
+    let unique_nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let unique_cwd = format!(
+        "/tmp/gate-destructive-{}-{}",
+        std::process::id(),
+        unique_nonce
+    );
+    let destructive_cmd = format!("rm -rf {unique_cwd}");
+
+    let make_envelope = |cmd: &str, cwd: &str| {
+        ClaudeCodeHookEnvelope::parse(
+            &serde_json::json!({
+                "tool_name": "Bash",
+                "tool_input": {"command": cmd},
+                "cwd": cwd
+            })
+            .to_string(),
+        )
+        .expect("valid envelope")
+    };
+
+    let envelope = make_envelope(&destructive_cmd, &unique_cwd);
+
+    // Ensure the session scope starts empty (no investigation tools recorded).
+    let hash = scope_hash(envelope.cwd());
+    clear_tool_calls(&hash);
+
+    // First call: must block — no investigation has happened yet.
+    let decision1 = check_gate_guard(&envelope);
+    assert!(
+        matches!(decision1, Some(GateDecision::Block { .. })),
+        "first destructive bash call must be blocked"
+    );
+
+    // Simulate investigation: record a Read tool call in the session scope.
+    record_tool_call("Read", ToolSource::Other, &hash);
+
+    // Second call (with investigation in history): must allow.
+    let decision2 = check_gate_guard(&envelope);
+    assert!(
+        matches!(decision2, Some(GateDecision::Allow)),
+        "second destructive bash call with investigation must be allowed"
+    );
+
+    // Third call immediately after: must block again (no TTL bypass for destructive).
+    let decision3 = check_gate_guard(&envelope);
+    assert!(
+        matches!(decision3, Some(GateDecision::Block { .. })),
+        "third destructive bash call must be blocked again — destructive re-gates every time"
+    );
+
+    // Cleanup session state.
+    clear_tool_calls(&hash);
+}
+
+/// Edit gate does NOT allow through on retry when no investigation tools have
+/// been called in the session. The field-count heuristic (`tool_input.len()` > 2)
+/// was always true for Edit, making the gate a one-shot blocker — this test
+/// pins the correct behavior: gate stays blocked without real investigation.
+#[test]
+fn edit_gate_stays_blocked_without_investigation_tool_calls() {
+    // Unique cwd and file path per execution so the thread-local GATE_MAP entry
+    // is fresh (pid alone is not enough — multiple tests share the same process).
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let unique_cwd = format!(
+        "/tmp/cortina-gate-edit-test-{}-{}",
+        std::process::id(),
+        nonce
+    );
+    let unique_path = format!("{unique_cwd}/src/main.rs");
+
+    // Ensure no leftover tool-call state for this scope.
+    let hash = scope_hash(Some(unique_cwd.as_str()));
+    clear_tool_calls(&hash);
+
+    let make_envelope = |file_path: &str, cwd: &str| {
+        ClaudeCodeHookEnvelope::parse(
+            &serde_json::json!({
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": file_path,
+                    "old_string": "fn foo() {}",
+                    "new_string": "fn foo() { bar(); }"
+                },
+                "cwd": cwd
+            })
+            .to_string(),
+        )
+        .expect("valid envelope")
+    };
+
+    let envelope = make_envelope(&unique_path, &unique_cwd);
+
+    // First call: must block.
+    let decision1 = check_gate_guard(&envelope);
+    assert!(
+        matches!(decision1, Some(GateDecision::Block { .. })),
+        "first Edit call must be blocked"
+    );
+
+    // Second call with no investigation tool calls in session: must still block.
+    // (Previously this would incorrectly allow because tool_input.len() == 3 > 2.)
+    let decision2 = check_gate_guard(&envelope);
+    assert!(
+        matches!(decision2, Some(GateDecision::Block { .. })),
+        "Edit gate must stay blocked on retry when no investigation tools were called"
+    );
+
+    // Cleanup.
+    clear_tool_calls(&hash);
+}
+
+/// Edit gate allows through once investigation tools have been called.
+#[test]
+fn edit_gate_allows_after_investigation_tool_called() {
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let unique_cwd = format!(
+        "/tmp/cortina-gate-edit-allow-test-{}-{}",
+        std::process::id(),
+        nonce
+    );
+    let unique_path = format!("{unique_cwd}/src/lib.rs");
+
+    let hash = scope_hash(Some(unique_cwd.as_str()));
+    clear_tool_calls(&hash);
+
+    let make_envelope = |file_path: &str, cwd: &str| {
+        ClaudeCodeHookEnvelope::parse(
+            &serde_json::json!({
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": file_path,
+                    "old_string": "fn a() {}",
+                    "new_string": "fn a() { b(); }"
+                },
+                "cwd": cwd
+            })
+            .to_string(),
+        )
+        .expect("valid envelope")
+    };
+
+    let envelope = make_envelope(&unique_path, &unique_cwd);
+
+    // First call: blocked.
+    let decision1 = check_gate_guard(&envelope);
+    assert!(
+        matches!(decision1, Some(GateDecision::Block { .. })),
+        "first Edit call must be blocked"
+    );
+
+    // Record an investigation tool call in the session.
+    record_tool_call("Grep", ToolSource::Other, &hash);
+
+    // Second call: must allow because investigation happened.
+    let decision2 = check_gate_guard(&envelope);
+    assert!(
+        matches!(decision2, Some(GateDecision::Allow)),
+        "Edit gate must allow after Grep was called"
+    );
+
+    // Cleanup.
+    clear_tool_calls(&hash);
+}

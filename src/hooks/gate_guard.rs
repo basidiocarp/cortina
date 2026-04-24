@@ -130,11 +130,11 @@ pub fn evaluate_gate(key: &GateKey, map: &mut GateMap, has_investigation: bool) 
             let template = match key.tool.as_str() {
                 "Edit" | "MultiEdit" => EDIT_GATE_TEMPLATE.to_string(),
                 "Write" => WRITE_GATE_TEMPLATE.to_string(),
-                "Bash" => {
-                    // For Bash, we'll determine the template later based on the actual command.
-                    // For now, default to routine. The caller will override this.
-                    ROUTINE_BASH_TEMPLATE.to_string()
-                }
+                // "Bash:Routine" and "Bash:Destructive" are the keys used by
+                // check_gate_guard. "Bash" alone is kept for symmetry and tests
+                // that call evaluate_gate directly with a plain "Bash" key.
+                // The caller overrides the Block message with the correct template.
+                "Bash" | "Bash:Routine" | "Bash:Destructive" => ROUTINE_BASH_TEMPLATE.to_string(),
                 _ => return GateDecision::Allow, // Unknown tool, allow by default.
             };
 

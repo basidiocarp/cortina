@@ -448,6 +448,10 @@ fn check_gate_guard(envelope: &ClaudeCodeHookEnvelope) -> Option<GateDecision> {
                             message: crate::hooks::gate_guard::DESTRUCTIVE_BASH_TEMPLATE
                                 .to_string(),
                         };
+                    } else if matches!(decision, GateDecision::Allow) {
+                        // Destructive Bash must re-gate on every call — no TTL bypass.
+                        // Remove the Allowed entry so the next invocation starts fresh.
+                        gate_map.remove(&gate_key);
                     }
                 }
 
@@ -460,33 +464,57 @@ fn check_gate_guard(envelope: &ClaudeCodeHookEnvelope) -> Option<GateDecision> {
     }
 }
 
-/// Detect if the model has provided investigation content.
-/// Simple heuristic: check if the context or input has grown significantly
-/// or contains investigation-related keywords.
-fn detect_investigation_content(envelope: &ClaudeCodeHookEnvelope) -> bool {
-    // Check tool input for keywords or substantial content.
-    let tool_input = envelope
-        .raw_value()
-        .get("tool_input")
-        .and_then(|v| v.as_object())
-        .map_or(0, serde_json::Map::len);
+/// Investigation-type tool names that count as evidence the model has done
+/// pre-investigation before retrying a gated operation.
+const INVESTIGATION_TOOLS: &[&str] = &["Read", "Grep", "Glob"];
 
-    // If multiple fields are present (beyond just the basic ones),
-    // assume investigation is happening.
-    if tool_input > 2 {
+/// Returns true if a tool name is an investigation tool.
+/// Matches exact names and `mcp__rhizome__` prefixed MCP calls.
+fn is_investigation_tool(name: &str) -> bool {
+    INVESTIGATION_TOOLS.contains(&name) || name.starts_with("mcp__rhizome__")
+}
+
+/// Detect if the model has performed investigation tool calls since the session
+/// started. Uses the persisted tool-call history (same source as the write
+/// advisory logic) rather than a field-count heuristic.
+///
+/// For Edit the `tool_input` always has exactly 3 fields (`file_path`, `old_string`,
+/// `new_string`), so field-count checks are not a reliable signal. Checking the
+/// session history for Read/Grep/Glob/rhizome calls is both more accurate and
+/// matches the intent of the gate: has the model actually looked at things?
+fn detect_investigation_content(envelope: &ClaudeCodeHookEnvelope) -> bool {
+    let hash = scope_hash(envelope.cwd());
+    let tool_calls = load_tool_calls(&hash);
+
+    // If any investigation-type tool has been called this session, treat it as
+    // evidence that the model investigated before retrying.
+    if tool_calls
+        .iter()
+        .any(|e| is_investigation_tool(&e.tool_name))
+    {
         return true;
     }
 
-    // Check for investigation keywords in any string fields.
+    // Secondary fallback: check the envelope body for explicit investigation
+    // keywords. This catches cases where the session state file is unavailable
+    // or has been cleared. We require the keyword to appear in a non-trivial
+    // string (> 100 chars) to avoid false positives from field names alone.
     let raw_str = serde_json::to_string(envelope.raw_value()).unwrap_or_default();
-    let investigation_keywords = [
-        "grep", "glob", "import", "caller", "schema", "api", "targets", "rollback", "purpose",
-        "fact",
-    ];
+    if raw_str.len() > 100 {
+        let lower = raw_str.to_ascii_lowercase();
+        let investigation_keywords = [
+            "rollback",
+            "targets affected",
+            "callers",
+            "schema before",
+            "schema after",
+            "fact:",
+            "authorized by",
+        ];
+        return investigation_keywords.iter().any(|kw| lower.contains(kw));
+    }
 
-    investigation_keywords
-        .iter()
-        .any(|keyword| raw_str.to_ascii_lowercase().contains(keyword))
+    false
 }
 
 /// Hash a destructive command to a stable target identifier.
