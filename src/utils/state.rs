@@ -367,8 +367,7 @@ fn refresh_lock_if_owned(
 
 fn lock_token_matches(lock_path: &Path, token: &str) -> bool {
     read_lock_metadata(lock_path)
-        .map(|(current_token, _)| current_token == token)
-        .unwrap_or(false)
+        .is_ok_and(|(current_token, _)| current_token == token)
 }
 
 fn read_lock_metadata(lock_path: &Path) -> Result<(String, u64)> {

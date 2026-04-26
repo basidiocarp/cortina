@@ -71,6 +71,34 @@ pub struct MemoryProtocolState {
     pub protocol_resource_uri: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEventV1Dto {
+    pub schema_version: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub session_id: String,
+    pub project: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub worktree_id: Option<String>,
+    pub started_at: u64,
+}
+
+impl From<&SessionState> for SessionEventV1Dto {
+    fn from(state: &SessionState) -> Self {
+        Self {
+            schema_version: "1.0".to_string(),
+            event_type: "session_state".to_string(),
+            session_id: state.session_id.clone(),
+            project: state.project.clone(),
+            project_root: state.project_root.clone(),
+            worktree_id: state.worktree_id.clone(),
+            started_at: state.started_at,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct SessionIdentity {
     pub project: String,
@@ -179,6 +207,11 @@ where
             return with_file_lock(&path, || match load_json_file::<SessionState>(&path) {
                 Some(current) if current.session_id != existing.session_id => Ok(Some(current)),
                 _ => {
+                    debug!(
+                        wire = ?serde_json::to_value(SessionEventV1Dto::from(&new_state))
+                            .unwrap_or_default(),
+                        "session state wire event"
+                    );
                     save_json_file(&path, &new_state)?;
                     Ok(Some(new_state.clone()))
                 }
@@ -193,6 +226,11 @@ where
                 return Ok(Some(current));
             }
 
+            debug!(
+                wire = ?serde_json::to_value(SessionEventV1Dto::from(&new_state))
+                    .unwrap_or_default(),
+                "session state wire event"
+            );
             save_json_file(&path, &new_state)?;
             Ok(Some(new_state))
         })

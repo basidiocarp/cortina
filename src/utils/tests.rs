@@ -6,8 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use super::session_scope::{
-    SessionIdentity, clear_session_state, end_hyphae_session_with, ensure_hyphae_session_with_hash,
-    session_identity_for_cwd_with, session_state_path,
+    SessionEventV1Dto, SessionIdentity, clear_session_state, end_hyphae_session_with,
+    ensure_hyphae_session_with_hash, session_identity_for_cwd_with, session_state_path,
 };
 use super::state::{
     canonicalize_path, lock_path_for, save_json_file, scope_hash_with, stable_identity_hash,
@@ -1123,4 +1123,100 @@ fn update_json_file_recovers_stale_lock() {
 
     let _ = fs::remove_file(path);
     let _ = fs::remove_file(lock_path);
+}
+
+#[test]
+fn session_event_v1_dto_from_session_state_has_required_fields() {
+    let state = SessionState {
+        session_id: "01JNQSESS000000000000000".to_string(),
+        project: "basidiocarp".to_string(),
+        project_root: Some("/home/user/projects/basidiocarp".to_string()),
+        worktree_id: Some("main".to_string()),
+        legacy_scope: None,
+        started_at: 1_234_567_890,
+        memory_protocol: None,
+    };
+
+    let dto = SessionEventV1Dto::from(&state);
+
+    assert_eq!(dto.schema_version, "1.0");
+    assert_eq!(dto.event_type, "session_state");
+    assert_eq!(dto.session_id, "01JNQSESS000000000000000");
+    assert_eq!(dto.project, "basidiocarp");
+    assert_eq!(dto.project_root.as_deref(), Some("/home/user/projects/basidiocarp"));
+    assert_eq!(dto.worktree_id.as_deref(), Some("main"));
+    assert_eq!(dto.started_at, 1_234_567_890);
+}
+
+#[test]
+fn session_event_v1_dto_serializes_to_correct_json() {
+    let state = SessionState {
+        session_id: "01JNQSESS000000000000000".to_string(),
+        project: "basidiocarp".to_string(),
+        project_root: Some("/home/user/projects/basidiocarp".to_string()),
+        worktree_id: Some("main".to_string()),
+        legacy_scope: None,
+        started_at: 1_234_567_890,
+        memory_protocol: None,
+    };
+
+    let dto = SessionEventV1Dto::from(&state);
+    let json = serde_json::to_string(&dto).expect("serialization should succeed");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("json should parse");
+
+    assert_eq!(parsed["schema_version"], "1.0");
+    assert_eq!(parsed["type"], "session_state");
+    assert_eq!(parsed["session_id"], "01JNQSESS000000000000000");
+    assert_eq!(parsed["project"], "basidiocarp");
+    assert_eq!(parsed["project_root"], "/home/user/projects/basidiocarp");
+    assert_eq!(parsed["worktree_id"], "main");
+    assert_eq!(parsed["started_at"], 1_234_567_890u64);
+    // Verify no unexpected fields like legacy_scope or memory_protocol
+    assert!(!parsed.as_object().unwrap().contains_key("legacy_scope"));
+    assert!(!parsed.as_object().unwrap().contains_key("memory_protocol"));
+}
+
+#[test]
+fn session_event_v1_dto_preserves_zero_started_at() {
+    let state = SessionState {
+        session_id: "01JNQSESS000000000000001".to_string(),
+        project: "test-project".to_string(),
+        project_root: Some("/tmp/test".to_string()),
+        worktree_id: Some("feature".to_string()),
+        legacy_scope: None,
+        started_at: 0,
+        memory_protocol: None,
+    };
+
+    let dto = SessionEventV1Dto::from(&state);
+    assert_eq!(dto.started_at, 0);
+
+    let json = serde_json::to_string(&dto).expect("serialization should succeed");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("json should parse");
+    assert_eq!(parsed["started_at"], 0u64);
+}
+
+#[test]
+fn session_event_v1_dto_omits_none_optional_fields() {
+    let state = SessionState {
+        session_id: "01JNQSESS000000000000002".to_string(),
+        project: "minimal-project".to_string(),
+        project_root: None,
+        worktree_id: None,
+        legacy_scope: None,
+        started_at: 0,
+        memory_protocol: None,
+    };
+
+    let dto = SessionEventV1Dto::from(&state);
+    let json = serde_json::to_string(&dto).expect("serialization should succeed");
+    let parsed: serde_json::Value = serde_json::from_str(&json).expect("json should parse");
+
+    assert_eq!(parsed["schema_version"], "1.0");
+    assert_eq!(parsed["type"], "session_state");
+    assert_eq!(parsed["session_id"], "01JNQSESS000000000000002");
+    assert_eq!(parsed["project"], "minimal-project");
+    assert!(!parsed.as_object().unwrap().contains_key("project_root"));
+    assert!(!parsed.as_object().unwrap().contains_key("worktree_id"));
+    assert_eq!(parsed["started_at"], 0u64);
 }
