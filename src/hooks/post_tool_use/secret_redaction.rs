@@ -2,7 +2,7 @@
 ///
 /// This function replaces secret-like patterns with placeholder text to prevent
 /// credentials from being logged or stored. It targets:
-/// - API keys and tokens (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
+/// - API keys and tokens (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)
 /// - Bearer tokens
 /// - Authorization headers
 /// - Generic secrets and passwords
@@ -190,7 +190,7 @@ fn redact_aws_keys(text: &str) -> String {
 
             if potential_key.to_uppercase().starts_with("AKIA")
                 && potential_key.len() == 20
-                && potential_key[4..].chars().all(|c| c.is_alphanumeric())
+                && potential_key[4..].chars().all(char::is_alphanumeric)
             {
                 // Skip the matched characters in the main iterator
                 for _ in 0..19 {
@@ -208,53 +208,31 @@ fn redact_aws_keys(text: &str) -> String {
     result
 }
 
-/// Redacts credentials in URLs.
+/// Redacts credentials in URLs (e.g. `https://user:pass@host`).
 fn redact_url_credentials(text: &str) -> String {
     let mut result = String::new();
 
     for line in text.lines() {
-        if (line.contains("http://") || line.contains("https://")) && line.contains("@") {
-            // Simple approach: find http(s)://, skip until @, keep the rest
-            let mut current_line = String::new();
-            let mut in_proto = false;
-            let mut chars = line.chars().peekable();
+        if (line.contains("http://") || line.contains("https://")) && line.contains('@') {
+            // Use byte-safe find() to locate the protocol boundary.
+            let proto_end = line
+                .find("https://")
+                .map(|i| i + 8)
+                .or_else(|| line.find("http://").map(|i| i + 7));
 
-            while let Some(ch) = chars.next() {
-                if line[..current_line.len() + 1].ends_with("http://")
-                    || line[..current_line.len() + 1].ends_with("https://")
-                {
-                    in_proto = true;
-                    current_line.push(ch);
-                    break;
+            if let Some(proto_end) = proto_end {
+                if let Some(at_offset) = line[proto_end..].find('@') {
+                    let at_pos = proto_end + at_offset;
+                    result.push_str(&line[..proto_end]);
+                    result.push_str("[REDACTED]:[REDACTED]@");
+                    result.push_str(&line[at_pos + 1..]);
+                    result.push('\n');
+                    continue;
                 }
-                current_line.push(ch);
             }
-
-            if in_proto {
-                result.push_str(&current_line);
-                result.push_str("[REDACTED]:[REDACTED]@");
-                // Skip until we find @
-                let mut found_at = false;
-                while let Some(ch) = chars.next() {
-                    if ch == '@' {
-                        found_at = true;
-                        break;
-                    }
-                }
-                if found_at {
-                    while let Some(ch) = chars.next() {
-                        result.push(ch);
-                    }
-                }
-                result.push('\n');
-            } else {
-                result.push_str(line);
-                result.push('\n');
-            }
-        } else {
-            result.push_str(line);
-            result.push('\n');
         }
+        result.push_str(line);
+        result.push('\n');
     }
 
     // Remove trailing newline if original didn't have it

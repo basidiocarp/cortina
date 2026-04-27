@@ -50,8 +50,12 @@ pub(super) fn handle_bash(event: &BashToolEvent) {
         return;
     }
 
+    // Redact secrets from command before passing to any Hyphae storage path.
+    let safe_command = redact_secrets(command);
+    let safe_command = safe_command.as_str();
+
     let session = if command_exists("hyphae") {
-        ensure_scoped_hyphae_session(scope_cwd, Some(&truncate(command, 200)))
+        ensure_scoped_hyphae_session(scope_cwd, Some(&truncate(safe_command, 200)))
     } else {
         None
     };
@@ -75,9 +79,9 @@ pub(super) fn handle_bash(event: &BashToolEvent) {
                 session.clone(),
                 OutcomeEvent::new(
                     OutcomeKind::ErrorDetected,
-                    format!("Command failed: {}", truncate(command, 200)),
+                    format!("Command failed: {}", truncate(safe_command, 200)),
                 )
-                .with_command(truncate(command, 500)),
+                .with_command(truncate(safe_command, 500)),
             );
             let inserted = record_outcome(&hash, outcome);
             if inserted && command_exists("hyphae") {
@@ -87,7 +91,7 @@ pub(super) fn handle_bash(event: &BashToolEvent) {
                     "tool_error",
                     -1,
                     "cortina.post_tool_use.error_detected",
-                    Some(&truncate(command, 200)),
+                    Some(&truncate(safe_command, 200)),
                 );
             }
         }

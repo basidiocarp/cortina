@@ -7,46 +7,55 @@ use std::path::{Path, PathBuf};
 fn get_workspace_root() -> PathBuf {
     std::env::var("CORTINA_WORKSPACE_ROOT")
         .or_else(|_| std::env::var("WORKSPACE_ROOT"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-}
-
-/// Checks if a path is within the workspace root.
-/// Handles both absolute and relative paths.
-fn is_within_workspace_root(path: &Path, root: &Path) -> bool {
-    // If the path is relative, it's considered within the workspace root
-    if !path.is_absolute() {
-        return true;
-    }
-
-    // For absolute paths, check if it starts with the root
-    path.starts_with(root)
+        .map_or_else(
+            |_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            PathBuf::from,
+        )
 }
 
 /// Canonicalizes a path and returns it only if it stays within the workspace root.
-/// Out-of-root paths are silently skipped.
-/// For relative paths, returns the path as-is. For absolute paths, checks if within root.
+/// Out-of-root paths are silently skipped — no error is returned to the caller.
+///
+/// Both absolute paths and relative paths with traversal components (e.g. `../../etc/passwd`)
+/// are checked. Relative paths are joined against the workspace root before checking.
 pub(crate) fn canonicalize_and_gate(candidate: &str) -> Option<String> {
     let candidate_path = Path::new(candidate);
-
-    // Relative paths are always accepted
-    if !candidate_path.is_absolute() {
-        return Some(candidate.to_string());
-    }
-
-    // For absolute paths, try to canonicalize and check if within workspace root
-    let canonical = candidate_path
-        .canonicalize()
-        .unwrap_or_else(|_| candidate_path.to_path_buf());
-
     let workspace_root = get_workspace_root();
 
-    // Only return if the path is within the workspace root
-    if is_within_workspace_root(&canonical, &workspace_root) {
-        Some(canonical.to_string_lossy().into_owned())
+    // Resolve to an absolute path. For relative paths, join against workspace root
+    // so traversal components like `../../etc/passwd` are normalised correctly.
+    let joined = if candidate_path.is_absolute() {
+        candidate_path.to_path_buf()
+    } else {
+        workspace_root.join(candidate_path)
+    };
+
+    // Prefer real canonicalization (resolves symlinks). Fall back to manual component
+    // normalization for paths that don't exist yet (common for planned file references).
+    let resolved = joined.canonicalize().unwrap_or_else(|_| normalize_path(&joined));
+
+    if resolved.starts_with(&workspace_root) {
+        // Return the original candidate string — callers only need the gated decision.
+        Some(candidate.to_string())
     } else {
         None
     }
+}
+
+/// Resolves `.` and `..` components without requiring the path to exist on disk.
+fn normalize_path(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::CurDir => {}
+            c => normalized.push(c),
+        }
+    }
+    normalized
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
