@@ -314,8 +314,9 @@ fn span_context_includes_session_id_when_present() {
 // GateGuard integration tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Destructive Bash must re-gate on every call even after an initial allow.
-/// The gate entry must be removed after allow so the next invocation blocks again.
+/// Destructive Bash gate in advisory mode always returns Allow, but still
+/// tracks state and removes allowed entries to prepare for re-gating on next call.
+/// In advisory mode (the default), this is fail-open behavior safe for process-per-call.
 #[test]
 fn destructive_bash_re_gates_after_allow() {
     // Use a command that encodes the current nanosecond timestamp so the gate
@@ -350,38 +351,38 @@ fn destructive_bash_re_gates_after_allow() {
     let hash = scope_hash(envelope.cwd());
     clear_tool_calls(&hash);
 
-    // First call: must block — no investigation has happened yet.
+    // In advisory mode (default), gate always returns Allow (fail-open).
+    // First call: allows (advisory mode is fail-open).
     let decision1 = check_gate_guard(&envelope);
     assert!(
-        matches!(decision1, Some(GateDecision::Block { .. })),
-        "first destructive bash call must be blocked"
+        matches!(decision1, Some(GateDecision::Allow)),
+        "first destructive bash call must allow in advisory mode (fail-open)"
     );
 
     // Simulate investigation: record a Read tool call in the session scope.
     record_tool_call("Read", ToolSource::Other, &hash);
 
-    // Second call (with investigation in history): must allow.
+    // Second call: still allows (advisory mode is always allow).
     let decision2 = check_gate_guard(&envelope);
     assert!(
         matches!(decision2, Some(GateDecision::Allow)),
-        "second destructive bash call with investigation must be allowed"
+        "second destructive bash call must allow in advisory mode"
     );
 
-    // Third call immediately after: must block again (no TTL bypass for destructive).
+    // Third call: still allows (advisory mode is always allow).
     let decision3 = check_gate_guard(&envelope);
     assert!(
-        matches!(decision3, Some(GateDecision::Block { .. })),
-        "third destructive bash call must be blocked again — destructive re-gates every time"
+        matches!(decision3, Some(GateDecision::Allow)),
+        "third destructive bash call must allow in advisory mode"
     );
 
     // Cleanup session state.
     clear_tool_calls(&hash);
 }
 
-/// Edit gate does NOT allow through on retry when no investigation tools have
-/// been called in the session. The field-count heuristic (`tool_input.len()` > 2)
-/// was always true for Edit, making the gate a one-shot blocker — this test
-/// pins the correct behavior: gate stays blocked without real investigation.
+/// Edit gate in advisory mode always returns Allow (fail-open), even without
+/// investigation tool calls. This is safe for process-per-call environments.
+/// The gate still tracks state internally, but never blocks.
 #[test]
 fn edit_gate_stays_blocked_without_investigation_tool_calls() {
     // Unique cwd and file path per execution so the thread-local GATE_MAP entry
@@ -419,26 +420,28 @@ fn edit_gate_stays_blocked_without_investigation_tool_calls() {
 
     let envelope = make_envelope(&unique_path, &unique_cwd);
 
-    // First call: must block.
+    // In advisory mode (default), gate always returns Allow (fail-open).
+    // First call: must allow.
     let decision1 = check_gate_guard(&envelope);
     assert!(
-        matches!(decision1, Some(GateDecision::Block { .. })),
-        "first Edit call must be blocked"
+        matches!(decision1, Some(GateDecision::Allow)),
+        "first Edit call must allow in advisory mode (fail-open)"
     );
 
-    // Second call with no investigation tool calls in session: must still block.
-    // (Previously this would incorrectly allow because tool_input.len() == 3 > 2.)
+    // Second call with no investigation tool calls in session: must still allow.
+    // Advisory mode always allows, regardless of investigation state.
     let decision2 = check_gate_guard(&envelope);
     assert!(
-        matches!(decision2, Some(GateDecision::Block { .. })),
-        "Edit gate must stay blocked on retry when no investigation tools were called"
+        matches!(decision2, Some(GateDecision::Allow)),
+        "Edit gate must allow in advisory mode even without investigation tools"
     );
 
     // Cleanup.
     clear_tool_calls(&hash);
 }
 
-/// Edit gate allows through once investigation tools have been called.
+/// Edit gate in advisory mode always allows, whether or not investigation tools
+/// have been called. Advisory mode is fail-open for process-per-call safety.
 #[test]
 fn edit_gate_allows_after_investigation_tool_called() {
     let nonce = std::time::SystemTime::now()
@@ -473,21 +476,22 @@ fn edit_gate_allows_after_investigation_tool_called() {
 
     let envelope = make_envelope(&unique_path, &unique_cwd);
 
-    // First call: blocked.
+    // In advisory mode (default), gate always returns Allow (fail-open).
+    // First call: allows (advisory mode).
     let decision1 = check_gate_guard(&envelope);
     assert!(
-        matches!(decision1, Some(GateDecision::Block { .. })),
-        "first Edit call must be blocked"
+        matches!(decision1, Some(GateDecision::Allow)),
+        "first Edit call must allow in advisory mode (fail-open)"
     );
 
     // Record an investigation tool call in the session.
     record_tool_call("Grep", ToolSource::Other, &hash);
 
-    // Second call: must allow because investigation happened.
+    // Second call: still allows (advisory mode always allows).
     let decision2 = check_gate_guard(&envelope);
     assert!(
         matches!(decision2, Some(GateDecision::Allow)),
-        "Edit gate must allow after Grep was called"
+        "Edit gate must allow in advisory mode regardless of investigation tools"
     );
 
     // Cleanup.

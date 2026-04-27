@@ -1,6 +1,19 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+/// Gate mode determines whether `GateGuard` blocks or only advises.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GateMode {
+    /// Advisory-only (default): gate records concerns but always returns Allow.
+    /// This is safe for process-per-call environments where state cannot persist.
+    #[default]
+    Advisory,
+    /// Blocking: gate evaluates decision and may return Block until investigation completes.
+    /// Note: process-per-call environments will not retain state between calls.
+    #[allow(dead_code)]
+    Blocking,
+}
+
 /// State for a single gate instance.
 #[derive(Debug, Clone)]
 pub enum GateState {
@@ -113,10 +126,47 @@ pub fn is_readonly_git(command: &str) -> bool {
 
 /// Evaluate whether a gate should allow or block the operation.
 ///
-/// On first call (gate not in map): returns Block with the appropriate fact template.
-/// On retry with investigation content: returns Allow.
-/// Expired gates are treated as new gates (restart the cycle).
-pub fn evaluate_gate(key: &GateKey, map: &mut GateMap, has_investigation: bool) -> GateDecision {
+/// When mode is Advisory (default):
+/// - Always returns Allow regardless of state
+/// - Records gate concerns internally for observability, but does not block
+/// - Safe for process-per-call environments where state does not persist
+///
+/// When mode is Blocking (must be opt-in):
+/// - On first call (gate not in map): returns Block with the appropriate fact template.
+/// - On retry with investigation content: returns Allow.
+/// - Expired gates are treated as new gates (restart the cycle).
+/// - Note: process-per-call invocations will lose state between calls, so blocking
+///   gate state cannot rely on same-process retry counts.
+pub fn evaluate_gate(key: &GateKey, map: &mut GateMap, has_investigation: bool, mode: GateMode) -> GateDecision {
+    // In advisory mode, always return Allow regardless of state.
+    // This is fail-open behavior for process-per-call environments.
+    if mode == GateMode::Advisory {
+        // Still record state for observability, but never block.
+        if let Some(state) = map.get(key) {
+            if state.is_expired() {
+                map.remove(key);
+            }
+        } else {
+            // Record first-call advisory for observability.
+            let template = match key.tool.as_str() {
+                "Edit" | "MultiEdit" => EDIT_GATE_TEMPLATE.to_string(),
+                "Write" => WRITE_GATE_TEMPLATE.to_string(),
+                "Bash" | "Bash:Routine" | "Bash:Destructive" => ROUTINE_BASH_TEMPLATE.to_string(),
+                _ => String::new(),
+            };
+            if !template.is_empty() {
+                map.insert(
+                    key.clone(),
+                    GateState::Blocked {
+                        fact_template: template,
+                    },
+                );
+            }
+        }
+        return GateDecision::Allow;
+    }
+
+    // Blocking mode follows the original behavior.
     // Clean up expired gates.
     if let Some(state) = map.get(key) {
         if state.is_expired() {
@@ -237,7 +287,7 @@ mod tests {
             target: "/tmp/src/main.rs".to_string(),
         };
 
-        let decision = evaluate_gate(&key, &mut map, false);
+        let decision = evaluate_gate(&key, &mut map, false, GateMode::Blocking);
         match decision {
             GateDecision::Block { message } => {
                 assert!(message.contains("Grep"));
@@ -256,15 +306,15 @@ mod tests {
         };
 
         // First call: blocked
-        let decision1 = evaluate_gate(&key, &mut map, false);
+        let decision1 = evaluate_gate(&key, &mut map, false, GateMode::Blocking);
         assert!(matches!(decision1, GateDecision::Block { .. }));
 
         // Second call with investigation: allowed
-        let decision2 = evaluate_gate(&key, &mut map, true);
+        let decision2 = evaluate_gate(&key, &mut map, true, GateMode::Blocking);
         assert!(matches!(decision2, GateDecision::Allow));
 
         // Third call: still allowed (within TTL)
-        let decision3 = evaluate_gate(&key, &mut map, false);
+        let decision3 = evaluate_gate(&key, &mut map, false, GateMode::Blocking);
         assert!(matches!(decision3, GateDecision::Allow));
     }
 
@@ -277,11 +327,11 @@ mod tests {
         };
 
         // First call: blocked
-        let decision1 = evaluate_gate(&key, &mut map, false);
+        let decision1 = evaluate_gate(&key, &mut map, false, GateMode::Blocking);
         assert!(matches!(decision1, GateDecision::Block { .. }));
 
         // Second call without investigation: still blocked
-        let decision2 = evaluate_gate(&key, &mut map, false);
+        let decision2 = evaluate_gate(&key, &mut map, false, GateMode::Blocking);
         assert!(matches!(decision2, GateDecision::Block { .. }));
     }
 
@@ -293,7 +343,7 @@ mod tests {
             target: "/tmp/src/complex.rs".to_string(),
         };
 
-        let decision = evaluate_gate(&key, &mut map, false);
+        let decision = evaluate_gate(&key, &mut map, false, GateMode::Blocking);
         match decision {
             GateDecision::Block { message } => {
                 assert!(message.contains("Grep"));
@@ -315,7 +365,7 @@ mod tests {
             target: "command_hash".to_string(),
         };
 
-        let decision = evaluate_gate(&key, &mut map, false);
+        let decision = evaluate_gate(&key, &mut map, false, GateMode::Blocking);
         match decision {
             GateDecision::Block { message } => {
                 assert!(message.contains("purpose"));
@@ -323,5 +373,26 @@ mod tests {
             }
             GateDecision::Allow => panic!("Expected block on first call"),
         }
+    }
+
+    #[test]
+    fn test_advisory_mode_always_allows() {
+        let mut map = GateMap::new();
+        let key = GateKey {
+            tool: "Edit".to_string(),
+            target: "/tmp/src/main.rs".to_string(),
+        };
+
+        // First call in advisory mode should allow (not block)
+        let decision1 = evaluate_gate(&key, &mut map, false, GateMode::Advisory);
+        assert!(matches!(decision1, GateDecision::Allow));
+
+        // Second call should still allow, even without investigation
+        let decision2 = evaluate_gate(&key, &mut map, false, GateMode::Advisory);
+        assert!(matches!(decision2, GateDecision::Allow));
+
+        // Third call should still allow, proving we are fail-open
+        let decision3 = evaluate_gate(&key, &mut map, false, GateMode::Advisory);
+        assert!(matches!(decision3, GateDecision::Allow));
     }
 }

@@ -106,26 +106,46 @@ change thresholds met   ─►   trigger logic            ─►     Rhizome exp
 
 ---
 
+## Capture and Policy Boundary
+
+### GateGuard (Advisory by Default)
+
+Cortina includes a gate-guard mechanism in
+[`src/hooks/gate_guard.rs`](src/hooks/gate_guard.rs) that can optionally enforce
+fact-gathering before certain high-risk operations (edits, writes, destructive bash).
+
+**Important**: GateGuard is **advisory-only by default**. It records concerns
+internally for observability and future analysis, but always returns Allow,
+never Block. This fail-open behavior is essential because:
+
+1. Cortina runs as a host hook, and blocking the hook can break the outer tool
+   session if state does not persist across process invocations.
+2. Process-per-call architectures cannot maintain thread-local gate state between
+   hook calls, so blocking gates would fail to enforce across invocation boundaries.
+3. The recommend strategy is to emit gate concerns into stderr and logs, letting
+   the operator or user observe patterns without process-boundary failures.
+
+If a future deployment needs blocking gate behavior, it can be enabled by
+passing `GateMode::Blocking` to `evaluate_gate()`, but only in environments
+where state persists reliably (e.g., same-process, long-lived servers).
+
 ## What Cortina Owns
 
 - Host adapter boundary and lifecycle event intake
 - Signal classification and scoped temp-state tracking
-- Normalized usage-event producer boundary before downstream summaries
+- Gate-guard fact gathering and gate-concern observability (advisory-only)
+- Normalized tool-usage tracking boundary before downstream summaries
 - Session outcome attribution
 - Operator policy, status, and doctor surfaces
 
-### Usage Event Producer Path
+### Tool Usage Event Tracking
 
-The current production-adjacent `usage-event-v1` producer path lives in
-[`src/statusline.rs`](src/statusline.rs). Specifically,
-`read_transcript_usage(...)` and `build_usage_event_payload(...)` form the
-Cortina seam that reads Claude transcript usage blocks and normalizes them into
-Septa's `usage-event-v1` field names. Cortina does not expose a standalone
-usage-event emission command yet, so the producer-side regression seam also
-lives there: the
-`usage_event_serialization_matches_septa_fixture_shape` test serializes that
-normalized payload and compares it directly against
-`../septa/fixtures/usage-event-v1.example.json`.
+Cortina tracks tool invocations and their usage metadata in
+[`src/tool_usage.rs`](src/tool_usage.rs). The module provides `record_tool_call`
+and `load_tool_calls` functions that maintain a per-session record of which
+tools were called and from where (hyphae, rhizome, mycelium, etc.). This data
+feeds into gate-guard decision making (e.g., detecting whether investigation
+tools have been called before an edit) and into session outcome attribution.
 
 ## What Cortina Does Not Own
 

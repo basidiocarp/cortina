@@ -10,7 +10,7 @@ use tracing::{debug, warn};
 
 use crate::adapters::claude_code::{ClaudeCodeHookEnvelope, block_response, rewrite_response};
 use crate::hooks::gate_guard::{
-    GateDecision, GateKey, GateMap, evaluate_gate, is_destructive_bash, is_readonly_git,
+    GateDecision, GateKey, GateMap, GateMode, evaluate_gate, is_destructive_bash, is_readonly_git,
 };
 use crate::hooks::pre_commit::handoff_pre_commit_warnings;
 use crate::policy::{CapturePolicy, capture_policy};
@@ -408,8 +408,9 @@ fn check_gate_guard(envelope: &ClaudeCodeHookEnvelope) -> Option<GateDecision> {
 
             let has_investigation = detect_investigation_content(envelope);
 
-            let decision = GATE_MAP
-                .with(|map| evaluate_gate(&gate_key, &mut map.borrow_mut(), has_investigation));
+            let decision = GATE_MAP.with(|map| {
+                evaluate_gate(&gate_key, &mut map.borrow_mut(), has_investigation, GateMode::Advisory)
+            });
 
             Some(decision)
         }
@@ -440,7 +441,7 @@ fn check_gate_guard(envelope: &ClaudeCodeHookEnvelope) -> Option<GateDecision> {
             let decision = GATE_MAP.with(|map| {
                 let mut gate_map = map.borrow_mut();
                 // For destructive bash, we need to override the template.
-                let mut decision = evaluate_gate(&gate_key, &mut gate_map, has_investigation);
+                let mut decision = evaluate_gate(&gate_key, &mut gate_map, has_investigation, GateMode::Advisory);
 
                 if is_destructive_bash(command) {
                     if let GateDecision::Block { .. } = &decision {
