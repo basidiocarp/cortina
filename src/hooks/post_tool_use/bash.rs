@@ -70,7 +70,7 @@ pub(super) fn handle_bash(event: &BashToolEvent) {
         if track_error(
             &track_file,
             &cmd_key,
-            command,
+            safe_command,
             output,
             session.as_ref(),
             project.clone(),
@@ -85,7 +85,7 @@ pub(super) fn handle_bash(event: &BashToolEvent) {
             );
             let inserted = record_outcome(&hash, outcome);
             if inserted && command_exists("hyphae") {
-                store_error_in_hyphae(command, output, scope_cwd);
+                store_error_in_hyphae(safe_command, output, scope_cwd);
                 log_scoped_hyphae_feedback_signal(
                     scope_cwd,
                     "tool_error",
@@ -96,8 +96,8 @@ pub(super) fn handle_bash(event: &BashToolEvent) {
             }
         }
     } else {
-        resolve_error(&track_file, &cmd_key, command, &hash, scope_cwd);
-        log_validation_success(command, exit_code, &hash, scope_cwd);
+        resolve_error(&track_file, &cmd_key, safe_command, &hash, scope_cwd);
+        log_validation_success(safe_command, exit_code, &hash, scope_cwd);
     }
 
     if is_build_command(command) && exit_code.is_none_or(|c| c == 0) {
