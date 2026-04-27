@@ -1,10 +1,12 @@
 mod bash;
 mod edits;
 mod pending;
+mod secret_redaction;
 #[cfg(test)]
 mod tests;
 
 use anyhow::Result;
+pub use secret_redaction::redact_secrets;
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::events::{OutcomeEvent, ToolResultEvent};

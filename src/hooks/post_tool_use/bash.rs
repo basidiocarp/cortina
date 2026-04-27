@@ -11,7 +11,7 @@ use crate::utils::{
     store_in_hyphae, successful_validation_feedback, update_json_file,
 };
 
-use super::{annotate_outcome_with_session, pending, truncate};
+use super::{annotate_outcome_with_session, pending, truncate, redact_secrets};
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct ErrorEntry {
@@ -202,10 +202,12 @@ fn resolve_error(
         let inserted = record_outcome(hash, outcome);
 
         if inserted && command_exists("hyphae") {
+            let redacted_command = redact_secrets(command);
+            let redacted_error = redact_secrets(&prev_error.error);
             let content = format!(
                 "Fixed: {}\nPrevious error: {}",
-                truncate(command, 200),
-                truncate(&prev_error.error, 300)
+                truncate(&redacted_command, 200),
+                truncate(&redacted_error, 300)
             );
             let project = project_name_for_cwd(scope_cwd);
             let agent_id = current_agent_id_for_cwd(scope_cwd);
@@ -221,17 +223,19 @@ fn resolve_error(
                 "error_resolved",
                 1,
                 "cortina.post_tool_use.error_resolution",
-                Some(&truncate(command, 200)),
+                Some(&truncate(&redacted_command, 200)),
             );
         }
     }
 }
 
 fn store_error_in_hyphae(command: &str, output: &str, scope_cwd: Option<&str>) {
+    let redacted_command = redact_secrets(command);
+    let redacted_output = redact_secrets(output);
     let content = format!(
         "Command: {}\nError: {}",
-        truncate(command, 200),
-        truncate(output, 500)
+        truncate(&redacted_command, 200),
+        truncate(&redacted_output, 500)
     );
     let agent_id = current_agent_id_for_cwd(scope_cwd);
     store_in_hyphae(

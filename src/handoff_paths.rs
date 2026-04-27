@@ -3,6 +3,52 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// Determines the workspace root for path validation.
+fn get_workspace_root() -> PathBuf {
+    std::env::var("CORTINA_WORKSPACE_ROOT")
+        .or_else(|_| std::env::var("WORKSPACE_ROOT"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+}
+
+/// Checks if a path is within the workspace root.
+/// Handles both absolute and relative paths.
+fn is_within_workspace_root(path: &Path, root: &Path) -> bool {
+    // If the path is relative, it's considered within the workspace root
+    if !path.is_absolute() {
+        return true;
+    }
+
+    // For absolute paths, check if it starts with the root
+    path.starts_with(root)
+}
+
+/// Canonicalizes a path and returns it only if it stays within the workspace root.
+/// Out-of-root paths are silently skipped.
+/// For relative paths, returns the path as-is. For absolute paths, checks if within root.
+pub(crate) fn canonicalize_and_gate(candidate: &str) -> Option<String> {
+    let candidate_path = Path::new(candidate);
+
+    // Relative paths are always accepted
+    if !candidate_path.is_absolute() {
+        return Some(candidate.to_string());
+    }
+
+    // For absolute paths, try to canonicalize and check if within workspace root
+    let canonical = candidate_path
+        .canonicalize()
+        .unwrap_or_else(|_| candidate_path.to_path_buf());
+
+    let workspace_root = get_workspace_root();
+
+    // Only return if the path is within the workspace root
+    if is_within_workspace_root(&canonical, &workspace_root) {
+        Some(canonical.to_string_lossy().into_owned())
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandoffPaths {
     pub handoff_file: PathBuf,
@@ -114,7 +160,7 @@ fn collect_path_candidates(
         let candidate = token.trim_matches(|ch: char| {
             matches!(
                 ch,
-                '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | ':'
+                '`' | '"' | '\'' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | ':' | '*'
             )
         });
         push_path_candidate(candidate, referenced_paths, seen_paths);
@@ -130,9 +176,14 @@ fn push_path_candidate(
     if !looks_like_path(candidate) {
         return;
     }
-    let candidate = candidate.to_string();
-    if seen_paths.insert(candidate.clone()) {
-        referenced_paths.push(candidate);
+
+    // Canonicalize and gate: skip if outside workspace root
+    let Some(canonical) = canonicalize_and_gate(candidate) else {
+        return;
+    };
+
+    if seen_paths.insert(canonical.clone()) {
+        referenced_paths.push(canonical);
     }
 }
 
@@ -257,6 +308,52 @@ cortina/src/cli.rs
                 .referenced_paths
                 .iter()
                 .any(|value| value == "cortina/src/cli.rs")
+        );
+    }
+
+    #[test]
+    fn silently_skips_paths_outside_workspace_root() {
+        let dir = TempDir::new().unwrap();
+        let path = write_handoff(
+            &dir,
+            "security.md",
+            r"# Handoff
+
+#### Files to modify
+
+- **`cortina/src/handoff_paths.rs`** — valid path
+- **`/etc/passwd`** — invalid path
+- **`/tmp/secret-file`** — invalid path
+
+- [ ] Update path validation
+",
+        );
+
+        let extracted = extract_paths(&path).unwrap();
+
+        // Should contain the valid relative path (or its canonical form)
+        assert!(
+            extracted.referenced_paths.iter().any(|p| p.contains("handoff_paths.rs")),
+            "Valid relative path should be included: {:?}",
+            extracted.referenced_paths
+        );
+
+        // Should NOT contain absolute paths outside workspace
+        assert!(
+            !extracted
+                .referenced_paths
+                .iter()
+                .any(|p| p.contains("/etc/passwd")),
+            "Path /etc/passwd should be excluded: {:?}",
+            extracted.referenced_paths
+        );
+        assert!(
+            !extracted
+                .referenced_paths
+                .iter()
+                .any(|p| p.contains("/tmp/secret-file")),
+            "Path /tmp/secret-file should be excluded: {:?}",
+            extracted.referenced_paths
         );
     }
 }
