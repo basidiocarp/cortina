@@ -20,7 +20,7 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
-spore = { git = "https://github.com/basidiocarp/spore", tag = "v0.4.11", features = ["otel"] }
+spore = { git = "https://github.com/basidiocarp/spore", rev = "0bc2e878010e75e30e26fa517d747e97d59628b0", features = ["otel"] }
 tracing = "0.1"
 
 rusqlite = { version = "0.39", features = ["bundled"] }
