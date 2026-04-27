@@ -174,6 +174,7 @@ impl NormalizedLifecycleEvent {
             ),
         );
         normalized.cwd = Some(event.cwd.clone());
+        normalized.session_id = event.execution_session.as_ref().map(|s| s.session_id.clone());
         normalized
             .metadata
             .insert("phase".to_string(), json!(event.phase));
@@ -283,6 +284,7 @@ mod tests {
             stderr: Some("oops".to_string()),
             exit_code: Some(1),
             error: Some("backend error".to_string()),
+            execution_session: None,
         };
 
         let normalized = NormalizedLifecycleEvent::from_volva_hook(&event);
@@ -290,5 +292,32 @@ mod tests {
         assert_eq!(normalized.status, LifecycleStatus::Failed);
         assert_eq!(normalized.host, LifecycleHost::Volva);
         assert_eq!(normalized.cwd.as_deref(), Some("/tmp/demo"));
+    }
+
+    #[test]
+    fn propagates_session_id_from_volva_hook_event() {
+        use super::super::VolvaExecutionSession;
+
+        let event = VolvaHookEvent {
+            schema_version: "1.0".to_string(),
+            phase: VolvaHookPhase::BeforePromptSend,
+            backend_kind: VolvaBackendKind::OfficialCli,
+            cwd: "/tmp/demo".to_string(),
+            prompt_text: "prompt".to_string(),
+            prompt_summary: "prompt".to_string(),
+            stdout: None,
+            stderr: None,
+            exit_code: None,
+            error: None,
+            execution_session: Some(VolvaExecutionSession {
+                session_id: "volva-run-test-123".to_string(),
+            }),
+        };
+
+        let normalized = NormalizedLifecycleEvent::from_volva_hook(&event);
+        assert_eq!(normalized.category, LifecycleCategory::Host);
+        assert_eq!(normalized.status, LifecycleStatus::Requested);
+        assert_eq!(normalized.host, LifecycleHost::Volva);
+        assert_eq!(normalized.session_id.as_deref(), Some("volva-run-test-123"));
     }
 }

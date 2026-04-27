@@ -62,6 +62,20 @@ fn record_hook_event(event: &VolvaHookEvent) -> Result<()> {
     let hash = scope_hash(Some(&event.cwd));
     let event = event.clone();
     update_json_file::<Vec<VolvaHookEvent>, _, _>(volva_hook_events_path(&hash), move |events| {
+        // Dedupe: skip if an event with the same execution session id and phase is already recorded
+        if let Some(session_id) = event.execution_session.as_ref().map(|s| &s.session_id) {
+            let duplicate = events.iter().any(|e| {
+                e.phase == event.phase
+                    && e.execution_session
+                        .as_ref()
+                        .map(|s| &s.session_id)
+                        == Some(session_id)
+            });
+            if duplicate {
+                return;
+            }
+        }
+
         events.push(event);
 
         if events.len() > MAX_RECORDED_VOLVA_HOOK_EVENTS {
@@ -188,5 +202,140 @@ mod tests {
             .join(format!("cortina-volva-hook-{stamp}-{name}"))
             .to_string_lossy()
             .to_string()
+    }
+
+    #[test]
+    fn preserves_execution_session_id_from_volva_hook_event() {
+        let cwd = unique_cwd("session-id");
+        clear_recorded_hook_events(&cwd);
+
+        let input = json!({
+            "schema_version": "1.0",
+            "phase": "before_prompt_send",
+            "backend_kind": "official-cli",
+            "cwd": cwd,
+            "prompt_text": "hello",
+            "prompt_summary": "hello",
+            "execution_session": {
+                "session_id": "volva-run-test-abc123",
+                "mode": "run",
+                "backend": "official-cli",
+                "workspace": {
+                    "workspace_root": "/tmp/test",
+                    "vendor_path": "/tmp/test/vendor"
+                },
+                "primary_participant": {
+                    "participant_id": "p-1",
+                    "kind": "model"
+                },
+                "state": "active"
+            }
+        })
+        .to_string();
+
+        handle_hook_event(&input).expect("should accept event with execution_session");
+
+        let events = load_recorded_hook_events(&cwd);
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].execution_session.as_ref().map(|s| s.session_id.as_str()),
+            Some("volva-run-test-abc123")
+        );
+        clear_recorded_hook_events(&cwd);
+    }
+
+    #[test]
+    fn deduplicates_repeated_volva_hook_event_delivery() {
+        let cwd = unique_cwd("dedupe");
+        clear_recorded_hook_events(&cwd);
+
+        let input = json!({
+            "schema_version": "1.0",
+            "phase": "before_prompt_send",
+            "backend_kind": "official-cli",
+            "cwd": cwd,
+            "prompt_text": "hello",
+            "prompt_summary": "hello",
+            "execution_session": {
+                "session_id": "volva-run-dedupe-xyz",
+                "mode": "run",
+                "backend": "official-cli",
+                "workspace": {
+                    "workspace_root": "/tmp/test",
+                    "vendor_path": "/tmp/test/vendor"
+                },
+                "primary_participant": {
+                    "participant_id": "p-1",
+                    "kind": "model"
+                },
+                "state": "active"
+            }
+        })
+        .to_string();
+
+        handle_hook_event(&input).expect("first delivery accepted");
+        handle_hook_event(&input).expect("second delivery silently deduped");
+
+        let events = load_recorded_hook_events(&cwd);
+        assert_eq!(
+            events.len(),
+            1,
+            "duplicate delivery should not create a second entry"
+        );
+        clear_recorded_hook_events(&cwd);
+    }
+
+    #[test]
+    fn two_phases_same_session_id_are_not_deduped() {
+        let cwd = unique_cwd("two-phases");
+        clear_recorded_hook_events(&cwd);
+
+        let session_json = json!({
+            "session_id": "volva-run-two-phases",
+            "mode": "run",
+            "backend": "official-cli",
+            "workspace": {
+                "workspace_root": "/tmp/test",
+                "vendor_path": "/tmp/test/vendor"
+            },
+            "primary_participant": {
+                "participant_id": "p-1",
+                "kind": "model"
+            },
+            "state": "active"
+        });
+
+        let before = json!({
+            "schema_version": "1.0",
+            "phase": "before_prompt_send",
+            "backend_kind": "official-cli",
+            "cwd": &cwd,
+            "prompt_text": "hello",
+            "prompt_summary": "hello",
+            "execution_session": session_json
+        })
+        .to_string();
+
+        let after = json!({
+            "schema_version": "1.0",
+            "phase": "response_complete",
+            "backend_kind": "official-cli",
+            "cwd": &cwd,
+            "prompt_text": "hello",
+            "prompt_summary": "hello",
+            "execution_session": session_json
+        })
+        .to_string();
+
+        handle_hook_event(&before).expect("before_prompt_send accepted");
+        handle_hook_event(&after).expect("response_complete accepted");
+
+        let events = load_recorded_hook_events(&cwd);
+        assert_eq!(
+            events.len(),
+            2,
+            "distinct phases must not be deduped"
+        );
+        clear_recorded_hook_events(&cwd);
     }
 }

@@ -8,7 +8,8 @@ mod outcome_events;
 )]
 pub use adapter_events::{
     BashToolEvent, CommandRewriteRequest, FileEditEvent, PreCompactEvent, SessionStopEvent,
-    ToolResultEvent, UserPromptSubmitEvent, VolvaBackendKind, VolvaHookEvent, VolvaHookPhase,
+    ToolResultEvent, UserPromptSubmitEvent, VolvaBackendKind, VolvaExecutionSession,
+    VolvaHookEvent, VolvaHookPhase,
 };
 #[allow(
     unused_imports,

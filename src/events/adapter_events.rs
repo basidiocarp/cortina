@@ -61,6 +61,13 @@ pub enum VolvaBackendKind {
     AnthropicApi,
 }
 
+/// Subset of the Volva `ExecutionSessionIdentity` needed for replay identity.
+/// Unknown fields are silently ignored (serde default — no `deny_unknown_fields`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct VolvaExecutionSession {
+    pub session_id: String,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct VolvaHookEvent {
     pub schema_version: String,
@@ -77,6 +84,8 @@ pub struct VolvaHookEvent {
     pub exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_session: Option<VolvaExecutionSession>,
 }
 
 impl CommandRewriteRequest {
