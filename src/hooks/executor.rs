@@ -10,9 +10,13 @@ const CONTEXT_MOD_LIMIT: usize = 50 * 1024; // 50KB
 
 /// Executor for hook processes.
 ///
-/// The executor loads hook executables from configured directories,
-/// runs them with a 30-second timeout, and aggregates their outputs.
-/// If no hooks are configured, execution proceeds silently (fail-open).
+/// **Stub implementation.** This executor is a no-op placeholder — no hook
+/// subprocesses are launched or awaited. The API is in place; real execute
+/// behavior (subprocess spawn, 30-second timeout, stdout/stderr aggregation,
+/// fail-open diagnostics on nonzero exit) is follow-on work.
+///
+/// If no hooks are configured, or until real execution is wired, execution
+/// proceeds silently and fail-open.
 #[allow(dead_code)] // Stub implementation for follow-on work
 pub struct HookExecutor {
     /// Directories to search for hook executables.
@@ -29,15 +33,15 @@ impl HookExecutor {
 
     /// Run all hooks matching the given hook type.
     ///
-    /// Searches `hooks_dirs` for executables named after `hook_type`,
-    /// runs them with the input serialized to JSON on stdin,
-    /// enforces a 30-second timeout per hook,
-    /// and aggregates outputs.
+    /// **Stub.** Returns the default pass-through `HookOutput` without
+    /// searching directories or launching subprocesses.
     ///
-    /// If no hooks are configured or found, returns a default (pass-through)
-    /// `HookOutput`. If a hook times out or fails, logs a warning and continues.
-    ///
-    /// This is a stub implementation — real subprocess execution is follow-on work.
+    /// When real execution is implemented, this will:
+    /// - search `hooks_dirs` for executables named after `hook_type`
+    /// - run each with input serialized to JSON on stdin
+    /// - enforce a 30-second timeout per hook
+    /// - aggregate outputs across all hooks
+    /// - log a diagnostic warning and continue on nonzero exit or timeout
     pub fn run_hooks(&self, hook_type: HookType, input: &HookInput) -> HookOutput {
         // Stub: no hook processes to run yet; returns fail-open default
         let _ = (hook_type, input, &self.hooks_dirs); // suppress unused warnings
