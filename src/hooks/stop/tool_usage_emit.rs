@@ -28,10 +28,8 @@ struct ToolUsageEventV1 {
     session_id: String,
     host: String,
     timestamp: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     tools_available: Vec<ToolAvailableItem>,
     tools_called: Vec<ToolCalledItem>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     tools_relevant_unused: Vec<ToolRelevantUnusedItem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     task_id: Option<String>,
@@ -253,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_gaps_omit_tools_relevant_unused_from_serialized_event() {
+    fn empty_vecs_serialize_as_empty_arrays() {
         let event = ToolUsageEventV1 {
             schema_version: "1.0".to_string(),
             session_id: "ses_clean".to_string(),
@@ -272,9 +270,14 @@ mod tests {
         };
 
         let json = serde_json::to_string(&event).expect("should serialize");
+        // Schema requires both fields; empty arrays should serialize as []
         assert!(
-            !json.contains("tools_relevant_unused"),
-            "empty vec should be skipped"
+            json.contains("\"tools_available\":[]"),
+            "empty tools_available should serialize as empty array"
+        );
+        assert!(
+            json.contains("\"tools_relevant_unused\":[]"),
+            "empty tools_relevant_unused should serialize as empty array"
         );
     }
 
