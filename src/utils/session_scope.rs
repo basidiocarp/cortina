@@ -6,7 +6,41 @@ use spore::telemetry::TraceContextCarrier;
 use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
+use std::sync::mpsc;
+use std::time::Duration;
 use tracing::{debug, warn};
+
+/// Internal deadline for the `hyphae session end` subprocess.
+///
+/// If hyphae hangs during session-end, this timeout lets cortina clean up
+/// its state file and return before the lamella hook timeout kills the process.
+const HYPHAE_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Run `cmd` with an internal deadline.
+///
+/// Spawns the subprocess, moves it into a background thread that calls
+/// [`wait_with_output`], and waits on a channel for at most
+/// `HYPHAE_WRITE_TIMEOUT`. Returns `Err(TimedOut)` if the deadline fires.
+/// The background thread continues until the process exits on its own (the
+/// lamella hook timeout will reap it when cortina is killed).
+fn run_with_timeout(cmd: &mut Command) -> std::io::Result<Output> {
+    let child = cmd.spawn()?;
+    let (tx, rx) = mpsc::channel::<std::io::Result<Output>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(HYPHAE_WRITE_TIMEOUT) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "hyphae session end timed out after 5s",
+        )),
+        Err(mpsc::RecvTimeoutError::Disconnected) => Err(std::io::Error::new(
+            std::io::ErrorKind::BrokenPipe,
+            "hyphae session end thread exited before sending result",
+        )),
+    }
+}
 
 use super::hyphae_client::{command_exists, resolved_command};
 use super::session_store::SessionStore;
@@ -254,7 +288,7 @@ pub fn end_scoped_hyphae_session(
         summary,
         files_modified,
         errors_encountered,
-        Command::output,
+        run_with_timeout,
     )
 }
 
@@ -317,6 +351,15 @@ where
                 );
                 let _ = store.end_orphaned(&state.session_id);
             }
+            with_file_lock(&path, || {
+                if load_json_file::<SessionState>(&path)
+                    .as_ref()
+                    .is_some_and(|current| current.session_id == state.session_id)
+                {
+                    let _ = fs::remove_file(&path);
+                }
+                Ok(())
+            })?;
             return Ok(None);
         };
 
@@ -334,6 +377,15 @@ where
                 );
                 let _ = store.end_orphaned(&state.session_id);
             }
+            with_file_lock(&path, || {
+                if load_json_file::<SessionState>(&path)
+                    .as_ref()
+                    .is_some_and(|current| current.session_id == state.session_id)
+                {
+                    let _ = fs::remove_file(&path);
+                }
+                Ok(())
+            })?;
             return Ok(None);
         }
 

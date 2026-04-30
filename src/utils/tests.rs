@@ -966,7 +966,7 @@ fn legacy_scope_hash_for_test(cwd: &str) -> String {
 }
 
 #[test]
-fn end_hyphae_session_with_spawn_failure_keeps_cached_state() {
+fn end_hyphae_session_with_spawn_failure_clears_cached_state() {
     let _lock = crate::test_support::test_lock();
     let hash = "end-spawn-failure";
     clear_session_state(hash);
@@ -986,12 +986,11 @@ fn end_hyphae_session_with_spawn_failure_keeps_cached_state() {
     });
 
     assert!(result.is_none());
-    assert_eq!(load_session_state(hash).as_ref(), Some(&state));
-    clear_session_state(hash);
+    assert!(load_session_state(hash).is_none(), "state file must be removed on command failure");
 }
 
 #[test]
-fn end_hyphae_session_with_non_zero_exit_keeps_cached_state() {
+fn end_hyphae_session_with_non_zero_exit_clears_cached_state() {
     let _lock = crate::test_support::test_lock();
     let hash = "end-non-zero";
     clear_session_state(hash);
@@ -1011,8 +1010,7 @@ fn end_hyphae_session_with_non_zero_exit_keeps_cached_state() {
     });
 
     assert!(result.is_none());
-    assert_eq!(load_session_state(hash).as_ref(), Some(&state));
-    clear_session_state(hash);
+    assert!(load_session_state(hash).is_none(), "state file must be removed on non-zero exit");
 }
 
 #[test]
