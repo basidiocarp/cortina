@@ -18,9 +18,18 @@ impl SessionStore {
     ///
     /// Returns an error if the database cannot be opened or schema creation fails.
     pub fn open() -> Result<Self> {
-        let db_path =
-            spore::paths::db_path("cortina", SESSIONS_DB_FILENAME, SESSIONS_DB_ENV_VAR, None)
-                .context("resolve cortina sessions database path")?;
+        let db_path = if let Ok(p) = std::env::var(SESSIONS_DB_ENV_VAR) {
+            std::path::PathBuf::from(p)
+        } else {
+            spore::paths::data_dir("basidiocarp")
+                .join("cortina")
+                .join(SESSIONS_DB_FILENAME)
+        };
+
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create cortina data directory {}", parent.display()))?;
+        }
 
         Self::open_at(&db_path)
     }

@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 use spore::logging::{SpanContext, subprocess_span, tool_span};
 use spore::telemetry::TraceContextCarrier;
@@ -66,6 +68,70 @@ pub fn command_exists(name: &str) -> bool {
     command_path(name).is_some()
 }
 
+// ---------------------------------------------------------------------------
+// Hyphae socket endpoint discovery
+// ---------------------------------------------------------------------------
+
+/// Cached unix-socket path for the hyphae service endpoint.
+///
+/// Read from `~/.config/hyphae/hyphae.endpoint.json` on first call. `None`
+/// means the descriptor is absent or the transport is not unix-socket — cortina
+/// falls back to the CLI spawn path in that case.
+static HYPHAE_SOCKET_PATH: OnceLock<Option<String>> = OnceLock::new();
+
+fn hyphae_socket_path() -> Option<&'static str> {
+    HYPHAE_SOCKET_PATH
+        .get_or_init(|| {
+            let descriptor_path =
+                spore::paths::config_dir("hyphae").join("hyphae.endpoint.json");
+            let json = std::fs::read_to_string(descriptor_path).ok()?;
+            let v: serde_json::Value = serde_json::from_str(&json).ok()?;
+            if v.get("transport").and_then(|t| t.as_str()) != Some("unix-socket") {
+                return None;
+            }
+            v.get("endpoint")?.as_str().map(String::from)
+        })
+        .as_deref()
+}
+
+/// Send a fire-and-forget JSON-RPC 2.0 request to the hyphae unix socket.
+///
+/// Opens, writes, reads one response line, and closes. Blocks briefly — callers
+/// must spawn a background thread if blocking would stall the hook.
+#[cfg(unix)]
+fn socket_call(socket_path: &str, method: &str, params: serde_json::Value) -> anyhow::Result<()> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixStream;
+
+    let stream = UnixStream::connect(socket_path)?;
+    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+
+    let mut writer = stream.try_clone()?;
+
+    let request = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": method,
+        "params": params,
+    });
+    writer.write_all(serde_json::to_string(&request)?.as_bytes())?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+
+    let reader = BufReader::new(&stream);
+    reader
+        .lines()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no response from hyphae socket"))??;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// hyphae_memory_store — socket preferred, CLI fallback
+// ---------------------------------------------------------------------------
+
 pub fn store_in_hyphae(
     topic: &str,
     content: &str,
@@ -75,6 +141,45 @@ pub fn store_in_hyphae(
 ) {
     let span_ctx = span_context("hyphae_store");
     let _tool_span = tool_span("hyphae_store", &span_ctx).entered();
+
+    #[cfg(unix)]
+    if let Some(socket) = hyphae_socket_path() {
+        let mut params = serde_json::json!({
+            "topic": topic,
+            "content": content,
+            "importance": importance.as_str(),
+            "keywords": ["cortina", "hook"],
+        });
+        if let Some(proj) = project {
+            params["project"] = serde_json::json!(proj);
+        }
+        if let Some(id) = agent_id {
+            params["agent_id"] = serde_json::json!(id);
+        }
+
+        let socket = socket.to_string();
+        let _spawn_span = subprocess_span("hyphae store (socket)", &span_ctx).entered();
+        std::thread::spawn(move || {
+            if let Err(e) = socket_call(&socket, "hyphae_memory_store", params) {
+                warn!("hyphae_memory_store socket call failed: {e}");
+            }
+        });
+        return;
+    }
+
+    // [COMPATIBILITY FALLBACK] hyphae socket endpoint unavailable — CLI only
+    warn!("hyphae socket endpoint unavailable; using CLI fallback for store_in_hyphae");
+    store_in_hyphae_cli(topic, content, importance, project, agent_id, &span_ctx);
+}
+
+fn store_in_hyphae_cli(
+    topic: &str,
+    content: &str,
+    importance: Importance,
+    project: Option<&str>,
+    agent_id: Option<&str>,
+    span_ctx: &SpanContext,
+) {
     let Some(mut cmd) = resolved_command("hyphae") else {
         debug!("Hyphae binary is not discoverable; skipping store");
         return;
@@ -99,7 +204,7 @@ pub fn store_in_hyphae(
         }
     }
 
-    let _spawn_span = subprocess_span("hyphae store", &span_ctx).entered();
+    let _spawn_span = subprocess_span("hyphae store", span_ctx).entered();
     if let Err(err) = cmd
         .stdout(std::process::Stdio::null())
         .stderr(diagnostic_stderr())
@@ -109,6 +214,10 @@ pub fn store_in_hyphae(
     }
 }
 
+// ---------------------------------------------------------------------------
+// compact_summary artifact store — socket preferred, CLI fallback
+// ---------------------------------------------------------------------------
+
 /// Store a typed `compact_summary` artifact in Hyphae.
 ///
 /// Uses topic `artifact/compact_summary/{session_id}` so the artifact is
@@ -117,13 +226,7 @@ pub fn store_in_hyphae(
 pub fn store_compact_summary_artifact(payload: &str, project: Option<&str>) {
     let span_ctx = span_context("hyphae_store_artifact");
     let _tool_span = tool_span("hyphae_store_artifact", &span_ctx).entered();
-    let Some(mut cmd) = resolved_command("hyphae") else {
-        debug!("Hyphae binary is not discoverable; skipping compact_summary artifact store");
-        return;
-    };
 
-    // Extract session_id from the payload for the topic, falling back to
-    // "unknown" so the store still lands under a queryable prefix.
     let session_id = serde_json::from_str::<serde_json::Value>(payload)
         .ok()
         .and_then(|v| v["session_id"].as_str().map(ToString::to_string))
@@ -131,7 +234,49 @@ pub fn store_compact_summary_artifact(payload: &str, project: Option<&str>) {
 
     let topic = format!("artifact/compact_summary/{session_id}");
 
-    cmd.args(["store", "--topic", &topic])
+    #[cfg(unix)]
+    if let Some(socket) = hyphae_socket_path() {
+        let mut params = serde_json::json!({
+            "topic": topic,
+            "content": payload,
+            "importance": Importance::High.as_str(),
+            "keywords": ["cortina", "hook", "compact_summary", "artifact"],
+        });
+        if let Some(proj) = project {
+            params["project"] = serde_json::json!(proj);
+        }
+
+        let socket = socket.to_string();
+        let _spawn_span =
+            subprocess_span("hyphae store artifact (socket)", &span_ctx).entered();
+        std::thread::spawn(move || {
+            if let Err(e) = socket_call(&socket, "hyphae_memory_store", params) {
+                warn!("hyphae_memory_store socket call failed for compact_summary: {e}");
+            }
+        });
+        return;
+    }
+
+    // [COMPATIBILITY FALLBACK] hyphae socket endpoint unavailable — CLI only
+    warn!(
+        "hyphae socket endpoint unavailable; \
+         using CLI fallback for store_compact_summary_artifact"
+    );
+    store_compact_summary_artifact_cli(&topic, payload, project, &span_ctx);
+}
+
+fn store_compact_summary_artifact_cli(
+    topic: &str,
+    payload: &str,
+    project: Option<&str>,
+    span_ctx: &SpanContext,
+) {
+    let Some(mut cmd) = resolved_command("hyphae") else {
+        debug!("Hyphae binary is not discoverable; skipping compact_summary artifact store");
+        return;
+    };
+
+    cmd.args(["store", "--topic", topic])
         .args(["--content", payload])
         .args(["--importance", Importance::High.as_str()])
         .args(["--keywords", "cortina,hook,compact_summary,artifact"]);
@@ -147,7 +292,7 @@ pub fn store_compact_summary_artifact(payload: &str, project: Option<&str>) {
         }
     }
 
-    let _spawn_span = subprocess_span("hyphae store artifact", &span_ctx).entered();
+    let _spawn_span = subprocess_span("hyphae store artifact", span_ctx).entered();
     if let Err(err) = cmd
         .stdout(std::process::Stdio::null())
         .stderr(diagnostic_stderr())
@@ -156,6 +301,10 @@ pub fn store_compact_summary_artifact(payload: &str, project: Option<&str>) {
         warn!("Failed to spawn hyphae store for compact_summary artifact: {err}");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Generic async spawn helper — out of scope for socket migration
+// ---------------------------------------------------------------------------
 
 pub fn spawn_async_checked(cmd: &str, args: &[&str]) -> bool {
     let context = span_context(cmd);
