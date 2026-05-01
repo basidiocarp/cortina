@@ -324,8 +324,7 @@ fn destructive_bash_re_gates_after_allow() {
     // GATE_MAP persists across tests in the same thread).
     let unique_nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.subsec_nanos());
     let unique_cwd = format!(
         "/tmp/gate-destructive-{}-{}",
         std::process::id(),
@@ -389,8 +388,7 @@ fn edit_gate_stays_blocked_without_investigation_tool_calls() {
     // is fresh (pid alone is not enough — multiple tests share the same process).
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.subsec_nanos());
     let unique_cwd = format!(
         "/tmp/cortina-gate-edit-test-{}-{}",
         std::process::id(),
@@ -446,8 +444,7 @@ fn edit_gate_stays_blocked_without_investigation_tool_calls() {
 fn edit_gate_allows_after_investigation_tool_called() {
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.subsec_nanos());
     let unique_cwd = format!(
         "/tmp/cortina-gate-edit-allow-test-{}-{}",
         std::process::id(),
