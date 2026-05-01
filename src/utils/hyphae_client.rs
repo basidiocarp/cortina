@@ -99,6 +99,7 @@ fn hyphae_socket_path() -> Option<&'static str> {
 /// Opens, writes, reads one response line, and closes. Blocks briefly — callers
 /// must spawn a background thread if blocking would stall the hook.
 #[cfg(unix)]
+#[allow(clippy::needless_pass_by_value)]
 fn socket_call(socket_path: &str, method: &str, params: serde_json::Value) -> anyhow::Result<()> {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixStream;
