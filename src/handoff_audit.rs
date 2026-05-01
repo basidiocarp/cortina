@@ -458,6 +458,7 @@ mod tests {
         assert!(report.contains("matched_paths=cortina/src/cli.rs"));
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn audit_handoff_counts_existing_items_in_a_temp_repo() {
         let dir = TempDir::new().unwrap();

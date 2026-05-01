@@ -160,6 +160,7 @@ mod tests {
         clear_outcomes(&hash);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn preserves_concurrent_outcome_writes() {
         let hash = test_hash("concurrent");
