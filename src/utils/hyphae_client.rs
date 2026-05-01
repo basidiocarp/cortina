@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::sync::OnceLock;
 #[cfg(unix)]
 use std::time::Duration;
