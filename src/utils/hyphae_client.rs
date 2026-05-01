@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+#[cfg(unix)]
 use std::time::Duration;
 
 use spore::logging::{SpanContext, subprocess_span, tool_span};
@@ -77,8 +78,10 @@ pub fn command_exists(name: &str) -> bool {
 /// Read from `~/.config/hyphae/hyphae.endpoint.json` on first call. `None`
 /// means the descriptor is absent or the transport is not unix-socket — cortina
 /// falls back to the CLI spawn path in that case.
+#[cfg(unix)]
 static HYPHAE_SOCKET_PATH: OnceLock<Option<String>> = OnceLock::new();
 
+#[cfg(unix)]
 fn hyphae_socket_path() -> Option<&'static str> {
     HYPHAE_SOCKET_PATH
         .get_or_init(|| {
