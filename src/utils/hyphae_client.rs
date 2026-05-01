@@ -82,8 +82,7 @@ static HYPHAE_SOCKET_PATH: OnceLock<Option<String>> = OnceLock::new();
 fn hyphae_socket_path() -> Option<&'static str> {
     HYPHAE_SOCKET_PATH
         .get_or_init(|| {
-            let descriptor_path =
-                spore::paths::config_dir("hyphae").join("hyphae.endpoint.json");
+            let descriptor_path = spore::paths::config_dir("hyphae").join("hyphae.endpoint.json");
             let json = std::fs::read_to_string(descriptor_path).ok()?;
             let v: serde_json::Value = serde_json::from_str(&json).ok()?;
             if v.get("transport").and_then(|t| t.as_str()) != Some("unix-socket") {
@@ -248,8 +247,7 @@ pub fn store_compact_summary_artifact(payload: &str, project: Option<&str>) {
         }
 
         let socket = socket.to_string();
-        let _spawn_span =
-            subprocess_span("hyphae store artifact (socket)", &span_ctx).entered();
+        let _spawn_span = subprocess_span("hyphae store artifact (socket)", &span_ctx).entered();
         std::thread::spawn(move || {
             if let Err(e) = socket_call(&socket, "hyphae_memory_store", params) {
                 warn!("hyphae_memory_store socket call failed for compact_summary: {e}");

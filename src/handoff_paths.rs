@@ -32,7 +32,9 @@ pub(crate) fn canonicalize_and_gate(candidate: &str) -> Option<String> {
 
     // Prefer real canonicalization (resolves symlinks). Fall back to manual component
     // normalization for paths that don't exist yet (common for planned file references).
-    let resolved = joined.canonicalize().unwrap_or_else(|_| normalize_path(&joined));
+    let resolved = joined
+        .canonicalize()
+        .unwrap_or_else(|_| normalize_path(&joined));
 
     if resolved.starts_with(&workspace_root) {
         // Return the original candidate string — callers only need the gated decision.
@@ -342,7 +344,10 @@ cortina/src/cli.rs
 
         // Should contain the valid relative path (or its canonical form)
         assert!(
-            extracted.referenced_paths.iter().any(|p| p.contains("handoff_paths.rs")),
+            extracted
+                .referenced_paths
+                .iter()
+                .any(|p| p.contains("handoff_paths.rs")),
             "Valid relative path should be included: {:?}",
             extracted.referenced_paths
         );

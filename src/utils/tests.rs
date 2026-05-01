@@ -986,7 +986,10 @@ fn end_hyphae_session_with_spawn_failure_clears_cached_state() {
     });
 
     assert!(result.is_none());
-    assert!(load_session_state(hash).is_none(), "state file must be removed on command failure");
+    assert!(
+        load_session_state(hash).is_none(),
+        "state file must be removed on command failure"
+    );
 }
 
 #[test]
@@ -1010,7 +1013,10 @@ fn end_hyphae_session_with_non_zero_exit_clears_cached_state() {
     });
 
     assert!(result.is_none());
-    assert!(load_session_state(hash).is_none(), "state file must be removed on non-zero exit");
+    assert!(
+        load_session_state(hash).is_none(),
+        "state file must be removed on non-zero exit"
+    );
 }
 
 #[test]
@@ -1141,7 +1147,10 @@ fn session_event_v1_dto_from_session_state_has_required_fields() {
     assert_eq!(dto.event_type, "session_state");
     assert_eq!(dto.session_id, "01JNQSESS000000000000000");
     assert_eq!(dto.project, "basidiocarp");
-    assert_eq!(dto.project_root.as_deref(), Some("/home/user/projects/basidiocarp"));
+    assert_eq!(
+        dto.project_root.as_deref(),
+        Some("/home/user/projects/basidiocarp")
+    );
     assert_eq!(dto.worktree_id.as_deref(), Some("main"));
     assert_eq!(dto.started_at, 1_234_567_890);
 }

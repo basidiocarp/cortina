@@ -409,7 +409,12 @@ fn check_gate_guard(envelope: &ClaudeCodeHookEnvelope) -> Option<GateDecision> {
             let has_investigation = detect_investigation_content(envelope);
 
             let decision = GATE_MAP.with(|map| {
-                evaluate_gate(&gate_key, &mut map.borrow_mut(), has_investigation, GateMode::Advisory)
+                evaluate_gate(
+                    &gate_key,
+                    &mut map.borrow_mut(),
+                    has_investigation,
+                    GateMode::Advisory,
+                )
             });
 
             Some(decision)
@@ -441,7 +446,12 @@ fn check_gate_guard(envelope: &ClaudeCodeHookEnvelope) -> Option<GateDecision> {
             let decision = GATE_MAP.with(|map| {
                 let mut gate_map = map.borrow_mut();
                 // For destructive bash, we need to override the template.
-                let mut decision = evaluate_gate(&gate_key, &mut gate_map, has_investigation, GateMode::Advisory);
+                let mut decision = evaluate_gate(
+                    &gate_key,
+                    &mut gate_map,
+                    has_investigation,
+                    GateMode::Advisory,
+                );
 
                 if is_destructive_bash(command) {
                     if let GateDecision::Block { .. } = &decision {

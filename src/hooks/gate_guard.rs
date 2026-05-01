@@ -137,7 +137,12 @@ pub fn is_readonly_git(command: &str) -> bool {
 /// - Expired gates are treated as new gates (restart the cycle).
 /// - Note: process-per-call invocations will lose state between calls, so blocking
 ///   gate state cannot rely on same-process retry counts.
-pub fn evaluate_gate(key: &GateKey, map: &mut GateMap, has_investigation: bool, mode: GateMode) -> GateDecision {
+pub fn evaluate_gate(
+    key: &GateKey,
+    map: &mut GateMap,
+    has_investigation: bool,
+    mode: GateMode,
+) -> GateDecision {
     // In advisory mode, always return Allow regardless of state.
     // This is fail-open behavior for process-per-call environments.
     if mode == GateMode::Advisory {

@@ -174,7 +174,10 @@ impl NormalizedLifecycleEvent {
             ),
         );
         normalized.cwd = Some(event.cwd.clone());
-        normalized.session_id = event.execution_session.as_ref().map(|s| s.session_id.clone());
+        normalized.session_id = event
+            .execution_session
+            .as_ref()
+            .map(|s| s.session_id.clone());
         normalized
             .metadata
             .insert("phase".to_string(), json!(event.phase));

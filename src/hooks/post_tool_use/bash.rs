@@ -11,7 +11,7 @@ use crate::utils::{
     store_in_hyphae, successful_validation_feedback, update_json_file,
 };
 
-use super::{annotate_outcome_with_session, pending, truncate, redact_secrets};
+use super::{annotate_outcome_with_session, pending, redact_secrets, truncate};
 
 #[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct ErrorEntry {
