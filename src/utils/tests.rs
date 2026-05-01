@@ -40,6 +40,7 @@ fn exit_status_from_code(code: i32) -> ExitStatus {
 #[cfg(windows)]
 fn exit_status_from_code(code: i32) -> ExitStatus {
     use std::os::windows::process::ExitStatusExt;
+    #[allow(clippy::cast_sign_loss)]
     ExitStatus::from_raw(code as u32)
 }
 

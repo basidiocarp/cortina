@@ -104,7 +104,9 @@ pub fn bridge_signals(outcome: &OutcomeEvent) -> Vec<CausalSignal> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(windows))]
     use std::sync::{Arc, Barrier};
+    #[cfg(not(windows))]
     use std::thread;
 
     use super::*;
