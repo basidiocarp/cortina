@@ -190,6 +190,9 @@ pub fn handle(input: &str) -> Result<()> {
         crate::hooks::trigger_word::TriggerWordProcessor::store(&payloads);
     }
 
+    // Check if structural files were modified and invalidate compiled environment artifact if so
+    trigger_compile_env_invalidation_if_needed(&summary.files_modified, &event.cwd);
+
     Ok(())
 }
 
@@ -444,6 +447,48 @@ fn read_transcript_text(path: Option<&str>) -> String {
 
 /// Extract the final assistant message from transcript text.
 /// Scans backwards through JSONL lines to find the last assistant entry.
+/// Trigger rhizome compile-env invalidation if structural files were modified.
+/// This lightweight check looks for changes to Cargo.toml, package.json, pyproject.toml,
+/// or Cargo.lock in the session's file modifications.
+fn trigger_compile_env_invalidation_if_needed(files_modified: &[String], cwd: &str) {
+    // Structural file patterns that should trigger invalidation
+    const STRUCTURAL_FILES: &[&str] = &[
+        "Cargo.toml",
+        "Cargo.lock",
+        "package.json",
+        "pyproject.toml",
+        "package-lock.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+    ];
+
+    // Check if any modified file matches structural patterns
+    let has_structural_change = files_modified.iter().any(|f| {
+        STRUCTURAL_FILES.iter().any(|pattern| {
+            f.contains(pattern)
+                || f.ends_with(pattern)
+                || f.split('/').last().map_or(false, |name| name == *pattern)
+        })
+    });
+
+    if !has_structural_change {
+        return;
+    }
+
+    // Spawn background invalidation — fire and forget
+    let project_name = project_name_for_cwd(Some(cwd)).unwrap_or_else(|| {
+        Path::new(cwd)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string()
+    });
+
+    let _ = std::process::Command::new("rhizome")
+        .args(["compile-env", "--invalidate", "--name", &project_name])
+        .spawn();
+}
+
 fn extract_final_message(transcript_text: &str) -> String {
     for line in transcript_text.lines().rev() {
         let trimmed = line.trim();
