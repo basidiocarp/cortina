@@ -64,7 +64,6 @@ cargo install --git https://github.com/basidiocarp/cortina
 cortina policy
 cortina status
 cortina doctor
-annulus statusline
 ```
 
 ---
@@ -137,6 +136,16 @@ where state persists reliably (e.g., same-process, long-lived servers).
 - Normalized tool-usage tracking boundary before downstream summaries
 - Session outcome attribution
 - Operator policy, status, and doctor surfaces
+- Handoff audit and validation before dispatch
+
+### Handoff Audit
+
+The `cortina audit-handoff` command reads handoff markdown files, checks filesystem
+evidence against declared preconditions and verification steps, and emits a
+structured audit result. The audit classifies confidence (e.g., preconditions met,
+pending evidence, stale signals) without enforcing blocks — allowing operators to
+review handoff readiness before dispatch to implementation agents. Output is
+human-readable by default; use `--json` for machine consumption.
 
 ### Tool Usage Event Tracking
 
@@ -161,6 +170,7 @@ tools have been called before an edit) and into session outcome attribution.
 - Adapter-first runtime: keeps host-specific intake separate from shared signal logic.
 - Structured feedback signals: turn transient hook activity into reusable session data.
 - Scoped operator views: report per-worktree policy, state, and hook health.
+- Handoff audit: read and validate handoff markdown against filesystem evidence before dispatch.
 - Status line support: renders compact session summaries for Claude Code.
 - Downstream triggers: launch Rhizome export and Hyphae doc ingest when local thresholds are met.
 
@@ -183,9 +193,10 @@ cortina adapter claude-code pre-tool-use
 cortina adapter claude-code post-tool-use
 cortina adapter claude-code session-end
 cortina adapter volva hook-event
+cortina audit-handoff [--json] <PATH>
+cortina policy [--json]
 cortina status
 cortina doctor
-annulus statusline
 ```
 
 ---
@@ -233,6 +244,10 @@ stdout stays clean.
 - Most runtime diagnostics now flow through the shared tracing contract, but a
   few user-facing compatibility warnings still intentionally write straight to
   stderr with `eprintln!` so they appear even when structured logging is off.
+
+## Telemetry
+
+If `OTEL_EXPORTER_OTLP_ENDPOINT` is set, cortina exports OpenTelemetry traces to the configured endpoint.
 
 ## License
 
