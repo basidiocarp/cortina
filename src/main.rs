@@ -23,6 +23,7 @@ mod status;
 mod test_support;
 mod tool_usage;
 mod utils;
+mod verification;
 
 use adapters::ClaudeCodeEventCommand;
 use cli::{Cli, Commands};
