@@ -201,6 +201,24 @@ cortina doctor
 
 ---
 
+## Environment Variables
+
+| Variable | Values | Effect |
+|----------|--------|--------|
+| `CORTINA_HOOK_PROFILE` | `minimal`, `standard` (default), `strict` | `minimal`: only `Stop` and `SessionEnd` events fire. `strict`: all events fire with extra validation. `standard` (or unset): normal behavior. |
+| `CORTINA_DISABLED_HOOKS` | Comma-separated names | Two mechanisms share this variable. **Event gating** (env_gate): PascalCase event type names suppress specific event types before any hook runs, e.g. `PostToolUse,PreCompact`. **Hook gating** (policy): snake_case internal hook names suppress individual hooks, e.g. `post_tool_use,pre_compact`. Both are checked; the event gate fires first. |
+| `CORTINA_LOG` | Log level | Control Cortina-specific logging. E.g., `CORTINA_LOG=cortina=debug` |
+
+**Hook Profile and Disabled Events:**
+
+- `CORTINA_HOOK_PROFILE` controls which event types are globally allowed.
+- `CORTINA_DISABLED_HOOKS` (env_gate path) suppresses specific event types by PascalCase name (e.g., `PostToolUse`, `PreCompact`). Takes precedence over the profile.
+- `CORTINA_DISABLED_HOOKS` (policy path) also accepts snake_case internal hook names (e.g., `post_tool_use`). Both mechanisms read the same variable; the event gate fires first, then the policy hook gate fires for hooks that were not already suppressed.
+
+Example: `CORTINA_HOOK_PROFILE=minimal` ensures only session lifecycle signals are captured, useful for minimal observability overhead.
+
+---
+
 ## Documentation
 
 - [docs/README.md](docs/README.md): repo-local docs index

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Subcommand;
 
+use crate::env_gate::EnvGate;
 use crate::hooks;
 use crate::pipeline::{LoggingHandler, Pipeline, PipelineContext, PipelineStage};
 use crate::policy::{CapturePolicy, capture_policy};
@@ -104,6 +105,18 @@ fn init_pipeline() -> Pipeline {
 // handle_adapter_command / handle_legacy_claude_command signatures stable.
 #[allow(clippy::unnecessary_wraps)]
 fn handle_claude_code_event(event: ClaudeCodeEventCommand, input: &str) -> Result<()> {
+    // Check env-var gating first: if this event should be skipped based on
+    // CORTINA_HOOK_PROFILE or CORTINA_DISABLED_HOOKS (PascalCase event names), return early with success.
+    let gate = EnvGate::from_env();
+    if gate.should_skip_event(event) {
+        tracing::trace!(
+            "cortina: event {:?} skipped by env gate (profile: {:?})",
+            event,
+            gate.profile
+        );
+        return Ok(());
+    }
+
     let pipeline = init_pipeline();
     let payload = serde_json::from_str::<serde_json::Value>(input).unwrap_or_default();
 
@@ -234,7 +247,7 @@ fn run_hook_with_policy(policy: &CapturePolicy, hook_name: &str, f: impl FnOnce(
 mod tests {
     use anyhow::anyhow;
 
-    use super::run_hook_with_policy;
+    use super::{run_hook_with_policy, ClaudeCodeEventCommand};
     use crate::policy::CapturePolicy;
 
     // Helper: build a policy with specific disabled_hooks without touching
@@ -314,5 +327,51 @@ mod tests {
             policy.disabled_hooks.is_empty(),
             "no hooks should be disabled by default"
         );
+    }
+
+    #[test]
+    fn env_gate_minimal_profile_skips_tool_use_events() {
+        use crate::env_gate::EnvGate;
+
+        let gate = EnvGate::from_reader(|name| match name {
+            "CORTINA_HOOK_PROFILE" => Some("minimal".to_string()),
+            _ => None,
+        });
+
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::PreToolUse));
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::PostToolUse));
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::UserPromptSubmit));
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::PreCompact));
+    }
+
+    #[test]
+    fn env_gate_minimal_profile_allows_lifecycle_events() {
+        use crate::env_gate::EnvGate;
+
+        let gate = EnvGate::from_reader(|name| match name {
+            "CORTINA_HOOK_PROFILE" => Some("minimal".to_string()),
+            _ => None,
+        });
+
+        assert!(!gate.should_skip_event(ClaudeCodeEventCommand::Stop));
+        assert!(!gate.should_skip_event(ClaudeCodeEventCommand::SessionEnd));
+    }
+
+    #[test]
+    fn env_gate_disabled_events_takes_precedence() {
+        use crate::env_gate::EnvGate;
+
+        let gate = EnvGate::from_reader(|name| match name {
+            "CORTINA_HOOK_PROFILE" => Some("standard".to_string()),
+            // CORTINA_DISABLED_HOOKS uses PascalCase event type names (e.g., PostToolUse),
+            // distinct from the policy.rs mechanism which uses snake_case hook names.
+            "CORTINA_DISABLED_HOOKS" => Some("PostToolUse,PreCompact".to_string()),
+            _ => None,
+        });
+
+        assert!(!gate.should_skip_event(ClaudeCodeEventCommand::PreToolUse));
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::PostToolUse));
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::PreCompact));
+        assert!(!gate.should_skip_event(ClaudeCodeEventCommand::Stop));
     }
 }

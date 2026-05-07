@@ -7,6 +7,7 @@ use tracing::Level;
 
 mod adapters;
 mod cli;
+mod env_gate;
 mod events;
 mod handoff_audit;
 mod handoff_lint;
