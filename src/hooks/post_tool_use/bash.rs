@@ -4,6 +4,7 @@ use std::path::Path;
 use crate::events::{BashToolEvent, OutcomeEvent, OutcomeKind};
 use crate::outcomes::{error_causal_signal, record_outcome};
 use crate::policy::capture_policy;
+use crate::signals::{FactExtracted, FactKind};
 use crate::utils::{
     Importance, command_exists, current_agent_id_for_cwd, current_timestamp_ms,
     ensure_scoped_hyphae_session, has_error, is_build_command, is_significant_command,
@@ -103,6 +104,9 @@ pub(super) fn handle_bash(event: &BashToolEvent) {
     if is_build_command(command) && exit_code.is_none_or(|c| c == 0) {
         pending::check_and_trigger_exports(&hash, scope_cwd);
     }
+
+    // Layer 0: rule-based fact extraction (fail-open — errors are swallowed).
+    extract_and_store_facts(safe_command, output, scope_cwd);
 }
 
 pub(super) fn log_validation_success(
@@ -249,6 +253,86 @@ fn store_error_in_hyphae(command: &str, output: &str, scope_cwd: Option<&str>) {
         project_name_for_cwd(scope_cwd).as_deref(),
         agent_id.as_deref(),
     );
+}
+
+fn extract_commit_fact(command: &str, output: &str) -> Option<FactExtracted> {
+    let mut parts = command.split_whitespace();
+    if parts.next() != Some("git") || parts.next() != Some("commit") {
+        return None;
+    }
+    let commit_line = output.lines().find(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with('[') && trimmed.contains(']')
+    })?;
+    let content = commit_line.trim().to_string();
+    if content.is_empty() {
+        return None;
+    }
+    Some(FactExtracted {
+        kind: FactKind::Commit,
+        content: truncate(&content, 500),
+        source_command: Some(command.to_string()),
+        confidence: 0.9,
+    })
+}
+
+fn extract_preference_fact(output: &str) -> Option<FactExtracted> {
+    const SIGNALS: &[&str] = &[
+        "always use",
+        "never use",
+        "preferred",
+        "prefer to use",
+        "i want you to",
+        "please always",
+        "don't use",
+    ];
+    let matched_line = output.lines().find(|line| {
+        let lower = line.to_ascii_lowercase();
+        SIGNALS.iter().any(|s| lower.contains(s))
+    })?;
+    Some(FactExtracted {
+        kind: FactKind::Preference,
+        content: truncate(matched_line.trim(), 500),
+        source_command: None,
+        confidence: 0.4,
+    })
+}
+
+fn extract_and_store_facts(command: &str, output: &str, scope_cwd: Option<&str>) {
+    if !command_exists("hyphae") {
+        return;
+    }
+
+    let mut facts: Vec<FactExtracted> = Vec::new();
+
+    if let Some(fact) = extract_commit_fact(command, output) {
+        facts.push(fact);
+    }
+    if let Some(fact) = extract_preference_fact(output) {
+        facts.push(fact);
+    }
+
+    for fact in facts {
+        let topic = match fact.kind {
+            FactKind::Commit => "context/commits",
+            FactKind::Preference => "preferences",
+            FactKind::Error => "errors/resolved",
+            FactKind::ConfigChange => "context/config-changes",
+        };
+        let min_confidence = match fact.kind {
+            FactKind::Preference => 0.5,
+            _ => 0.3,
+        };
+        if fact.confidence >= min_confidence {
+            store_in_hyphae(
+                topic,
+                &fact.content,
+                Importance::Medium,
+                project_name_for_cwd(scope_cwd).as_deref(),
+                current_agent_id_for_cwd(scope_cwd).as_deref(),
+            );
+        }
+    }
 }
 
 #[cfg(test)]

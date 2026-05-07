@@ -6,6 +6,7 @@ use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::events::{NormalizedLifecycleEvent, OutcomeEvent, OutcomeKind};
 use crate::outcomes::{load_outcomes, record_outcome};
 use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
+use crate::signals::PreCompactSnapshot;
 use crate::utils::{
     Importance, command_exists, current_agent_id_for_cwd, current_task_id_for_cwd,
     current_timestamp_ms, ensure_scoped_hyphae_session, load_json_file, project_name_for_cwd,
@@ -53,6 +54,12 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
     let files_modified = collect_modified_files(&hash);
     let active_task_id = current_task_id_for_cwd(Some(&event.cwd));
     let signal_summary = build_signal_summary(&hash);
+    let resume_hint = build_resume_hint(
+        &active_errors,
+        &files_modified,
+        active_task_id.as_deref(),
+        &signal_summary,
+    );
     let content = compaction_snapshot_content(
         event,
         &active_errors,
@@ -64,6 +71,24 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
     if !remember_snapshot_capture(&hash, &content) {
         return;
     }
+
+    // Construct PreCompactSnapshot for Layer 1 (logged at debug level).
+    let open_errors: Vec<String> = active_errors
+        .values()
+        .map(|e| format!("{}: {}", e.command, e.error))
+        .collect();
+    let mut signal_counts = std::collections::HashMap::new();
+    for (k, v) in &signal_summary {
+        signal_counts.insert(k.clone(), *v);
+    }
+    let pre_compact_snapshot = PreCompactSnapshot {
+        active_files: files_modified.clone(),
+        open_errors,
+        resume_hint: resume_hint.clone(),
+        active_task_id: active_task_id.clone(),
+        signal_counts,
+    };
+    tracing::debug!("pre_compact_snapshot: {:?}", pre_compact_snapshot);
 
     if command_exists("hyphae") {
         let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(SNAPSHOT_SESSION_TASK));
@@ -99,6 +124,58 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
     }
 }
 
+fn build_resume_hint(
+    active_errors: &BTreeMap<String, ActiveErrorEntry>,
+    files_modified: &[String],
+    active_task_id: Option<&str>,
+    signal_summary: &BTreeMap<String, usize>,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Some(task_id) = active_task_id {
+        parts.push(format!("Working on task {task_id}."));
+    }
+
+    if !files_modified.is_empty() {
+        let count = files_modified.len();
+        let sample = files_modified
+            .iter()
+            .take(3)
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        if count > 3 {
+            parts.push(format!("Modified {count} files including {sample}."));
+        } else {
+            parts.push(format!("Modified {sample}."));
+        }
+    }
+
+    if !active_errors.is_empty() {
+        let error_count = active_errors.len();
+        let sample_cmd = active_errors
+            .keys()
+            .next()
+            .map_or("unknown", String::as_str);
+        parts.push(format!(
+            "{error_count} unresolved error(s) including from `{sample_cmd}`."
+        ));
+    } else if signal_summary
+        .get("validation_passed")
+        .copied()
+        .unwrap_or(0)
+        > 0
+    {
+        parts.push("Recent validations passed.".to_string());
+    }
+
+    if parts.is_empty() {
+        "Session in progress.".to_string()
+    } else {
+        parts.join(" ")
+    }
+}
+
 fn compaction_snapshot_content(
     event: &crate::events::PreCompactEvent,
     active_errors: &BTreeMap<String, ActiveErrorEntry>,
@@ -106,6 +183,12 @@ fn compaction_snapshot_content(
     active_task_id: Option<&str>,
     signal_summary: &BTreeMap<String, usize>,
 ) -> String {
+    let resume_hint = build_resume_hint(
+        active_errors,
+        files_modified,
+        active_task_id,
+        signal_summary,
+    );
     let active_errors: Vec<_> = active_errors
         .values()
         .map(|error| json!({ "command": error.command, "error": error.error }))
@@ -126,6 +209,7 @@ fn compaction_snapshot_content(
         "transcript_path": event.transcript_path,
         "active_task_id": active_task_id,
         "signal_summary": signal_summary,
+        "resume_hint": resume_hint,
     })
     .to_string()
 }
@@ -140,6 +224,13 @@ fn compact_summary_artifact_payload(
     active_task_id: Option<&str>,
     signal_summary: &BTreeMap<String, usize>,
 ) -> String {
+    let active_errors = load_active_errors(&crate::utils::scope_hash(Some(&event.cwd)));
+    let resume_hint = build_resume_hint(
+        &active_errors,
+        files_modified,
+        active_task_id,
+        signal_summary,
+    );
     let mut files_modified = files_modified.to_vec();
     files_modified.sort();
     json!({
@@ -150,6 +241,7 @@ fn compact_summary_artifact_payload(
         "active_task_id": active_task_id,
         "signal_summary": signal_summary,
         "summary_request": SUMMARY_REQUEST,
+        "resume_hint": resume_hint,
         "created_at": current_timestamp_ms(),
     })
     .to_string()
@@ -247,6 +339,11 @@ mod tests {
         assert!(content.contains(r#""files_modified":["README.md","src/main.rs"]"#));
         assert_eq!(parsed["active_task_id"].as_str(), Some("task-42"));
         assert_eq!(parsed["signal_summary"]["error_detected"].as_u64(), Some(2));
+        assert!(parsed["resume_hint"].is_string());
+        let hint = parsed["resume_hint"]
+            .as_str()
+            .expect("resume_hint is string");
+        assert!(!hint.is_empty(), "resume_hint should not be empty");
     }
 
     #[test]
@@ -275,6 +372,7 @@ mod tests {
             parsed["signal_summary"]["knowledge_exported"].as_u64(),
             Some(1)
         );
+        assert!(parsed["resume_hint"].is_string());
         assert!(parsed["created_at"].as_u64().is_some());
         let files = parsed["files_modified"].as_array().expect("array");
         assert_eq!(files.len(), 2);
