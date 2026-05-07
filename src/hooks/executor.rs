@@ -41,6 +41,10 @@ impl HookExecutor {
     /// - run each with input serialized to JSON on stdin
     /// - enforce a 30-second timeout per hook
     /// - aggregate outputs across all hooks
+    /// - map exit codes to signals:
+    ///   - exit 0 → `HookOutput::default()` (allow)
+    ///   - exit 2 → `HookOutput { cancel: true, .. }` (block tool)
+    ///   - exit 49 → `HookOutput { halt_turn: true, .. }` (halt turn)
     /// - log a diagnostic warning and continue on nonzero exit or timeout
     pub fn run_hooks(&self, hook_type: HookType, input: &HookInput) -> HookOutput {
         // Stub: no hook processes to run yet; returns fail-open default
@@ -79,5 +83,29 @@ mod tests {
         assert!(!output.cancel);
         assert!(output.context_modification.is_none());
         assert!(output.error.is_none());
+        assert!(!output.halt_turn);
+    }
+
+    #[test]
+    fn hook_output_halt_turn_field_defaults_to_false() {
+        let output = HookOutput {
+            cancel: false,
+            context_modification: None,
+            error: None,
+            halt_turn: false,
+        };
+        assert!(!output.halt_turn);
+    }
+
+    #[test]
+    fn hook_output_can_signal_halt_turn() {
+        let output = HookOutput {
+            cancel: false,
+            context_modification: None,
+            error: None,
+            halt_turn: true,
+        };
+        assert!(output.halt_turn);
+        assert!(!output.cancel);
     }
 }

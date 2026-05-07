@@ -18,6 +18,7 @@ mod pipeline;
 mod policy;
 mod risk;
 mod rules;
+mod signals;
 mod status;
 #[cfg(test)]
 mod test_support;

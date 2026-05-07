@@ -40,9 +40,10 @@ pub struct HookInput {
 
 /// Output returned by a hook handler.
 ///
-/// Hooks can block execution (cancel=true), modify context payloads,
-/// or return errors. By default (`cancel=false`, `context_modification=None`),
-/// the outer system proceeds without change. This is the fail-open default.
+/// Hooks can block execution (`cancel=true`), modify context payloads,
+/// halt the turn (`halt_turn=true`), or return errors. By default
+/// (all false/None), the outer system proceeds without change.
+/// This is the fail-open default.
 #[allow(dead_code)] // Stub implementation for follow-on work
 #[derive(Debug, Clone, Default)]
 pub struct HookOutput {
@@ -54,4 +55,8 @@ pub struct HookOutput {
     pub context_modification: Option<serde_json::Value>,
     /// Error message from the hook process (if any).
     pub error: Option<String>,
+    /// If true, halt the entire agent turn (exit 49).
+    /// Default: false (fail-open — continue normally).
+    /// Distinct from `cancel` which blocks only the current tool call.
+    pub halt_turn: bool,
 }

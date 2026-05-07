@@ -165,13 +165,29 @@ pub fn block_response(message: &str) -> Value {
     })
 }
 
+/// Response body for halt-turn signal (exit 49).
+///
+/// Exit code 49 is the real signal to Claude Code; the JSON body carries
+/// a reason string for display. Uses `"halt_turn"` as the decision value so
+/// consumers (Annulus, Cap) can distinguish this from a per-tool block.
+#[allow(dead_code)] // Will be used when halt-turn signal path is wired in handlers
+pub fn halt_turn_response(message: &str) -> Value {
+    json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "halt_turn",
+            "permissionDecisionReason": message
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
 
     use crate::events::ToolResultEvent;
 
-    use super::{ClaudeCodeHookEnvelope, block_response, rewrite_response};
+    use super::{ClaudeCodeHookEnvelope, block_response, halt_turn_response, rewrite_response};
 
     #[test]
     fn parses_tool_fields_from_claude_code_envelope() {
@@ -381,6 +397,33 @@ mod tests {
                 .and_then(|value| value.get("permissionDecisionReason"))
                 .and_then(serde_json::Value::as_str),
             Some("Please provide investigation facts before proceeding")
+        );
+    }
+
+    #[test]
+    fn builds_halt_turn_response() {
+        let response = halt_turn_response("Hook requested turn halt");
+
+        assert_eq!(
+            response
+                .get("hookSpecificOutput")
+                .and_then(|value| value.get("hookEventName"))
+                .and_then(serde_json::Value::as_str),
+            Some("PreToolUse")
+        );
+        assert_eq!(
+            response
+                .get("hookSpecificOutput")
+                .and_then(|value| value.get("permissionDecision"))
+                .and_then(serde_json::Value::as_str),
+            Some("halt_turn")
+        );
+        assert_eq!(
+            response
+                .get("hookSpecificOutput")
+                .and_then(|value| value.get("permissionDecisionReason"))
+                .and_then(serde_json::Value::as_str),
+            Some("Hook requested turn halt")
         );
     }
 }
