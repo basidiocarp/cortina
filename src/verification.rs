@@ -88,10 +88,9 @@ pub fn evaluate_deterministic_checks(
                 }
             }
             DeterministicCheckKind::ExitCode => {
-                let expected: i32 = check
-                    .target
-                    .parse()
-                    .map_err(|_| format!("ExitCode target is not a valid integer: {:?}", check.target))?;
+                let expected: i32 = check.target.parse().map_err(|_| {
+                    format!("ExitCode target is not a valid integer: {:?}", check.target)
+                })?;
                 if exit_code != expected {
                     return Err(format!("exit code {exit_code}, expected {expected}"));
                 }

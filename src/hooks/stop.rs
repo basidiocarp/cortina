@@ -467,7 +467,9 @@ fn trigger_compile_env_invalidation_if_needed(files_modified: &[String], cwd: &s
         STRUCTURAL_FILES.iter().any(|pattern| {
             f.contains(pattern)
                 || f.ends_with(pattern)
-                || f.split('/').next_back().is_some_and(|name| name == *pattern)
+                || f.split('/')
+                    .next_back()
+                    .is_some_and(|name| name == *pattern)
         })
     });
 

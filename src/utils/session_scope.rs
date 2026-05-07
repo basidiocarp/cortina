@@ -52,6 +52,23 @@ use super::state::{
 use crate::events::OutcomeKind;
 use crate::outcomes::load_outcomes;
 
+fn async_session_end_enabled() -> bool {
+    fn is_enabled(v: &str) -> bool {
+        v != "false" && v != "0"
+    }
+
+    // Disable async mode during tests by default
+    if cfg!(test) {
+        return std::env::var("CORTINA_ASYNC_SESSION_END").is_ok_and(|v| is_enabled(&v));
+    }
+
+    // Enable async mode in production by default (unless explicitly disabled)
+    match std::env::var("CORTINA_ASYNC_SESSION_END").as_deref() {
+        Ok(v) => is_enabled(v),
+        Err(_) => true,
+    }
+}
+
 fn span_context(project_root: Option<&str>, tool: &str) -> SpanContext {
     let context = SpanContext::for_app("cortina").with_tool(tool);
     match project_root {
@@ -59,6 +76,22 @@ fn span_context(project_root: Option<&str>, tool: &str) -> SpanContext {
             context.with_workspace_root(project_root.to_string())
         }
         _ => context,
+    }
+}
+
+fn spawn_async_session_end(mut cmd: Command) {
+    match cmd
+        .stdout(std::process::Stdio::null())
+        .stderr(diagnostic_stderr())
+        .spawn()
+    {
+        Ok(child) => {
+            std::thread::spawn(move || {
+                let _ = child.wait_with_output();
+            });
+            debug!("cortina: hyphae session-end fired async (CORTINA_ASYNC_SESSION_END=true)");
+        }
+        Err(e) => warn!("cortina: failed to spawn hyphae session-end: {e}"),
     }
 }
 
@@ -340,6 +373,35 @@ where
         }
 
         let _subprocess_span = subprocess_span("hyphae session end", &context).entered();
+
+        // Phase 1: session archive write (already done before hyphae call)
+        // Mark clean end in SQLite and remove state file
+        let db_store = SessionStore::open().ok();
+        if let Some(store) = db_store {
+            tracing::info!(
+                session_id = %state.session_id,
+                "cortina: session ended cleanly"
+            );
+            let _ = store.end_clean(&state.session_id);
+        }
+
+        with_file_lock(&path, || {
+            if load_json_file::<SessionState>(&path)
+                .as_ref()
+                .is_some_and(|current| current.session_id == state.session_id)
+            {
+                let _ = fs::remove_file(&path);
+            }
+            Ok(Some(state.clone()))
+        })?;
+
+        // Phase 2: hyphae session end subprocess — async or sync depending on env var
+        if async_session_end_enabled() {
+            spawn_async_session_end(cmd);
+            return with_file_lock(&path, || Ok(Some(state)));
+        }
+
+        // Synchronous fallback (CORTINA_ASYNC_SESSION_END=false)
         let Ok(output) = run_command(&mut cmd) else {
             warn!("Failed to execute hyphae session end");
             // Mark session orphaned in SQLite instead of leaving file behind
@@ -389,25 +451,7 @@ where
             return Ok(None);
         }
 
-        // Mark clean end in SQLite and remove file
-        let db_store = SessionStore::open().ok();
-        if let Some(store) = db_store {
-            tracing::info!(
-                session_id = %state.session_id,
-                "cortina: session ended cleanly"
-            );
-            let _ = store.end_clean(&state.session_id);
-        }
-
-        with_file_lock(&path, || {
-            if load_json_file::<SessionState>(&path)
-                .as_ref()
-                .is_some_and(|current| current.session_id == state.session_id)
-            {
-                let _ = fs::remove_file(&path);
-            }
-            Ok(Some(state))
-        })
+        with_file_lock(&path, || Ok(Some(state)))
     })
     .ok()
     .flatten()
