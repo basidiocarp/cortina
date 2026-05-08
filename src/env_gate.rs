@@ -106,21 +106,22 @@ mod tests {
     use super::*;
 
     // Helper: build a gate with specific overrides without touching the global env
-    fn gate_with_profile_and_disabled(
-        profile: &str,
-        disabled: &[&str],
-    ) -> EnvGate {
+    fn gate_with_profile_and_disabled(profile: &str, disabled: &[&str]) -> EnvGate {
         EnvGate::from_reader(|name| match name {
-            "CORTINA_HOOK_PROFILE" => if profile.is_empty() {
-                None
-            } else {
-                Some(profile.to_string())
-            },
-            "CORTINA_DISABLED_HOOKS" => if disabled.is_empty() {
-                None
-            } else {
-                Some(disabled.join(","))
-            },
+            "CORTINA_HOOK_PROFILE" => {
+                if profile.is_empty() {
+                    None
+                } else {
+                    Some(profile.to_string())
+                }
+            }
+            "CORTINA_DISABLED_HOOKS" => {
+                if disabled.is_empty() {
+                    None
+                } else {
+                    Some(disabled.join(","))
+                }
+            }
             _ => None,
         })
     }
@@ -212,7 +213,10 @@ mod tests {
 
     #[test]
     fn event_to_name_returns_correct_strings() {
-        assert_eq!(event_to_name(ClaudeCodeEventCommand::PreToolUse), "PreToolUse");
+        assert_eq!(
+            event_to_name(ClaudeCodeEventCommand::PreToolUse),
+            "PreToolUse"
+        );
         assert_eq!(
             event_to_name(ClaudeCodeEventCommand::PostToolUse),
             "PostToolUse"
@@ -221,7 +225,10 @@ mod tests {
             event_to_name(ClaudeCodeEventCommand::UserPromptSubmit),
             "UserPromptSubmit"
         );
-        assert_eq!(event_to_name(ClaudeCodeEventCommand::PreCompact), "PreCompact");
+        assert_eq!(
+            event_to_name(ClaudeCodeEventCommand::PreCompact),
+            "PreCompact"
+        );
         assert_eq!(event_to_name(ClaudeCodeEventCommand::Stop), "Stop");
         assert_eq!(
             event_to_name(ClaudeCodeEventCommand::SessionEnd),

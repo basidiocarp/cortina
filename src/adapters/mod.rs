@@ -247,7 +247,7 @@ fn run_hook_with_policy(policy: &CapturePolicy, hook_name: &str, f: impl FnOnce(
 mod tests {
     use anyhow::anyhow;
 
-    use super::{run_hook_with_policy, ClaudeCodeEventCommand};
+    use super::{ClaudeCodeEventCommand, run_hook_with_policy};
     use crate::policy::CapturePolicy;
 
     // Helper: build a policy with specific disabled_hooks without touching
