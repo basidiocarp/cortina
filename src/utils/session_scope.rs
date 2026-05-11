@@ -824,6 +824,64 @@ where
     })
 }
 
+#[cfg(test)]
+#[allow(unsafe_code)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn async_disabled_by_default_in_tests() {
+        unsafe {
+            std::env::remove_var("CORTINA_ASYNC_SESSION_END");
+        }
+        assert!(!super::async_session_end_enabled());
+    }
+
+    #[test]
+    fn async_disabled_by_env() {
+        unsafe {
+            std::env::set_var("CORTINA_ASYNC_SESSION_END", "false");
+        }
+        assert!(!super::async_session_end_enabled());
+        unsafe {
+            std::env::remove_var("CORTINA_ASYNC_SESSION_END");
+        }
+    }
+
+    #[test]
+    fn async_disabled_by_zero() {
+        unsafe {
+            std::env::set_var("CORTINA_ASYNC_SESSION_END", "0");
+        }
+        assert!(!super::async_session_end_enabled());
+        unsafe {
+            std::env::remove_var("CORTINA_ASYNC_SESSION_END");
+        }
+    }
+
+    #[test]
+    fn async_enabled_by_true() {
+        unsafe {
+            std::env::set_var("CORTINA_ASYNC_SESSION_END", "true");
+        }
+        assert!(super::async_session_end_enabled());
+        unsafe {
+            std::env::remove_var("CORTINA_ASYNC_SESSION_END");
+        }
+    }
+
+    #[test]
+    fn async_enabled_by_one() {
+        unsafe {
+            std::env::set_var("CORTINA_ASYNC_SESSION_END", "1");
+        }
+        assert!(super::async_session_end_enabled());
+        unsafe {
+            std::env::remove_var("CORTINA_ASYNC_SESSION_END");
+        }
+    }
+}
+
 fn session_identity_for_cwd(cwd: Option<&str>) -> Option<SessionIdentity> {
     session_identity_for_cwd_with(cwd, Command::output)
 }
