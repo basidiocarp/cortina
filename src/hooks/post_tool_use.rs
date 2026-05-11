@@ -1,5 +1,6 @@
 mod bash;
 mod edits;
+mod memory_store;
 mod pending;
 mod secret_redaction;
 #[cfg(test)]
@@ -31,6 +32,12 @@ pub fn handle(input: &str) -> Result<()> {
         Some(ToolResultEvent::Bash(event)) => bash::handle_bash(&event),
         Some(ToolResultEvent::FileEdit(event)) => edits::handle_file_edits(&event),
         None => {}
+    }
+
+    // MCP tool handlers — not matched by tool_result_event() above.
+    // Minimal-profile suppression is enforced by the adapter env gate before this point.
+    if envelope.tool_name_is("hyphae_memory_store") {
+        memory_store::validate_memory_topic(&envelope);
     }
 
     if let Some(tool_name) = envelope.tool_name() {
