@@ -5,18 +5,24 @@ use std::path::{Path, PathBuf};
 use crate::handoff_lint::audit_handoff;
 use crate::utils::{load_json_file, scope_hash, temp_state_path};
 
-pub fn handoff_pre_commit_warnings(command: &str, cwd: Option<&str>) -> Vec<String> {
+#[derive(Debug, Default)]
+pub struct HandoffValidationResult {
+    pub warnings: Vec<String>,
+    pub blockers: Vec<String>,
+}
+
+pub fn handoff_pre_commit_warnings(command: &str, cwd: Option<&str>) -> HandoffValidationResult {
     if !looks_like_git_commit(command) {
-        return Vec::new();
+        return HandoffValidationResult::default();
     }
 
     let Some(cwd) = cwd else {
-        return Vec::new();
+        return HandoffValidationResult::default();
     };
 
     let cwd = Path::new(cwd);
     let Some(workspace_root) = workspace_root_from_cwd(cwd) else {
-        return Vec::new();
+        return HandoffValidationResult::default();
     };
     let handoff_files = session_handoff_files(cwd, &workspace_root);
     validate_session_handoffs(&handoff_files).unwrap_or_default()
@@ -66,8 +72,8 @@ fn recent_edit_paths(hash: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn validate_session_handoffs(handoff_files: &[PathBuf]) -> Result<Vec<String>> {
-    let mut warnings = Vec::new();
+pub fn validate_session_handoffs(handoff_files: &[PathBuf]) -> Result<HandoffValidationResult> {
+    let mut result = HandoffValidationResult::default();
 
     for handoff_path in handoff_files {
         if !handoff_path.exists() {
@@ -76,7 +82,7 @@ pub fn validate_session_handoffs(handoff_files: &[PathBuf]) -> Result<Vec<String
 
         let audit = audit_handoff(handoff_path)?;
         if !audit.empty_paste_markers.is_empty() {
-            warnings.push(format!(
+            result.warnings.push(format!(
                 "cortina: active handoff {} has empty paste markers at lines {}",
                 handoff_path.display(),
                 audit
@@ -89,7 +95,7 @@ pub fn validate_session_handoffs(handoff_files: &[PathBuf]) -> Result<Vec<String
         }
 
         if !audit.unchecked_checkboxes.is_empty() {
-            warnings.push(format!(
+            result.warnings.push(format!(
                 "cortina: active handoff {} still has unchecked items at {}",
                 handoff_path.display(),
                 audit
@@ -100,9 +106,23 @@ pub fn validate_session_handoffs(handoff_files: &[PathBuf]) -> Result<Vec<String
                     .join(" | ")
             ));
         }
+
+        if !audit.clarification_markers.is_empty() {
+            result.blockers.push(format!(
+                "cortina: clarification-gate: {} unresolved marker(s) in {}:\n{}",
+                audit.clarification_markers.len(),
+                handoff_path.display(),
+                audit
+                    .clarification_markers
+                    .iter()
+                    .map(|(line, marker)| format!("  Line {line}: {marker}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ));
+        }
     }
 
-    Ok(warnings)
+    Ok(result)
 }
 
 fn resolve_modified_handoff_path(
@@ -167,10 +187,11 @@ mod tests {
         )
         .unwrap();
 
-        let warnings = validate_session_handoffs(&[handoff_path]).unwrap();
+        let result = validate_session_handoffs(&[handoff_path]).unwrap();
 
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("empty paste markers"));
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("empty paste markers"));
+        assert!(result.blockers.is_empty());
     }
 
     #[test]
@@ -187,15 +208,18 @@ mod tests {
         )
         .unwrap();
 
-        let warnings = validate_session_handoffs(&[handoff_path]).unwrap();
+        let result = validate_session_handoffs(&[handoff_path]).unwrap();
 
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("unchecked items"));
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("unchecked items"));
+        assert!(result.blockers.is_empty());
     }
 
     #[test]
     fn skips_non_commit_commands() {
-        assert!(handoff_pre_commit_warnings("git status", None).is_empty());
+        let result = handoff_pre_commit_warnings("git status", None);
+        assert!(result.warnings.is_empty());
+        assert!(result.blockers.is_empty());
     }
 
     #[test]
@@ -229,8 +253,32 @@ mod tests {
         )
         .unwrap();
 
-        let warnings = handoff_pre_commit_warnings("git commit -m test", repo_root.to_str());
-        assert_eq!(warnings.len(), 1);
-        assert!(warnings[0].contains("unchecked items"));
+        let result = handoff_pre_commit_warnings("git commit -m test", repo_root.to_str());
+        assert_eq!(result.warnings.len(), 1);
+        assert!(result.warnings[0].contains("unchecked items"));
+        assert!(result.blockers.is_empty());
+    }
+
+    #[test]
+    fn clarification_markers_go_to_blockers() {
+        let dir = TempDir::new().unwrap();
+        let handoff_path = dir.path().join(".handoffs/cross-project/example.md");
+        fs::create_dir_all(handoff_path.parent().unwrap()).unwrap();
+        fs::write(
+            &handoff_path,
+            r"# Handoff
+
+- [x] done
+
+[NEEDS CLARIFICATION]
+",
+        )
+        .unwrap();
+
+        let result = validate_session_handoffs(&[handoff_path]).unwrap();
+
+        assert!(result.warnings.is_empty());
+        assert_eq!(result.blockers.len(), 1);
+        assert!(result.blockers[0].contains("clarification-gate"));
     }
 }

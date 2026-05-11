@@ -14,6 +14,7 @@ pub struct HandoffAudit {
     pub checked_checkboxes: usize,
     pub unchecked_checkboxes: Vec<ChecklistItem>,
     pub empty_paste_markers: Vec<usize>,
+    pub clarification_markers: Vec<(usize, String)>,
 }
 
 pub fn audit_handoff(path: &Path) -> Result<HandoffAudit> {
@@ -39,6 +40,7 @@ pub(crate) fn audit_handoff_content(path: &Path, content: &str) -> HandoffAudit 
         checked_checkboxes,
         unchecked_checkboxes,
         empty_paste_markers: find_empty_paste_markers(content),
+        clarification_markers: find_clarification_markers(content),
     }
 }
 
@@ -104,6 +106,24 @@ fn find_empty_paste_markers(content: &str) -> Vec<usize> {
     }
 
     empty_markers
+}
+
+fn find_clarification_markers(content: &str) -> Vec<(usize, String)> {
+    const MARKERS: &[&str] = &[
+        "[NEEDS CLARIFICATION]",
+        "[TBD]",
+        "[OPEN QUESTION]",
+        "[UNCLEAR]",
+        "[UNRESOLVED]",
+    ];
+    content
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let found = MARKERS.iter().find(|&&marker| line.contains(marker))?;
+            Some((index + 1, found.to_string()))
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -191,5 +211,48 @@ present
         let audit = audit_handoff(&path).unwrap();
 
         assert_eq!(audit.empty_paste_markers, vec![4, 14]);
+    }
+
+    #[test]
+    fn find_clarification_markers_detects_known_markers() {
+        let dir = TempDir::new().unwrap();
+        let path = write_handoff(
+            &dir,
+            r"# Handoff
+
+Some content
+[NEEDS CLARIFICATION]
+More text
+[TBD]
+Done
+",
+        );
+
+        let audit = audit_handoff(&path).unwrap();
+
+        assert_eq!(audit.clarification_markers.len(), 2);
+        assert_eq!(audit.clarification_markers[0].0, 4);
+        assert_eq!(audit.clarification_markers[0].1, "[NEEDS CLARIFICATION]");
+        assert_eq!(audit.clarification_markers[1].0, 6);
+        assert_eq!(audit.clarification_markers[1].1, "[TBD]");
+    }
+
+    #[test]
+    fn find_clarification_markers_empty_on_clean_content() {
+        let dir = TempDir::new().unwrap();
+        let path = write_handoff(
+            &dir,
+            r"# Handoff
+
+- [x] Complete task
+- [x] Another task
+
+All clean!
+",
+        );
+
+        let audit = audit_handoff(&path).unwrap();
+
+        assert!(audit.clarification_markers.is_empty());
     }
 }

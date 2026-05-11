@@ -81,9 +81,22 @@ pub fn handle(input: &str) -> Result<()> {
             return Ok(());
         }
 
-        if capture_policy().handoff_lint_enabled {
-            for warning in handoff_pre_commit_warnings(&event.command, envelope.cwd()) {
+        let policy = capture_policy();
+        if policy.handoff_lint_enabled {
+            let result = handoff_pre_commit_warnings(&event.command, envelope.cwd());
+            for warning in &result.warnings {
                 eprintln!("{warning}");
+            }
+            if policy.clarification_gate_enabled && !result.blockers.is_empty() {
+                if policy.clarification_gate_block {
+                    let message = result.blockers.join("\n");
+                    let response = block_response(&message);
+                    println!("{response}");
+                    return Ok(());
+                }
+                for blocker in &result.blockers {
+                    eprintln!("{blocker}");
+                }
             }
         }
 

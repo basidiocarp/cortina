@@ -15,6 +15,8 @@ pub struct CapturePolicy {
     pub ingest_threshold: usize,
     pub stale_handoff_detection_enabled: bool,
     pub handoff_lint_enabled: bool,
+    pub clarification_gate_enabled: bool,
+    pub clarification_gate_block: bool,
     pub rhizome_suggest_threshold: usize,
     pub rhizome_suggest_every: usize,
     pub rhizome_suggest_enabled: bool,
@@ -62,6 +64,8 @@ impl CapturePolicy {
                 true,
             ),
             handoff_lint_enabled: read_bool(&read_env, "CORTINA_HANDOFF_LINT_ENABLED", true),
+            clarification_gate_enabled: read_bool(&read_env, "CORTINA_CLARIFICATION_GATE_ENABLED", true),
+            clarification_gate_block: read_bool(&read_env, "CORTINA_CLARIFICATION_GATE_BLOCK", false),
             rhizome_suggest_threshold: read_usize(
                 &read_env,
                 "CORTINA_RHIZOME_SUGGEST_THRESHOLD",
@@ -149,6 +153,8 @@ mod tests {
         assert_eq!(policy.ingest_threshold, 7);
         assert!(!policy.stale_handoff_detection_enabled);
         assert!(!policy.handoff_lint_enabled);
+        assert!(policy.clarification_gate_enabled);
+        assert!(!policy.clarification_gate_block);
         assert_eq!(policy.rhizome_suggest_threshold, 250);
         assert_eq!(policy.rhizome_suggest_every, 9);
         assert!(!policy.rhizome_suggest_enabled);
