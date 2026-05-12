@@ -64,8 +64,16 @@ impl CapturePolicy {
                 true,
             ),
             handoff_lint_enabled: read_bool(&read_env, "CORTINA_HANDOFF_LINT_ENABLED", true),
-            clarification_gate_enabled: read_bool(&read_env, "CORTINA_CLARIFICATION_GATE_ENABLED", true),
-            clarification_gate_block: read_bool(&read_env, "CORTINA_CLARIFICATION_GATE_BLOCK", false),
+            clarification_gate_enabled: read_bool(
+                &read_env,
+                "CORTINA_CLARIFICATION_GATE_ENABLED",
+                true,
+            ),
+            clarification_gate_block: read_bool(
+                &read_env,
+                "CORTINA_CLARIFICATION_GATE_BLOCK",
+                false,
+            ),
             rhizome_suggest_threshold: read_usize(
                 &read_env,
                 "CORTINA_RHIZOME_SUGGEST_THRESHOLD",

@@ -13,7 +13,6 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-
 const LOCK_STALE_MS: u64 = 30_000;
 const LOCK_WAIT_ATTEMPTS: usize = 1_000;
 const LOCK_WAIT_MS: u64 = 10;
@@ -368,4 +367,3 @@ fn lock_is_stale(lock_path: &Path) -> bool {
         .and_then(|elapsed| u64::try_from(elapsed.as_millis()).ok())
         .is_some_and(|elapsed_ms| elapsed_ms > LOCK_STALE_MS)
 }
-
