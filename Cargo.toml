@@ -43,4 +43,4 @@ unsafe_code = "warn"
 
 [lints.clippy]
 all = "warn"
-pedantic = "warn"
+pedantic = { level = "warn", priority = -1 }
