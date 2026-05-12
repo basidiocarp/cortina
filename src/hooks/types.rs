@@ -27,8 +27,7 @@ pub enum HookType {
 /// The `hook_type` identifies which lifecycle event triggered the hook.
 /// `tool_name` is set for `PreToolUse` and `PostToolUse` events.
 /// `context` carries the full lifecycle event data for the hook to observe.
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // Fields are part of the public API even if unused in stub.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HookInput {
     /// Which lifecycle event triggered this hook call.
     pub hook_type: HookType,
@@ -44,8 +43,7 @@ pub struct HookInput {
 /// halt the turn (`halt_turn=true`), or return errors. By default
 /// (all false/None), the outer system proceeds without change.
 /// This is the fail-open default.
-#[allow(dead_code)] // Stub implementation for follow-on work
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct HookOutput {
     /// If true, the outer operation is blocked and aborted.
     /// Default: false (fail-open — errors do not block).
