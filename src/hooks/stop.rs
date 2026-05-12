@@ -34,30 +34,17 @@ pub struct StaleHandoffWarning {
 }
 
 #[allow(
-    clippy::too_many_lines,
     clippy::unnecessary_wraps,
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> Result<()> {
-    let envelope = match ClaudeCodeHookEnvelope::parse(input) {
-        Ok(envelope) => envelope,
-        Err(e) => {
-            eprintln!("cortina: failed to parse event input: {e}");
-            return Ok(());
-        }
+    let event = match parse_and_validate_envelope(input) {
+        Some(e) => e,
+        None => return Ok(()),
     };
-
-    let Some(event) = envelope.session_stop_event() else {
-        return Ok(());
-    };
-
-    if event.cwd.is_empty() {
-        return Ok(());
-    }
 
     let hash = scope_hash(Some(&event.cwd));
     let cached_session = load_session_state(&hash);
-    let had_cached_session = cached_session.is_some();
 
     if !command_exists("hyphae") {
         clear_outcomes(&hash);
@@ -65,6 +52,47 @@ pub fn handle(input: &str) -> Result<()> {
         return Ok(());
     }
 
+    let (project_name, summary, structured_outcomes) =
+        load_session_summary(&event, &hash, cached_session.as_ref());
+
+    run_handoff_checks(&event, &summary);
+
+    let text = build_summary_text(&project_name, &summary, &structured_outcomes);
+
+    write_session_to_hyphae_and_emit_signals(&event, &hash, &summary, &text);
+
+    run_post_processing(&event, &summary);
+
+    Ok(())
+}
+
+/// Parse and validate the hook envelope and session stop event.
+/// Returns None if the envelope is invalid or not a session stop event.
+fn parse_and_validate_envelope(input: &str) -> Option<crate::events::SessionStopEvent> {
+    let envelope = match ClaudeCodeHookEnvelope::parse(input) {
+        Ok(envelope) => envelope,
+        Err(e) => {
+            eprintln!("cortina: failed to parse event input: {e}");
+            return None;
+        }
+    };
+
+    let event = envelope.session_stop_event()?;
+
+    if event.cwd.is_empty() {
+        return None;
+    }
+
+    Some(event)
+}
+
+/// Load and merge session context, outcomes, and transcript.
+/// Returns the project name, merged summary, and filtered outcomes.
+fn load_session_summary(
+    event: &crate::events::SessionStopEvent,
+    hash: &str,
+    cached_session: Option<&crate::utils::SessionState>,
+) -> (String, summary::TranscriptSummary, Vec<crate::events::OutcomeEvent>) {
     let project_name = project_name_for_cwd(Some(&event.cwd)).unwrap_or_else(|| {
         Path::new(&event.cwd)
             .file_name()
@@ -72,9 +100,10 @@ pub fn handle(input: &str) -> Result<()> {
             .unwrap_or("unknown")
             .to_string()
     });
+
     let structured_outcomes = filter_outcomes_for_session(
-        &load_outcomes(&hash),
-        cached_session.as_ref(),
+        &load_outcomes(hash),
+        cached_session,
         &project_name,
     );
 
@@ -83,6 +112,14 @@ pub fn handle(input: &str) -> Result<()> {
         &structured_outcomes,
     );
 
+    (project_name, summary, structured_outcomes)
+}
+
+/// Run policy-gated handoff checks: staleness and lint validation.
+fn run_handoff_checks(
+    event: &crate::events::SessionStopEvent,
+    summary: &summary::TranscriptSummary,
+) {
     if capture_policy().stale_handoff_detection_enabled {
         for warning in check_handoff_staleness(&summary.files_modified, Path::new(&event.cwd)) {
             eprintln!(
@@ -113,7 +150,14 @@ pub fn handle(input: &str) -> Result<()> {
             eprintln!("{warning}");
         }
     }
+}
 
+/// Build the summary text from session metadata and outcomes.
+fn build_summary_text(
+    project_name: &str,
+    summary: &summary::TranscriptSummary,
+    structured_outcomes: &[crate::events::OutcomeEvent],
+) -> String {
     let mut text = format!("Session in {project_name}: {}", summary.task_desc);
 
     if !summary.files_modified.is_empty() {
@@ -132,18 +176,28 @@ pub fn handle(input: &str) -> Result<()> {
         let _ = write!(text, "\nOutcome: {}", summary.outcome);
     }
 
-    if let Some(attribution) = format_structured_outcome_attribution(&structured_outcomes) {
+    if let Some(attribution) = format_structured_outcome_attribution(structured_outcomes) {
         let _ = write!(text, "\nStructured outcomes: {attribution}");
     }
 
+    text
+}
+
+/// Write session data to Hyphae and emit all related signals.
+fn write_session_to_hyphae_and_emit_signals(
+    event: &crate::events::SessionStopEvent,
+    hash: &str,
+    summary: &summary::TranscriptSummary,
+    text: &str,
+) {
     let session_feedback = session_outcome_feedback(
         &summary.outcome,
-        summary::has_unresolved_errors(&structured_outcomes),
+        summary::has_unresolved_errors(&load_outcomes(hash)),
     );
 
     let ended_structured_session = end_scoped_hyphae_session(
         Some(&event.cwd),
-        Some(&text),
+        Some(text),
         &summary.files_modified,
         summary.errors_encountered,
     );
@@ -155,28 +209,43 @@ pub fn handle(input: &str) -> Result<()> {
             session_feedback.1,
             session_feedback.2,
         );
-        clear_outcomes(&hash);
+        clear_outcomes(hash);
 
-        // Emit tool usage event
-        let tool_calls = crate::tool_usage::load_tool_calls(&hash);
-        if !tool_calls.is_empty() {
-            let gaps = compute_tool_adoption_gaps(&summary.files_modified, &tool_calls);
-            if !gaps.is_empty() {
-                eprintln!("cortina: tool adoption gaps detected:");
-                for (tool_name, _source, reason) in &gaps {
-                    eprintln!("  - {tool_name} ({reason})");
-                }
-            }
-            tool_usage_emit::emit_tool_usage_event(&state.session_id, None, &tool_calls, &gaps);
-        }
-        crate::tool_usage::clear_tool_calls(&hash);
-    } else if !had_cached_session {
-        clear_outcomes(&hash);
-        crate::tool_usage::clear_tool_calls(&hash);
+        emit_tool_usage_signals(state, hash, &summary.files_modified);
+        crate::tool_usage::clear_tool_calls(hash);
+    } else {
+        // No session was ended; clean up local state
+        crate::tool_usage::clear_tool_calls(hash);
     }
+}
+
+/// Load tool calls and emit usage event with adoption gap analysis.
+fn emit_tool_usage_signals(
+    state: &crate::utils::SessionState,
+    hash: &str,
+    files_modified: &[String],
+) {
+    let tool_calls = crate::tool_usage::load_tool_calls(hash);
+    if !tool_calls.is_empty() {
+        let gaps = compute_tool_adoption_gaps(files_modified, &tool_calls);
+        if !gaps.is_empty() {
+            eprintln!("cortina: tool adoption gaps detected:");
+            for (tool_name, _source, reason) in &gaps {
+                eprintln!("  - {tool_name} ({reason})");
+            }
+        }
+        tool_usage_emit::emit_tool_usage_event(&state.session_id, None, &tool_calls, &gaps);
+    }
+}
+
+/// Run post-processing: FP check, trigger words, and compile env invalidation.
+fn run_post_processing(
+    event: &crate::events::SessionStopEvent,
+    summary: &summary::TranscriptSummary,
+) {
+    let transcript_text = read_transcript_text(event.transcript_path.as_deref());
 
     // Run FP marker check processor
-    let transcript_text = read_transcript_text(event.transcript_path.as_deref());
     if let Some(fp_summary) = crate::hooks::fp_check::FpCheckProcessor::process(&transcript_text) {
         tracing::info!("cortina stop: {fp_summary}");
     }
@@ -192,8 +261,6 @@ pub fn handle(input: &str) -> Result<()> {
 
     // Check if structural files were modified and invalidate compiled environment artifact if so
     trigger_compile_env_invalidation_if_needed(&summary.files_modified, &event.cwd);
-
-    Ok(())
 }
 
 /// Computes tool adoption gaps by checking which recommended tools were not called
