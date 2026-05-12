@@ -13,13 +13,6 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-#[cfg(windows)]
-use std::os::windows::ffi::OsStrExt;
-
-#[cfg(windows)]
-use windows_sys::Win32::Storage::FileSystem::{
-    MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
-};
 
 const LOCK_STALE_MS: u64 = 30_000;
 const LOCK_WAIT_ATTEMPTS: usize = 1_000;
@@ -166,28 +159,7 @@ pub fn load_json_file<T: serde::de::DeserializeOwned>(path: impl AsRef<Path>) ->
 }
 
 pub fn save_json_file<T: serde::Serialize>(path: impl AsRef<Path>, data: &T) -> Result<()> {
-    let path = path.as_ref();
-    let json = serde_json::to_string_pretty(data)?;
-    let file_name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("state");
-    let temp_path = path.with_file_name(format!(
-        ".{file_name}.{}.{}.{}.tmp",
-        std::process::id(),
-        current_timestamp_ms(),
-        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-
-    let mut temp_file = fs::File::create(&temp_path)?;
-    temp_file.write_all(json.as_bytes())?;
-    temp_file.sync_all()?;
-    drop(temp_file);
-
-    replace_file_atomic(&temp_path, path).inspect_err(|_| {
-        let _ = fs::remove_file(&temp_path);
-    })?;
-    Ok(())
+    spore::atomic_write_json(path.as_ref(), data).map_err(Into::into)
 }
 
 pub fn update_json_file<T, F, R>(path: impl AsRef<Path>, mutator: F) -> Result<R>
@@ -397,31 +369,3 @@ fn lock_is_stale(lock_path: &Path) -> bool {
         .is_some_and(|elapsed_ms| elapsed_ms > LOCK_STALE_MS)
 }
 
-#[cfg(not(windows))]
-fn replace_file_atomic(temp_path: &Path, path: &Path) -> Result<()> {
-    fs::rename(temp_path, path)?;
-    Ok(())
-}
-
-#[cfg(windows)]
-#[allow(unsafe_code)]
-fn replace_file_atomic(temp_path: &Path, path: &Path) -> Result<()> {
-    let mut from: Vec<u16> = temp_path.as_os_str().encode_wide().collect();
-    from.push(0);
-    let mut to: Vec<u16> = path.as_os_str().encode_wide().collect();
-    to.push(0);
-
-    let result = unsafe {
-        MoveFileExW(
-            from.as_ptr(),
-            to.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-
-    if result == 0 {
-        return Err(std::io::Error::last_os_error().into());
-    }
-
-    Ok(())
-}
