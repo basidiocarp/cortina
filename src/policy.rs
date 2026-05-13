@@ -82,7 +82,7 @@ impl CapturePolicy {
             ),
             rhizome_suggest_every: read_usize(&read_env, "CORTINA_RHIZOME_SUGGEST_EVERY", 5),
             rhizome_suggest_enabled: read_bool(&read_env, "CORTINA_RHIZOME_SUGGEST_ENABLED", true),
-            rhizome_enforce: read_bool(&read_env, "CORTINA_RHIZOME_ENFORCE", false),
+            rhizome_enforce: read_bool(&read_env, "CORTINA_RHIZOME_ENFORCE", true),
             outcome_attribution_grace_ms: read_u64(
                 &read_env,
                 "CORTINA_OUTCOME_ATTRIBUTION_GRACE_MS",
@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(policy.rhizome_suggest_threshold, 250);
         assert_eq!(policy.rhizome_suggest_every, 9);
         assert!(!policy.rhizome_suggest_enabled);
-        assert!(!policy.rhizome_enforce);
+        assert!(policy.rhizome_enforce); // inherits default true when not overridden
         assert_eq!(policy.outcome_attribution_grace_ms, 60_000);
         assert_eq!(policy.max_outcome_events, 55);
         assert!(policy.fallback_session_memory_on_end_failure);

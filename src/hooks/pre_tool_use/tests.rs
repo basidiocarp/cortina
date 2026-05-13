@@ -551,11 +551,25 @@ fn grep_tool_symbol_blocked_when_enforce_enabled() {
     assert!(policy.rhizome_enforce);
     assert!(symbol_like_grep_kind("AuthService").is_some());
 
-    // Verify the advisory path still works when enforce is disabled.
-    let non_enforce = CapturePolicy::from_reader(|_| None);
+    // Verify the advisory path still works when enforce is explicitly disabled.
+    // Use a unique cwd so the rate-limit counter starts fresh.
+    let non_enforce_cwd = format!("/tmp/cortina-enforce-grep-advisory-{}", std::process::id());
+    let non_enforce_envelope = ClaudeCodeHookEnvelope::parse(
+        &serde_json::json!({
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "AuthService"},
+            "cwd": non_enforce_cwd,
+        })
+        .to_string(),
+    )
+    .expect("valid envelope");
+    let non_enforce = CapturePolicy::from_reader(|name| match name {
+        "CORTINA_RHIZOME_ENFORCE" => Some("0".to_string()),
+        _ => None,
+    });
     assert!(!non_enforce.rhizome_enforce);
     // Advisory path respects rhizome_suggest_enabled (true by default).
-    let advisory = tool_suggestion_message_with_availability(&non_enforce, &envelope, true);
+    let advisory = tool_suggestion_message_with_availability(&non_enforce, &non_enforce_envelope, true);
     assert!(
         advisory.is_some(),
         "advisory should be emitted when enforce is off"
@@ -570,9 +584,9 @@ fn grep_tool_non_symbol_not_blocked_by_enforce() {
 }
 
 #[test]
-fn rhizome_enforce_default_is_off() {
+fn rhizome_enforce_default_is_on() {
     let policy = CapturePolicy::from_reader(|_| None);
-    assert!(!policy.rhizome_enforce, "rhizome_enforce must default to false");
+    assert!(policy.rhizome_enforce, "rhizome_enforce must default to true");
 }
 
 #[test]
