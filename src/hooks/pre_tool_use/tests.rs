@@ -500,10 +500,17 @@ fn edit_gate_allows_after_investigation_tool_called() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn bash_code_search_allows_recursive_on_non_code_dirs() {
+fn bash_code_search_blocks_recursive_on_source_dirs() {
+    // Recursive grep targeting known source directories is a code search.
+    assert!(is_bash_code_search("grep -r 'AuthService' src/"));
+    assert!(is_bash_code_search("rg -r 'MyTrait' crates/"));
+    assert!(is_bash_code_search("grep -R 'foo' lib/"));
+    assert!(is_bash_code_search("grep --recursive 'bar' app/"));
+    assert!(is_bash_code_search("grep -r 'baz' pkg/"));
+    assert!(is_bash_code_search("grep -r 'qux' packages/"));
+    // Non-source dirs with recursive flag are still allowed.
     assert!(!is_bash_code_search("grep -r 'error' logs/"));
-    assert!(!is_bash_code_search("grep -r 'AuthService' src/"));
-    assert!(!is_bash_code_search("rg -r 'MyTrait' crates/"));
+    assert!(!is_bash_code_search("grep -r 'key' config/"));
 }
 
 #[test]
@@ -570,7 +577,8 @@ fn grep_tool_symbol_blocked_when_enforce_enabled() {
     });
     assert!(!non_enforce.rhizome_enforce);
     // Advisory path respects rhizome_suggest_enabled (true by default).
-    let advisory = tool_suggestion_message_with_availability(&non_enforce, &non_enforce_envelope, true);
+    let advisory =
+        tool_suggestion_message_with_availability(&non_enforce, &non_enforce_envelope, true);
     assert!(
         advisory.is_some(),
         "advisory should be emitted when enforce is off"
@@ -587,7 +595,10 @@ fn grep_tool_non_symbol_not_blocked_by_enforce() {
 #[test]
 fn rhizome_enforce_default_is_on() {
     let policy = CapturePolicy::from_reader(|_| None);
-    assert!(policy.rhizome_enforce, "rhizome_enforce must default to true");
+    assert!(
+        policy.rhizome_enforce,
+        "rhizome_enforce must default to true"
+    );
 }
 
 #[test]

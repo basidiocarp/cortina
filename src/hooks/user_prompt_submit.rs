@@ -2,6 +2,15 @@ use serde_json::json;
 use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::mpsc;
+use std::time::Duration;
+
+/// Maximum bytes forwarded to stderr per recall injection.
+/// Filtered to `[cortina-recall]` lines only; truncated at a UTF-8 char boundary.
+const RECALL_INJECT_MAX_BYTES: usize = 2048;
+
+/// Deadline for the `hyphae auto-recall` subprocess before it is killed.
+const RECALL_TIMEOUT: Duration = Duration::from_secs(2);
 
 use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::events::{
@@ -308,12 +317,32 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
         cmd.args(["--project", p]);
     }
 
-    let Ok(output) = cmd
+    // Spawn with a 2-second deadline to prevent blocking the hook indefinitely
+    // when hyphae auto-recall is slow or hung.
+    //
+    // Move the child into a background thread that calls wait_with_output()
+    // exactly once — the channel-based approach avoids the double-wait race
+    // that occurs when try_wait() consumes the exit status before wait_with_output().
+    let Ok(child) = cmd
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
-        .output()
+        .spawn()
     else {
         return;
+    };
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    let output = match rx.recv_timeout(RECALL_TIMEOUT) {
+        Ok(Ok(out)) => out,
+        Ok(Err(_)) => return,
+        Err(_) => {
+            tracing::warn!("hyphae auto-recall timed out after 2s — skipping recall injection");
+            return;
+        }
     };
 
     if output.stdout.is_empty() {
@@ -322,26 +351,31 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
 
     let text = String::from_utf8_lossy(&output.stdout);
 
-    // Validate the output follows the expected cortina-recall format before
-    // injecting into the agent context. Content that doesn't contain the
-    // expected prefix header is not written to stderr.
-    let n = text
+    // Only forward lines that carry the expected [cortina-recall] prefix.
+    // Writing arbitrary stdout to stderr risks injecting adversarial directives
+    // from stored memory content into the agent context.
+    let recall_lines: Vec<&str> = text
         .lines()
         .filter(|l| l.starts_with("[cortina-recall]"))
-        .count();
+        .collect();
 
+    let n = recall_lines.len();
     if n == 0 {
         return;
     }
 
-    // Cap recall output to prevent context flooding from unexpectedly large responses.
-    const RECALL_INJECT_MAX_BYTES: usize = 8 * 1024;
-    let to_write = if output.stdout.len() > RECALL_INJECT_MAX_BYTES {
-        &output.stdout[..RECALL_INJECT_MAX_BYTES]
-    } else {
-        &output.stdout
-    };
-    let _ = std::io::stderr().write_all(to_write);
+    // Join filtered lines and cap at RECALL_INJECT_MAX_BYTES, truncating at a UTF-8
+    // char boundary. floor_char_boundary is not stable until 1.91.0; walk back manually.
+    let mut joined = recall_lines.join("\n");
+    if joined.len() > RECALL_INJECT_MAX_BYTES {
+        let mut boundary = RECALL_INJECT_MAX_BYTES;
+        while !joined.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        joined.truncate(boundary);
+    }
+    let _ = std::io::stderr().write_all(joined.as_bytes());
+    let _ = std::io::stderr().write_all(b"\n");
 
     // Store the recall event in hyphae using the fire-and-forget pattern.
     let recall_payload = json!({

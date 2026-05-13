@@ -79,22 +79,6 @@ fn span_context(project_root: Option<&str>, tool: &str) -> SpanContext {
     }
 }
 
-fn spawn_async_session_end(mut cmd: Command) {
-    match cmd
-        .stdout(std::process::Stdio::null())
-        .stderr(diagnostic_stderr())
-        .spawn()
-    {
-        Ok(child) => {
-            std::thread::spawn(move || {
-                let _ = child.wait_with_output();
-            });
-            debug!("cortina: hyphae session-end fired async (CORTINA_ASYNC_SESSION_END=true)");
-        }
-        Err(e) => warn!("cortina: failed to spawn hyphae session-end: {e}"),
-    }
-}
-
 fn diagnostic_stderr() -> std::process::Stdio {
     #[cfg(test)]
     {
@@ -325,6 +309,41 @@ pub fn end_scoped_hyphae_session(
     )
 }
 
+/// Spawn `hyphae session end` asynchronously. Marks the session clean in the session store only
+/// after the child process exits successfully; marks it orphaned otherwise.
+///
+/// This ensures the session store is updated only after hyphae confirms the write, not before.
+fn spawn_async_session_end_confirmed(mut cmd: Command, session_id: String) {
+    cmd.stdout(std::process::Stdio::null())
+        .stderr(diagnostic_stderr());
+    match cmd.spawn() {
+        Ok(child) => {
+            std::thread::spawn(move || match child.wait_with_output() {
+                Ok(out) if out.status.success() => {
+                    if let Ok(store) = SessionStore::open() {
+                        tracing::info!(
+                            session_id = %session_id,
+                            "cortina: session ended cleanly (async confirmed)"
+                        );
+                        let _ = store.end_clean(&session_id);
+                    }
+                }
+                _ => {
+                    if let Ok(store) = SessionStore::open() {
+                        tracing::info!(
+                            session_id = %session_id,
+                            "cortina: session ended orphaned (async hyphae non-zero)"
+                        );
+                        let _ = store.end_orphaned(&session_id);
+                    }
+                }
+            });
+            debug!("cortina: hyphae session-end fired async (CORTINA_ASYNC_SESSION_END=true)");
+        }
+        Err(e) => warn!("cortina: failed to spawn hyphae session-end: {e}"),
+    }
+}
+
 pub(super) fn end_hyphae_session_with<F>(
     hash: &str,
     summary: Option<&str>,
@@ -374,17 +393,8 @@ where
 
         let _subprocess_span = subprocess_span("hyphae session end", &context).entered();
 
-        // Phase 1: session archive write (already done before hyphae call)
-        // Mark clean end in SQLite and remove state file
-        let db_store = SessionStore::open().ok();
-        if let Some(store) = db_store {
-            tracing::info!(
-                session_id = %state.session_id,
-                "cortina: session ended cleanly"
-            );
-            let _ = store.end_clean(&state.session_id);
-        }
-
+        // Remove the state file now so the next session can start fresh regardless of
+        // whether the async hyphae write succeeds.
         with_file_lock(&path, || {
             if load_json_file::<SessionState>(&path)
                 .as_ref()
@@ -397,14 +407,14 @@ where
 
         // Phase 2: hyphae session end subprocess — async or sync depending on env var
         if async_session_end_enabled() {
-            spawn_async_session_end(cmd);
+            spawn_async_session_end_confirmed(cmd, state.session_id.clone());
             return with_file_lock(&path, || Ok(Some(state)));
         }
 
         // Synchronous fallback (CORTINA_ASYNC_SESSION_END=false)
         let Ok(output) = run_command(&mut cmd) else {
             warn!("Failed to execute hyphae session end");
-            // Mark session orphaned in SQLite instead of leaving file behind
+            // Mark session orphaned in SQLite; state file was already removed above.
             let db_store = SessionStore::open().ok();
             if let Some(store) = db_store {
                 tracing::info!(
@@ -413,15 +423,6 @@ where
                 );
                 let _ = store.end_orphaned(&state.session_id);
             }
-            with_file_lock(&path, || {
-                if load_json_file::<SessionState>(&path)
-                    .as_ref()
-                    .is_some_and(|current| current.session_id == state.session_id)
-                {
-                    let _ = fs::remove_file(&path);
-                }
-                Ok(())
-            })?;
             return Ok(None);
         };
 
@@ -439,16 +440,16 @@ where
                 );
                 let _ = store.end_orphaned(&state.session_id);
             }
-            with_file_lock(&path, || {
-                if load_json_file::<SessionState>(&path)
-                    .as_ref()
-                    .is_some_and(|current| current.session_id == state.session_id)
-                {
-                    let _ = fs::remove_file(&path);
-                }
-                Ok(())
-            })?;
             return Ok(None);
+        }
+
+        // Synchronous success: hyphae confirmed the write — mark clean now.
+        if let Ok(store) = SessionStore::open() {
+            tracing::info!(
+                session_id = %state.session_id,
+                "cortina: session ended cleanly"
+            );
+            let _ = store.end_clean(&state.session_id);
         }
 
         with_file_lock(&path, || Ok(Some(state)))

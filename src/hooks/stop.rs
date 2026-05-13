@@ -38,17 +38,15 @@ pub struct StaleHandoffWarning {
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> Result<()> {
-    let event = match parse_and_validate_envelope(input) {
-        Some(e) => e,
-        None => return Ok(()),
+    let Some(event) = parse_and_validate_envelope(input) else {
+        return Ok(());
     };
 
     let hash = scope_hash(Some(&event.cwd));
     let cached_session = load_session_state(&hash);
 
     if !command_exists("hyphae") {
-        clear_outcomes(&hash);
-        crate::tool_usage::clear_tool_calls(&hash);
+        tracing::warn!("hyphae binary not found at Stop — outcomes preserved for next session end");
         return Ok(());
     }
 
@@ -92,7 +90,11 @@ fn load_session_summary(
     event: &crate::events::SessionStopEvent,
     hash: &str,
     cached_session: Option<&crate::utils::SessionState>,
-) -> (String, summary::TranscriptSummary, Vec<crate::events::OutcomeEvent>) {
+) -> (
+    String,
+    summary::TranscriptSummary,
+    Vec<crate::events::OutcomeEvent>,
+) {
     let project_name = project_name_for_cwd(Some(&event.cwd)).unwrap_or_else(|| {
         Path::new(&event.cwd)
             .file_name()
@@ -101,11 +103,8 @@ fn load_session_summary(
             .to_string()
     });
 
-    let structured_outcomes = filter_outcomes_for_session(
-        &load_outcomes(hash),
-        cached_session,
-        &project_name,
-    );
+    let structured_outcomes =
+        filter_outcomes_for_session(&load_outcomes(hash), cached_session, &project_name);
 
     let summary = merge_structured_outcomes(
         parse_transcript(event.transcript_path.as_deref()),
@@ -566,9 +565,23 @@ fn extract_final_message(transcript_text: &str) -> String {
         }
 
         if let Ok(entry) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            if let Some("assistant") = entry.get("type").and_then(serde_json::Value::as_str) {
-                if let Some(text) = entry.get("text").and_then(serde_json::Value::as_str) {
-                    return text.to_string();
+            if entry.get("type").and_then(serde_json::Value::as_str) == Some("assistant") {
+                let text = entry
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array())
+                    .map(|blocks| {
+                        blocks
+                            .iter()
+                            .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .unwrap_or_default();
+
+                if !text.is_empty() {
+                    return text;
                 }
             }
         }

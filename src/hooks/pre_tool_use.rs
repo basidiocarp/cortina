@@ -58,6 +58,10 @@ thread_local! {
     clippy::unnecessary_wraps,
     reason = "Result return type required by dispatch match in main"
 )]
+#[allow(
+    clippy::too_many_lines,
+    reason = "handle() is a flat dispatch function; extracting sub-functions would fragment the control flow without improving clarity"
+)]
 pub fn handle(input: &str) -> Result<()> {
     let envelope = match ClaudeCodeHookEnvelope::parse(input) {
         Ok(envelope) => envelope,
@@ -97,7 +101,10 @@ pub fn handle(input: &str) -> Result<()> {
         // ─────────────────────────────────────────────────────────────────────────
         // Rhizome enforcement: block bash code searches when rhizome is available
         // ─────────────────────────────────────────────────────────────────────────
-        if policy.rhizome_enforce && command_exists("rhizome") && is_bash_code_search(&event.command) {
+        if policy.rhizome_enforce
+            && command_exists("rhizome")
+            && is_bash_code_search(&event.command)
+        {
             let response = block_response(BASH_SEARCH_ENFORCE_MESSAGE);
             println!("{response}");
             return Ok(());
@@ -361,17 +368,19 @@ fn resolve_read_path(file_path: &str, cwd: Option<&str>) -> String {
     )
 }
 
+/// Source directories that, when targeted with a recursive grep, indicate a code search.
+const CODE_SOURCE_DIRS: &[&str] = &["src/", "lib/", "crates/", "app/", "pkg/", "packages/"];
+
 /// Returns true when a bash command looks like a code-file search via grep or rg.
 ///
 /// Triggers on: `grep`, `rg`, or `ripgrep` appearing as a word in the command, combined with
-/// either a recursive flag (`-r`, `-R`, `--recursive`) or a code file extension in the arguments.
+/// either a code file extension in the arguments, OR a recursive flag (`-r`, `-R`, `--recursive`)
+/// that targets a known source directory (`src/`, `lib/`, `crates/`, `app/`, `pkg/`, `packages/`).
 fn is_bash_code_search(command: &str) -> bool {
-    let has_search_tool = command
-        .split_ascii_whitespace()
-        .any(|word| {
-            let name = word.rsplit('/').next().unwrap_or(word);
-            matches!(name, "grep" | "rg" | "ripgrep")
-        });
+    let has_search_tool = command.split_ascii_whitespace().any(|word| {
+        let name = word.rsplit('/').next().unwrap_or(word);
+        matches!(name, "grep" | "rg" | "ripgrep")
+    });
 
     if !has_search_tool {
         return false;
@@ -384,7 +393,20 @@ fn is_bash_code_search(command: &str) -> bool {
             || command.ends_with(&dot_ext)
     });
 
-    has_code_ext
+    if has_code_ext {
+        return true;
+    }
+
+    // Recursive flag targeting a known source directory is also a code search.
+    let has_recursive_flag = command
+        .split_ascii_whitespace()
+        .any(|word| matches!(word, "-r" | "-R" | "--recursive"));
+
+    if has_recursive_flag {
+        return CODE_SOURCE_DIRS.iter().any(|dir| command.contains(dir));
+    }
+
+    false
 }
 
 fn symbol_like_grep_kind(pattern: &str) -> Option<&'static str> {

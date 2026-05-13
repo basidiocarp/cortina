@@ -1,3 +1,7 @@
+// HookType, HookInput, and HookOutput are infrastructure for a future multi-hook
+// dispatch system, currently only used in executor.rs tests.
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 
 /// Hook lifecycle event types that cortina can observe and handle.

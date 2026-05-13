@@ -1,3 +1,14 @@
+// HookExecutor and related types are infrastructure for a future multi-hook dispatch system.
+// They are tested in this module but not yet wired into main().
+#![allow(
+    dead_code,
+    clippy::doc_markdown,
+    clippy::manual_let_else,
+    clippy::single_match_else,
+    clippy::uninlined_format_args,
+    clippy::unused_self
+)]
+
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
@@ -143,7 +154,10 @@ impl HookExecutor {
         })) {
             Ok(Some(Ok(output))) => output,
             _ => {
-                eprintln!("Warning: hook {} timed out or panicked", hook_path.display());
+                eprintln!(
+                    "Warning: hook {} timed out or panicked",
+                    hook_path.display()
+                );
                 return HookOutput::default();
             }
         };

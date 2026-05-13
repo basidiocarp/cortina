@@ -40,7 +40,7 @@ impl ClaudeCodeHookEnvelope {
                 exit_code: self.tool_output_exit_code(),
                 cwd: self.cwd().map(ToString::to_string),
             })),
-            "Write" | "Edit" | "MultiEdit" => Some(ToolResultEvent::FileEdit(FileEditEvent {
+            "Write" | "Edit" => Some(ToolResultEvent::FileEdit(FileEditEvent {
                 file_path: self
                     .tool_input_string("file_path")
                     .unwrap_or_default()
@@ -55,8 +55,51 @@ impl ClaudeCodeHookEnvelope {
                     .to_string(),
                 cwd: self.cwd().map(ToString::to_string),
             })),
+            // MultiEdit is handled separately via multi_edit_events() — one event per element.
             _ => None,
         }
+    }
+
+    /// For `MultiEdit` tool calls, return one `FileEditEvent` per element in the `edits` array.
+    /// Returns an empty Vec for all other tools or when the edits field is missing/malformed.
+    pub fn multi_edit_events(&self) -> Vec<FileEditEvent> {
+        if self.tool_name() != Some("MultiEdit") {
+            return Vec::new();
+        }
+
+        let file_path = self
+            .tool_input_string("file_path")
+            .unwrap_or_default()
+            .to_string();
+        let cwd = self.cwd().map(ToString::to_string);
+
+        let edits = self
+            .raw
+            .get("tool_input")
+            .and_then(|input| input.get("edits"))
+            .and_then(Value::as_array);
+
+        let Some(edits) = edits else {
+            return Vec::new();
+        };
+
+        edits
+            .iter()
+            .map(|edit| FileEditEvent {
+                file_path: file_path.clone(),
+                old_string: edit
+                    .get("old_string")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                new_string: edit
+                    .get("new_string")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                cwd: cwd.clone(),
+            })
+            .collect()
     }
 
     pub fn session_stop_event(&self) -> Option<SessionStopEvent> {

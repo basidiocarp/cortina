@@ -124,10 +124,17 @@ fn socket_call(socket_path: &str, method: &str, params: serde_json::Value) -> an
     writer.flush()?;
 
     let reader = BufReader::new(&stream);
-    reader
+    let line = reader
         .lines()
         .next()
         .ok_or_else(|| anyhow::anyhow!("no response from hyphae socket"))??;
+
+    // Validate the response is not a JSON-RPC error object before returning Ok.
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
+        if let Some(error) = parsed.get("error") {
+            return Err(anyhow::anyhow!("hyphae socket returned error: {error}"));
+        }
+    }
 
     Ok(())
 }

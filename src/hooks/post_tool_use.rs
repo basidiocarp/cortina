@@ -31,7 +31,12 @@ pub fn handle(input: &str) -> Result<()> {
     match envelope.tool_result_event() {
         Some(ToolResultEvent::Bash(event)) => bash::handle_bash(&event),
         Some(ToolResultEvent::FileEdit(event)) => edits::handle_file_edits(&event),
-        None => {}
+        None => {
+            // MultiEdit delivers edits as an array — emit one event per element.
+            for event in envelope.multi_edit_events() {
+                edits::handle_file_edits(&event);
+            }
+        }
     }
 
     // MCP tool handlers — not matched by tool_result_event() above.
@@ -58,7 +63,6 @@ pub fn handle(input: &str) -> Result<()> {
         );
     }
 
-    print!("{input}");
     Ok(())
 }
 
