@@ -553,13 +553,16 @@ fn check_gate_guard(envelope: &ClaudeCodeHookEnvelope) -> Option<GateDecision> {
 
             let decision = GATE_MAP.with(|map| {
                 let mut gate_map = map.borrow_mut();
-                // For destructive bash, we need to override the template.
-                let mut decision = evaluate_gate(
-                    &gate_key,
-                    &mut gate_map,
-                    has_investigation,
-                    GateMode::Advisory,
-                );
+                // Destructive bash always gates in Blocking mode.
+                // Routine bash gates in Advisory mode (once per session).
+                let gate_mode = if is_destructive_bash(command) {
+                    GateMode::Blocking
+                } else {
+                    GateMode::Advisory
+                };
+
+                let mut decision =
+                    evaluate_gate(&gate_key, &mut gate_map, has_investigation, gate_mode);
 
                 if is_destructive_bash(command) {
                     if let GateDecision::Block { .. } = &decision {

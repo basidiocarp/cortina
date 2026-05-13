@@ -314,9 +314,8 @@ fn span_context_includes_session_id_when_present() {
 // GateGuard integration tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Destructive Bash gate in advisory mode always returns Allow, but still
-/// tracks state and removes allowed entries to prepare for re-gating on next call.
-/// In advisory mode (the default), this is fail-open behavior safe for process-per-call.
+/// Destructive Bash gate in blocking mode blocks on first call, then allows
+/// after investigation tool (Grep/Read/etc) is called.
 #[test]
 fn destructive_bash_re_gates_after_allow() {
     // Use a command that encodes the current nanosecond timestamp so the gate
@@ -350,29 +349,29 @@ fn destructive_bash_re_gates_after_allow() {
     let hash = scope_hash(envelope.cwd());
     clear_tool_calls(&hash);
 
-    // In advisory mode (default), gate always returns Allow (fail-open).
-    // First call: allows (advisory mode is fail-open).
+    // In blocking mode, first call blocks without investigation.
     let decision1 = check_gate_guard(&envelope);
     assert!(
-        matches!(decision1, Some(GateDecision::Allow)),
-        "first destructive bash call must allow in advisory mode (fail-open)"
+        matches!(decision1, Some(GateDecision::Block { .. })),
+        "first destructive bash call must block in blocking mode"
     );
 
     // Simulate investigation: record a Read tool call in the session scope.
     record_tool_call("Read", ToolSource::Other, &hash);
 
-    // Second call: still allows (advisory mode is always allow).
+    // Second call with investigation: now allows.
     let decision2 = check_gate_guard(&envelope);
     assert!(
         matches!(decision2, Some(GateDecision::Allow)),
-        "second destructive bash call must allow in advisory mode"
+        "destructive bash call should allow after investigation"
     );
 
-    // Third call: still allows (advisory mode is always allow).
+    // Third call: blocks again — the allowed entry was removed after Allow so destructive
+    // bash must re-investigate before it can proceed.
     let decision3 = check_gate_guard(&envelope);
     assert!(
-        matches!(decision3, Some(GateDecision::Allow)),
-        "third destructive bash call must allow in advisory mode"
+        matches!(decision3, Some(GateDecision::Block { .. })),
+        "destructive bash must re-gate after allow (no TTL bypass)"
     );
 
     // Cleanup session state.

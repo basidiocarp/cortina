@@ -10,7 +10,6 @@ pub enum GateMode {
     Advisory,
     /// Blocking: gate evaluates decision and may return Block until investigation completes.
     /// Note: process-per-call environments will not retain state between calls.
-    #[allow(dead_code)]
     Blocking,
 }
 
