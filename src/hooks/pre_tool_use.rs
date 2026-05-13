@@ -33,6 +33,17 @@ mcp__rhizome__get_symbols or mcp__rhizome__get_structure for structure, or \
 mcp__rhizome__get_symbol_body for a specific function";
 const GREP_ADVISORY_MESSAGE: &str = "[cortina] Symbol search - consider: mcp__rhizome__search_symbols or \
 mcp__rhizome__find_references";
+const BASH_SEARCH_ENFORCE_MESSAGE: &str = "Code search via bash is blocked — rhizome is available.\n\
+Use instead:\n\
+  mcp__rhizome__search_symbols    symbol definitions and all usages\n\
+  mcp__rhizome__find_references   cross-file references\n\
+  mcp__rhizome__get_symbols       all symbols in a file\n\
+  mcp__rhizome__get_call_sites    callers of a function";
+const GREP_TOOL_ENFORCE_MESSAGE: &str = "Symbol grep is blocked — rhizome is available.\n\
+Use instead:\n\
+  mcp__rhizome__search_symbols    symbol definitions and all usages\n\
+  mcp__rhizome__find_references   cross-file references\n\
+  mcp__rhizome__get_call_sites    callers of a function";
 
 thread_local! {
     static GATE_MAP: RefCell<GateMap> = RefCell::new(HashMap::new());
@@ -82,6 +93,16 @@ pub fn handle(input: &str) -> Result<()> {
         }
 
         let policy = capture_policy();
+
+        // ─────────────────────────────────────────────────────────────────────────
+        // Rhizome enforcement: block bash code searches when rhizome is available
+        // ─────────────────────────────────────────────────────────────────────────
+        if policy.rhizome_enforce && command_exists("rhizome") && is_bash_code_search(&event.command) {
+            let response = block_response(BASH_SEARCH_ENFORCE_MESSAGE);
+            println!("{response}");
+            return Ok(());
+        }
+
         if policy.handoff_lint_enabled {
             let result = handoff_pre_commit_warnings(&event.command, envelope.cwd());
             for warning in &result.warnings {
@@ -162,6 +183,20 @@ pub fn handle(input: &str) -> Result<()> {
 
         println!("{response}");
         return Ok(());
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Rhizome enforcement: block Grep tool symbol searches when rhizome is available
+    // ─────────────────────────────────────────────────────────────────────────
+    let policy = capture_policy();
+    if policy.rhizome_enforce && command_exists("rhizome") && envelope.tool_name_is("Grep") {
+        if let Some(pattern) = envelope.tool_input_string("pattern") {
+            if symbol_like_grep_kind(pattern).is_some() {
+                let response = block_response(GREP_TOOL_ENFORCE_MESSAGE);
+                println!("{response}");
+                return Ok(());
+            }
+        }
     }
 
     if let Some(suggestion) = tool_suggestion_message(&envelope) {
@@ -324,6 +359,36 @@ fn resolve_read_path(file_path: &str, cwd: Option<&str>) -> String {
         || file_path.to_string(),
         |cwd| Path::new(cwd).join(path).to_string_lossy().into_owned(),
     )
+}
+
+/// Returns true when a bash command looks like a code-file search via grep or rg.
+///
+/// Triggers on: `grep`, `rg`, or `ripgrep` appearing as a word in the command, combined with
+/// either a recursive flag (`-r`, `-R`, `--recursive`) or a code file extension in the arguments.
+fn is_bash_code_search(command: &str) -> bool {
+    let has_search_tool = command
+        .split_ascii_whitespace()
+        .any(|word| {
+            let name = word.rsplit('/').next().unwrap_or(word);
+            matches!(name, "grep" | "rg" | "ripgrep")
+        });
+
+    if !has_search_tool {
+        return false;
+    }
+
+    let has_recursive = command
+        .split_ascii_whitespace()
+        .any(|w| matches!(w, "-r" | "-R" | "--recursive" | "-rn" | "-ri" | "-rni" | "-rin"));
+
+    let has_code_ext = CODE_EXTENSIONS.iter().any(|ext| {
+        let dot_ext = format!(".{ext}");
+        command.contains(&format!("*.{ext}"))
+            || command.contains(&format!("{dot_ext} "))
+            || command.ends_with(&dot_ext)
+    });
+
+    has_recursive || has_code_ext
 }
 
 fn symbol_like_grep_kind(pattern: &str) -> Option<&'static str> {

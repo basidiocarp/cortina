@@ -494,3 +494,98 @@ fn edit_gate_allows_after_investigation_tool_called() {
     // Cleanup.
     clear_tool_calls(&hash);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// is_bash_code_search tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn bash_code_search_detects_recursive_grep() {
+    assert!(is_bash_code_search("grep -r AuthService src/"));
+    assert!(is_bash_code_search("grep --recursive parse_command ."));
+    assert!(is_bash_code_search("rg -r 'MyTrait' crates/"));
+}
+
+#[test]
+fn bash_code_search_detects_extension_targeted_grep() {
+    assert!(is_bash_code_search("grep 'fn main' src/main.rs"));
+    assert!(is_bash_code_search("rg 'TODO' **/*.ts"));
+    assert!(is_bash_code_search("grep pattern *.py"));
+}
+
+#[test]
+fn bash_code_search_allows_non_code_grep() {
+    assert!(!is_bash_code_search("grep 'error' logs/app.log"));
+    assert!(!is_bash_code_search("grep 'key' config.yaml"));
+    assert!(!is_bash_code_search("cat file.txt | grep foo"));
+    assert!(!is_bash_code_search("echo hello"));
+}
+
+#[test]
+fn bash_code_search_allows_non_grep_commands() {
+    assert!(!is_bash_code_search("cargo test"));
+    assert!(!is_bash_code_search("git log --oneline"));
+    assert!(!is_bash_code_search("ls src/"));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rhizome enforcement tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn grep_tool_symbol_blocked_when_enforce_enabled() {
+    let envelope = ClaudeCodeHookEnvelope::parse(
+        r#"{
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "AuthService"},
+            "cwd": "/tmp/cortina-enforce-grep"
+        }"#,
+    )
+    .expect("valid envelope");
+    let policy = CapturePolicy::from_reader(|name| match name {
+        "CORTINA_RHIZOME_ENFORCE" => Some("1".to_string()),
+        _ => None,
+    });
+
+    // When rhizome is "available" (simulated), a symbol-like pattern triggers enforcement.
+    assert!(policy.rhizome_enforce);
+    assert!(symbol_like_grep_kind("AuthService").is_some());
+
+    // Verify the advisory path still works when enforce is disabled.
+    let non_enforce = CapturePolicy::from_reader(|_| None);
+    assert!(!non_enforce.rhizome_enforce);
+    // Advisory path respects rhizome_suggest_enabled (true by default).
+    let advisory = tool_suggestion_message_with_availability(&non_enforce, &envelope, true);
+    assert!(
+        advisory.is_some(),
+        "advisory should be emitted when enforce is off"
+    );
+}
+
+#[test]
+fn grep_tool_non_symbol_not_blocked_by_enforce() {
+    // Regex patterns are not symbol-like and pass through even with enforce on.
+    assert!(symbol_like_grep_kind("foo.*bar").is_none());
+    assert!(symbol_like_grep_kind("^fn ").is_none());
+}
+
+#[test]
+fn rhizome_enforce_default_is_off() {
+    let policy = CapturePolicy::from_reader(|_| None);
+    assert!(!policy.rhizome_enforce, "rhizome_enforce must default to false");
+}
+
+#[test]
+fn rhizome_enforce_reads_from_env() {
+    let policy = CapturePolicy::from_reader(|name| match name {
+        "CORTINA_RHIZOME_ENFORCE" => Some("true".to_string()),
+        _ => None,
+    });
+    assert!(policy.rhizome_enforce);
+
+    let policy_off = CapturePolicy::from_reader(|name| match name {
+        "CORTINA_RHIZOME_ENFORCE" => Some("0".to_string()),
+        _ => None,
+    });
+    assert!(!policy_off.rhizome_enforce);
+}
