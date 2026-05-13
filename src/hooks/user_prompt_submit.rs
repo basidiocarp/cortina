@@ -349,7 +349,16 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
         return;
     }
 
-    let text = String::from_utf8_lossy(&output.stdout);
+    // Cap at RECALL_INJECT_MAX_BYTES, truncating at a UTF-8 char boundary.
+    let bytes = &output.stdout;
+    let cap = RECALL_INJECT_MAX_BYTES.min(bytes.len());
+    let safe_cap = (0..=cap)
+        .rev()
+        .find(|&i| std::str::from_utf8(&bytes[..i]).is_ok())
+        .unwrap_or(0);
+    let to_write = &bytes[..safe_cap];
+
+    let text = String::from_utf8_lossy(to_write);
 
     // Only forward lines that carry the expected [cortina-recall] prefix.
     // Writing arbitrary stdout to stderr risks injecting adversarial directives
@@ -364,16 +373,8 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
         return;
     }
 
-    // Join filtered lines and cap at RECALL_INJECT_MAX_BYTES, truncating at a UTF-8
-    // char boundary. floor_char_boundary is not stable until 1.91.0; walk back manually.
-    let mut joined = recall_lines.join("\n");
-    if joined.len() > RECALL_INJECT_MAX_BYTES {
-        let mut boundary = RECALL_INJECT_MAX_BYTES;
-        while !joined.is_char_boundary(boundary) {
-            boundary -= 1;
-        }
-        joined.truncate(boundary);
-    }
+    // Join filtered lines and forward to stderr.
+    let joined = recall_lines.join("\n");
     let _ = std::io::stderr().write_all(joined.as_bytes());
     let _ = std::io::stderr().write_all(b"\n");
 

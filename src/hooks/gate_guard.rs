@@ -109,15 +109,29 @@ pub fn is_destructive_bash(command: &str) -> bool {
 /// Returns true if the bash command is read-only git and bypasses the routine gate.
 pub fn is_readonly_git(command: &str) -> bool {
     let lower = command.trim().to_ascii_lowercase();
-    let bypassed = [
+
+    // Check simple readonly patterns
+    let simple_bypassed = [
         "git log",
         "git diff",
         "git status",
         "git show",
-        "git branch",
         "git remote -v",
     ];
-    bypassed.iter().any(|p| lower.starts_with(p))
+    if simple_bypassed.iter().any(|p| lower.starts_with(p)) {
+        return true;
+    }
+
+    // Special handling for `git branch` — must have readonly flags and no destructive flags
+    if lower.starts_with("git branch") {
+        let readonly_flags = [" -l", " -a", " -r", " -v", " --list", " --show-current"];
+        let has_readonly = readonly_flags.iter().any(|f| lower.contains(f));
+        let no_delete = !lower.contains("-d") && !lower.contains("-D");
+        let no_move = !lower.contains("-m") && !lower.contains("-M");
+        return has_readonly && no_delete && no_move;
+    }
+
+    false
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -276,8 +290,20 @@ mod tests {
         assert!(is_readonly_git("git diff"));
         assert!(is_readonly_git("git status"));
         assert!(is_readonly_git("git show"));
-        assert!(is_readonly_git("git branch"));
         assert!(is_readonly_git("git remote -v"));
+
+        // git branch with readonly flags should pass
+        assert!(is_readonly_git("git branch -l"));
+        assert!(is_readonly_git("git branch -a"));
+        assert!(is_readonly_git("git branch -v"));
+        assert!(is_readonly_git("git branch --list"));
+        assert!(is_readonly_git("git branch --show-current"));
+
+        // git branch with destructive flags should fail
+        assert!(!is_readonly_git("git branch -D main"));
+        assert!(!is_readonly_git("git branch -d main"));
+        assert!(!is_readonly_git("git branch -m old new"));
+        assert!(!is_readonly_git("git branch -M old new"));
 
         assert!(!is_readonly_git("git commit -m 'test'"));
         assert!(!is_readonly_git("git push"));

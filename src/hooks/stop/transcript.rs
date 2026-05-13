@@ -31,9 +31,16 @@ pub(super) fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
         }
 
         if let Ok(entry) = serde_json::from_str::<Value>(line) {
+            // Human text: entry["message"]["content"][0]["text"]
             if !first_user_message
                 && let Some("human") = entry.get("type").and_then(Value::as_str)
-                && let Some(text) = entry.get("text").and_then(Value::as_str)
+                && let Some(text) = entry
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|el| el.get("text"))
+                    .and_then(Value::as_str)
             {
                 summary.task_desc = text
                     .replace('\n', " ")
@@ -43,29 +50,51 @@ pub(super) fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
                 first_user_message = true;
             }
 
-            if let Some("tool_use") = entry.get("type").and_then(Value::as_str)
-                && let Some(tool_name) = entry.get("tool_name").and_then(Value::as_str)
-            {
-                *tool_usage.entry(tool_name.to_string()).or_insert(0) += 1;
-
-                if (tool_name == "Write" || tool_name == "Edit")
-                    && let Some(path_str) = entry
-                        .get("input")
-                        .and_then(|v| v.get("file_path"))
-                        .and_then(Value::as_str)
+            // Tool use: walk entry["message"]["content"] for type == "tool_use"
+            if let Some("tool_use") = entry.get("type").and_then(Value::as_str) {
+                if let Some(content_arr) = entry
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array())
                 {
-                    file_set.insert(path_str.to_string());
+                    for el in content_arr {
+                        if el.get("type").and_then(Value::as_str) == Some("tool_use") {
+                            if let Some(tool_name) = el.get("name").and_then(Value::as_str) {
+                                *tool_usage.entry(tool_name.to_string()).or_insert(0) += 1;
+
+                                if (tool_name == "Write" || tool_name == "Edit")
+                                    && let Some(path_str) = el
+                                        .get("input")
+                                        .and_then(|v| v.get("file_path"))
+                                        .and_then(Value::as_str)
+                                {
+                                    file_set.insert(path_str.to_string());
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
+            // Assistant text: walk entry["message"]["content"] for type == "text"
             if let Some("assistant") = entry.get("type").and_then(Value::as_str)
-                && let Some(text) = entry.get("text").and_then(Value::as_str)
+                && let Some(content_arr) = entry
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array())
             {
-                summary.outcome = text
-                    .replace('\n', " ")
-                    .chars()
-                    .take(150)
-                    .collect::<String>();
+                for el in content_arr {
+                    if el.get("type").and_then(Value::as_str) == Some("text") {
+                        if let Some(text) = el.get("text").and_then(Value::as_str) {
+                            summary.outcome = text
+                                .replace('\n', " ")
+                                .chars()
+                                .take(150)
+                                .collect::<String>();
+                            break;
+                        }
+                    }
+                }
             }
 
             if let Some("tool_result") = entry.get("type").and_then(Value::as_str)

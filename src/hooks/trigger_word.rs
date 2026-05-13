@@ -73,15 +73,30 @@ impl TriggerWordProcessor {
 
     /// Store a single payload via hyphae.
     fn store_single(payload: &TriggerWordPayload) -> std::io::Result<()> {
-        use std::process::Command;
-
         // Topic is always context/inline for trigger words
         const TOPIC: &str = "context/inline";
 
-        // Call: hyphae store <topic> <content>
-        let output = Command::new("hyphae")
-            .args(["store", TOPIC, &payload.content])
-            .output()?;
+        // Use resolved_command to discover hyphae via spore
+        let Some(mut cmd) = crate::utils::resolved_command("hyphae") else {
+            tracing::warn!("cortina: hyphae not discoverable; trigger word memory not stored");
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "hyphae binary not found",
+            ));
+        };
+
+        // Call: hyphae store --topic TOPIC --content <content> --importance medium
+        cmd.args([
+            "store",
+            "--topic",
+            TOPIC,
+            "--content",
+            &payload.content,
+            "--importance",
+            "medium",
+        ]);
+
+        let output = cmd.output()?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

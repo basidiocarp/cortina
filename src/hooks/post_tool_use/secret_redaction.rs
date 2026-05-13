@@ -42,17 +42,19 @@ fn redact_key_assignments(text: &str) -> String {
 }
 
 /// Redacts a single key assignment.
+/// Uses `to_ascii_lowercase` to preserve byte positions for ASCII key names.
+/// This is safe because key names (`API_KEY`, `PASSWORD`, etc.) are pure ASCII.
 fn redact_single_key_assignment(text: &str, key_name: &str) -> String {
     let mut result = String::new();
-    let key_lower = key_name.to_lowercase();
+    let key_lower = key_name.to_ascii_lowercase();
 
     for line in text.lines() {
-        let line_lower = line.to_lowercase();
+        let line_lower = line.to_ascii_lowercase();
 
         // Check if this line contains the key
         if let Some(key_pos) = line_lower.find(&key_lower) {
             let after_key = &line[key_pos + key_name.len()..];
-            let after_key_lower = after_key.to_lowercase();
+            let after_key_lower = after_key.to_ascii_lowercase();
 
             // Look for = or : after the key
             if let Some(eq_pos) = after_key_lower.find('=') {

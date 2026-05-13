@@ -13,11 +13,11 @@ use super::{check_handoff_completion, check_handoff_staleness};
 
 #[test]
 fn parse_jsonl_transcript_valid() {
-    let jsonl = r#"{"type": "human", "text": "Build and test the project"}
-{"type": "tool_use", "tool_name": "Bash", "input": {"command": "cargo build"}}
-{"type": "tool_use", "tool_name": "Write", "input": {"file_path": "/path/to/file.rs"}}
+    let jsonl = r#"{"type": "human", "message": {"content": [{"type": "text", "text": "Build and test the project"}]}}
+{"type": "tool_use", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {"command": "cargo build"}}]}}
+{"type": "tool_use", "message": {"content": [{"type": "tool_use", "name": "Write", "input": {"file_path": "/path/to/file.rs"}}]}}
 {"type": "tool_result", "content": "Build succeeded"}
-{"type": "assistant", "text": "Build completed successfully"}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "Build completed successfully"}]}}
 "#;
 
     let summary = parse_jsonl_transcript(jsonl);
@@ -29,11 +29,11 @@ fn parse_jsonl_transcript_valid() {
 
 #[test]
 fn parse_jsonl_transcript_counts_tools() {
-    let jsonl = r#"{"type": "human", "text": "Task description"}
-{"type": "tool_use", "tool_name": "Bash", "input": {}}
-{"type": "tool_use", "tool_name": "Bash", "input": {}}
-{"type": "tool_use", "tool_name": "Edit", "input": {"file_path": "/test.rs"}}
-{"type": "assistant", "text": "Done"}
+    let jsonl = r#"{"type": "human", "message": {"content": [{"type": "text", "text": "Task description"}]}}
+{"type": "tool_use", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {}}]}}
+{"type": "tool_use", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {}}]}}
+{"type": "tool_use", "message": {"content": [{"type": "tool_use", "name": "Edit", "input": {"file_path": "/test.rs"}}]}}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "Done"}]}}
 "#;
 
     let summary = parse_jsonl_transcript(jsonl);
@@ -44,11 +44,11 @@ fn parse_jsonl_transcript_counts_tools() {
 
 #[test]
 fn parse_jsonl_transcript_counts_errors() {
-    let jsonl = r#"{"type": "human", "text": "Task"}
-{"type": "tool_use", "tool_name": "Bash", "input": {}}
+    let jsonl = r#"{"type": "human", "message": {"content": [{"type": "text", "text": "Task"}]}}
+{"type": "tool_use", "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {}}]}}
 {"type": "tool_result", "content": "error: failed"}
 {"type": "tool_result", "content": "FAILED: compilation"}
-{"type": "assistant", "text": "Done"}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "Done"}]}}
 "#;
 
     let summary = parse_jsonl_transcript(jsonl);
@@ -58,9 +58,9 @@ fn parse_jsonl_transcript_counts_errors() {
 
 #[test]
 fn parse_jsonl_transcript_ignores_error_handling_prose() {
-    let jsonl = r#"{"type": "human", "text": "Task"}
+    let jsonl = r#"{"type": "human", "message": {"content": [{"type": "text", "text": "Task"}]}}
 {"type": "tool_result", "content": "Improved error handling and validation flow"}
-{"type": "assistant", "text": "Done"}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "Done"}]}}
 "#;
 
     let summary = parse_jsonl_transcript(jsonl);
@@ -80,10 +80,10 @@ fn parse_jsonl_transcript_empty_input() {
 
 #[test]
 fn parse_jsonl_transcript_extracts_files() {
-    let jsonl = r#"{"type": "human", "text": "Modify files"}
-{"type": "tool_use", "tool_name": "Write", "input": {"file_path": "/a.rs"}}
-{"type": "tool_use", "tool_name": "Edit", "input": {"file_path": "/b.rs"}}
-{"type": "assistant", "text": "Done"}
+    let jsonl = r#"{"type": "human", "message": {"content": [{"type": "text", "text": "Modify files"}]}}
+{"type": "tool_use", "message": {"content": [{"type": "tool_use", "name": "Write", "input": {"file_path": "/a.rs"}}]}}
+{"type": "tool_use", "message": {"content": [{"type": "tool_use", "name": "Edit", "input": {"file_path": "/b.rs"}}]}}
+{"type": "assistant", "message": {"content": [{"type": "text", "text": "Done"}]}}
 "#;
 
     let summary = parse_jsonl_transcript(jsonl);

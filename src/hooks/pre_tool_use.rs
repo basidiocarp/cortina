@@ -371,6 +371,22 @@ fn resolve_read_path(file_path: &str, cwd: Option<&str>) -> String {
 /// Source directories that, when targeted with a recursive grep, indicate a code search.
 const CODE_SOURCE_DIRS: &[&str] = &["src/", "lib/", "crates/", "app/", "pkg/", "packages/"];
 
+/// Helper: check if command has recursive flag AND targets a known source directory
+fn has_recursive_src_search(cmd: &str) -> bool {
+    let has_recursive = cmd.contains(" -r ")
+        || cmd.contains(" -R ")
+        || cmd.contains(" --recursive ")
+        || cmd
+            .split_whitespace()
+            .any(|t| t == "-r" || t == "-R" || t == "--recursive");
+
+    if !has_recursive {
+        return false;
+    }
+
+    CODE_SOURCE_DIRS.iter().any(|d| cmd.contains(d))
+}
+
 /// Returns true when a bash command looks like a code-file search via grep or rg.
 ///
 /// Triggers on: `grep`, `rg`, or `ripgrep` appearing as a word in the command, combined with
@@ -397,13 +413,9 @@ fn is_bash_code_search(command: &str) -> bool {
         return true;
     }
 
-    // Recursive flag targeting a known source directory is also a code search.
-    let has_recursive_flag = command
-        .split_ascii_whitespace()
-        .any(|word| matches!(word, "-r" | "-R" | "--recursive"));
-
-    if has_recursive_flag {
-        return CODE_SOURCE_DIRS.iter().any(|dir| command.contains(dir));
+    // Recursive search in a known source directory is a code search.
+    if has_recursive_src_search(command) {
+        return true;
     }
 
     false

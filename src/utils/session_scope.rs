@@ -313,34 +313,47 @@ pub fn end_scoped_hyphae_session(
 /// after the child process exits successfully; marks it orphaned otherwise.
 ///
 /// This ensures the session store is updated only after hyphae confirms the write, not before.
-fn spawn_async_session_end_confirmed(mut cmd: Command, session_id: String) {
+/// Returns a `JoinHandle` so callers can join before exit.
+fn spawn_async_session_end_confirmed(
+    mut cmd: Command,
+    session_id: String,
+) -> std::thread::JoinHandle<()> {
     cmd.stdout(std::process::Stdio::null())
         .stderr(diagnostic_stderr());
+
     match cmd.spawn() {
-        Ok(child) => {
-            std::thread::spawn(move || match child.wait_with_output() {
-                Ok(out) if out.status.success() => {
-                    if let Ok(store) = SessionStore::open() {
-                        tracing::info!(
-                            session_id = %session_id,
-                            "cortina: session ended cleanly (async confirmed)"
-                        );
-                        let _ = store.end_clean(&session_id);
-                    }
+        Ok(child) => std::thread::spawn(move || match child.wait_with_output() {
+            Ok(out) if out.status.success() => {
+                if let Ok(store) = SessionStore::open() {
+                    tracing::info!(
+                        session_id = %session_id,
+                        "cortina: session ended cleanly (async confirmed)"
+                    );
+                    let _ = store.end_clean(&session_id);
                 }
-                _ => {
-                    if let Ok(store) = SessionStore::open() {
-                        tracing::info!(
-                            session_id = %session_id,
-                            "cortina: session ended orphaned (async hyphae non-zero)"
-                        );
-                        let _ = store.end_orphaned(&session_id);
-                    }
+            }
+            _ => {
+                if let Ok(store) = SessionStore::open() {
+                    tracing::info!(
+                        session_id = %session_id,
+                        "cortina: session ended orphaned (async hyphae non-zero)"
+                    );
+                    let _ = store.end_orphaned(&session_id);
                 }
-            });
-            debug!("cortina: hyphae session-end fired async (CORTINA_ASYNC_SESSION_END=true)");
+            }
+        }),
+        Err(e) => {
+            warn!("cortina: failed to spawn hyphae session-end: {e}");
+            std::thread::spawn(move || {
+                tracing::warn!(
+                    session_id = %session_id,
+                    "cortina: session ended orphaned (spawn failed)"
+                );
+                if let Ok(store) = SessionStore::open() {
+                    let _ = store.end_orphaned(&session_id);
+                }
+            })
         }
-        Err(e) => warn!("cortina: failed to spawn hyphae session-end: {e}"),
     }
 }
 
@@ -407,7 +420,8 @@ where
 
         // Phase 2: hyphae session end subprocess — async or sync depending on env var
         if async_session_end_enabled() {
-            spawn_async_session_end_confirmed(cmd, state.session_id.clone());
+            let _handle = spawn_async_session_end_confirmed(cmd, state.session_id.clone());
+            // Caller can join the handle if needed before process exit
             return with_file_lock(&path, || Ok(Some(state)));
         }
 
