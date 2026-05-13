@@ -500,10 +500,10 @@ fn edit_gate_allows_after_investigation_tool_called() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn bash_code_search_detects_recursive_grep() {
-    assert!(is_bash_code_search("grep -r AuthService src/"));
-    assert!(is_bash_code_search("grep --recursive parse_command ."));
-    assert!(is_bash_code_search("rg -r 'MyTrait' crates/"));
+fn bash_code_search_allows_recursive_on_non_code_dirs() {
+    assert!(!is_bash_code_search("grep -r 'error' logs/"));
+    assert!(!is_bash_code_search("grep -r 'AuthService' src/"));
+    assert!(!is_bash_code_search("rg -r 'MyTrait' crates/"));
 }
 
 #[test]
@@ -517,6 +517,7 @@ fn bash_code_search_detects_extension_targeted_grep() {
 fn bash_code_search_allows_non_code_grep() {
     assert!(!is_bash_code_search("grep 'error' logs/app.log"));
     assert!(!is_bash_code_search("grep 'key' config.yaml"));
+    assert!(!is_bash_code_search("grep -r 'pattern' config/"));
     assert!(!is_bash_code_search("cat file.txt | grep foo"));
     assert!(!is_bash_code_search("echo hello"));
 }

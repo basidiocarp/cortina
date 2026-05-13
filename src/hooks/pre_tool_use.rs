@@ -377,10 +377,6 @@ fn is_bash_code_search(command: &str) -> bool {
         return false;
     }
 
-    let has_recursive = command
-        .split_ascii_whitespace()
-        .any(|w| matches!(w, "-r" | "-R" | "--recursive" | "-rn" | "-ri" | "-rni" | "-rin"));
-
     let has_code_ext = CODE_EXTENSIONS.iter().any(|ext| {
         let dot_ext = format!(".{ext}");
         command.contains(&format!("*.{ext}"))
@@ -388,7 +384,7 @@ fn is_bash_code_search(command: &str) -> bool {
             || command.ends_with(&dot_ext)
     });
 
-    has_recursive || has_code_ext
+    has_code_ext
 }
 
 fn symbol_like_grep_kind(pattern: &str) -> Option<&'static str> {

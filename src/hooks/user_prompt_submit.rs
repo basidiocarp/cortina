@@ -320,11 +320,11 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
         return;
     }
 
-    // Write the recall block to stderr so the agent can see it.
-    let _ = std::io::stderr().write_all(&output.stdout);
-
-    // Count lines that start with "[cortina-recall]" as a proxy for injected count.
     let text = String::from_utf8_lossy(&output.stdout);
+
+    // Validate the output follows the expected cortina-recall format before
+    // injecting into the agent context. Content that doesn't contain the
+    // expected prefix header is not written to stderr.
     let n = text
         .lines()
         .filter(|l| l.starts_with("[cortina-recall]"))
@@ -333,6 +333,15 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
     if n == 0 {
         return;
     }
+
+    // Cap recall output to prevent context flooding from unexpectedly large responses.
+    const RECALL_INJECT_MAX_BYTES: usize = 8 * 1024;
+    let to_write = if output.stdout.len() > RECALL_INJECT_MAX_BYTES {
+        &output.stdout[..RECALL_INJECT_MAX_BYTES]
+    } else {
+        &output.stdout
+    };
+    let _ = std::io::stderr().write_all(to_write);
 
     // Store the recall event in hyphae using the fire-and-forget pattern.
     let recall_payload = json!({
