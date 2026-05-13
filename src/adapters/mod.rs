@@ -7,6 +7,7 @@ use crate::pipeline::{LoggingHandler, Pipeline, PipelineContext, PipelineStage};
 use crate::policy::{CapturePolicy, capture_policy};
 
 pub mod claude_code;
+pub mod codex;
 pub mod volva;
 
 #[derive(Debug, Subcommand)]
@@ -23,6 +24,13 @@ pub enum AdapterCommand {
     Volva {
         #[command(subcommand)]
         event: VolvaEventCommand,
+    },
+
+    /// Handle Codex agent turn-complete notifications
+    #[command(name = "codex")]
+    Codex {
+        #[command(subcommand)]
+        event: CodexEventCommand,
     },
 }
 
@@ -60,10 +68,18 @@ pub enum VolvaEventCommand {
     HookEvent,
 }
 
+#[derive(Clone, Copy, Debug, Subcommand)]
+pub enum CodexEventCommand {
+    /// Handle `agent-turn-complete` notification from Codex
+    #[command(name = "turn-complete")]
+    TurnComplete,
+}
+
 pub fn handle_adapter_command(adapter: &AdapterCommand, input: &str) -> Result<()> {
     let event_id = match adapter {
         AdapterCommand::ClaudeCode { event } => format!("claude-code.{event:?}"),
         AdapterCommand::Volva { event } => format!("volva.{event:?}"),
+        AdapterCommand::Codex { event } => format!("codex.{event:?}"),
     };
     let span = tracing::info_span!("cortina.event_dispatch",
         adapter = ?adapter,
@@ -74,6 +90,7 @@ pub fn handle_adapter_command(adapter: &AdapterCommand, input: &str) -> Result<(
     match adapter {
         AdapterCommand::ClaudeCode { event } => handle_claude_code_event(*event, input),
         AdapterCommand::Volva { event } => handle_volva_event(*event, input),
+        AdapterCommand::Codex { event } => handle_codex_event(*event, input),
     }
 }
 
@@ -212,6 +229,12 @@ fn handle_claude_code_event(event: ClaudeCodeEventCommand, input: &str) -> Resul
 fn handle_volva_event(event: VolvaEventCommand, input: &str) -> Result<()> {
     match event {
         VolvaEventCommand::HookEvent => volva::handle_hook_event(input),
+    }
+}
+
+fn handle_codex_event(event: CodexEventCommand, input: &str) -> Result<()> {
+    match event {
+        CodexEventCommand::TurnComplete => codex::handle_turn_complete(input),
     }
 }
 

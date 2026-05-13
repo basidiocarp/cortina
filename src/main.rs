@@ -232,5 +232,6 @@ fn adapter_operation_name(adapter: &adapters::AdapterCommand) -> &'static str {
             ClaudeCodeEventCommand::SessionEnd => "adapter_claude_code_session_end",
         },
         adapters::AdapterCommand::Volva { .. } => "adapter_volva_hook_event",
+        adapters::AdapterCommand::Codex { .. } => "adapter_codex_turn_complete",
     }
 }
