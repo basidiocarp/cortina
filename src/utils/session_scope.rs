@@ -420,6 +420,12 @@ where
 
         // Phase 2: hyphae session end subprocess — async or sync depending on env var
         if async_session_end_enabled() {
+            // Option A: Mark orphaned now so the record is in a defined state if the thread is killed.
+            // The spawned thread upgrades this to clean on successful hyphae confirmation.
+            // This ensures session integrity even if the process crashes during hyphae write.
+            if let Ok(store) = SessionStore::open() {
+                let _ = store.end_orphaned(&state.session_id);
+            }
             let _handle = spawn_async_session_end_confirmed(cmd, state.session_id.clone());
             // Caller can join the handle if needed before process exit
             return with_file_lock(&path, || Ok(Some(state)));
