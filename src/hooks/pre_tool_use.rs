@@ -391,7 +391,8 @@ fn has_recursive_src_search(cmd: &str) -> bool {
 ///
 /// Triggers on: `grep`, `rg`, or `ripgrep` appearing as a word in the command, combined with
 /// either a code file extension in the arguments, OR a recursive flag (`-r`, `-R`, `--recursive`)
-/// that targets a known source directory (`src/`, `lib/`, `crates/`, `app/`, `pkg/`, `packages/`).
+/// that targets a known source directory (`src/`, `lib/`, `crates/`, `app/`, `pkg/`, `packages/`),
+/// OR an rg/ripgrep language type flag (`-t <lang>` or `--type <lang>`).
 fn is_bash_code_search(command: &str) -> bool {
     let has_search_tool = command.split_ascii_whitespace().any(|word| {
         let name = word.rsplit('/').next().unwrap_or(word);
@@ -418,7 +419,72 @@ fn is_bash_code_search(command: &str) -> bool {
         return true;
     }
 
+    // rg/ripgrep language type flag is a code search.
+    if has_rg_type_flag(command) {
+        return true;
+    }
+
     false
+}
+
+/// Helper: check if command has rg/ripgrep language type flag (`-t <lang>` or `--type <lang>`).
+///
+/// Detects patterns like `rg -t rust`, `rg --type go`, `ripgrep --type=python`.
+/// This is the idiomatic way to search a specific language with ripgrep.
+///
+/// Note: `ag`, `ack`, `tre`, and `fd` language flags are not detected (accepted limitation).
+fn has_rg_type_flag(cmd: &str) -> bool {
+    // Check if rg or ripgrep is present
+    let has_rg = cmd.split_ascii_whitespace().any(|word| {
+        let name = word.rsplit('/').next().unwrap_or(word);
+        matches!(name, "rg" | "ripgrep")
+    });
+
+    if !has_rg {
+        return false;
+    }
+
+    // Check for -t <lang> pattern (with space)
+    if cmd.contains(" -t ") {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        for i in 0..parts.len() - 1 {
+            if parts[i] == "-t" && is_language_identifier(parts[i + 1]) {
+                return true;
+            }
+        }
+    }
+
+    // Check for --type <lang> pattern (with space)
+    if cmd.contains("--type ") {
+        let parts: Vec<&str> = cmd.split_whitespace().collect();
+        for i in 0..parts.len() - 1 {
+            if parts[i] == "--type" && is_language_identifier(parts[i + 1]) {
+                return true;
+            }
+        }
+    }
+
+    // Check for --type=<lang> pattern (with equals)
+    if cmd.contains("--type=") {
+        return cmd.split_whitespace().any(|token| {
+            if let Some(lang) = token.strip_prefix("--type=") {
+                is_language_identifier(lang)
+            } else {
+                false
+            }
+        });
+    }
+
+    false
+}
+
+/// Helper: check if a string looks like a language identifier.
+/// Simple heuristic: non-empty, alphanumeric (plus underscore), and not a path or flag.
+fn is_language_identifier(s: &str) -> bool {
+    if s.is_empty() || s.starts_with('-') || s.contains('/') || s.contains('.') {
+        return false;
+    }
+    s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn symbol_like_grep_kind(pattern: &str) -> Option<&'static str> {

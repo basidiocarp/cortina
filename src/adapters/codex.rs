@@ -59,6 +59,8 @@ pub fn handle_turn_complete(input: &str) -> Result<()> {
         payload.session_id.as_deref().unwrap_or("unknown")
     );
 
+    // Note: store_in_hyphae is fire-and-forget with internal error logging.
+    // Failures are logged as warn! inside hyphae_client::store_in_hyphae().
     store_in_hyphae(
         &topic,
         &signal.to_string(),

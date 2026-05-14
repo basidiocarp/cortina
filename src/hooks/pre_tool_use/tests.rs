@@ -535,13 +535,64 @@ fn bash_code_search_allows_non_grep_commands() {
     assert!(!is_bash_code_search("ls src/"));
 }
 
+#[test]
+fn bash_code_search_detects_rg_type_flag() {
+    // rg -t <lang> patterns are code searches
+    assert!(is_bash_code_search("rg -t rust MyStruct"));
+    assert!(is_bash_code_search("rg -t py import foo"));
+    assert!(is_bash_code_search("rg -t go pattern ."));
+    assert!(is_bash_code_search("rg -t js useState"));
+
+    // rg --type <lang> patterns are code searches
+    assert!(is_bash_code_search("rg --type rust MyStruct"));
+    assert!(is_bash_code_search("rg --type py import foo"));
+    assert!(is_bash_code_search("rg --type=rust pattern"));
+    assert!(is_bash_code_search("rg --type=go func src/"));
+
+    // ripgrep variations
+    assert!(is_bash_code_search("ripgrep -t rust MyStruct"));
+    assert!(is_bash_code_search("ripgrep --type py foo"));
+
+    // Multiple flags in the command
+    assert!(is_bash_code_search("rg -i -t rust MyStruct"));
+    assert!(is_bash_code_search("rg -t rust MyStruct src/"));
+
+    // Without a valid language identifier should not trigger
+    assert!(!is_bash_code_search("rg -t"));
+    assert!(!is_bash_code_search("rg --type"));
+    assert!(!is_bash_code_search("rg -t /some/path"));
+    assert!(!is_bash_code_search("rg --type=file.txt"));
+
+    // Non-rg commands with -t should not trigger
+    assert!(!is_bash_code_search("grep -t rust pattern"));
+}
+
+#[test]
+fn rg_type_flag_helper_validates_language_identifiers() {
+    assert!(has_rg_type_flag("rg -t rust MyStruct"));
+    assert!(has_rg_type_flag("rg --type py foo"));
+    assert!(has_rg_type_flag("rg --type=go func"));
+    assert!(has_rg_type_flag("ripgrep -t rust"));
+
+    // Reject invalid language identifiers
+    assert!(!has_rg_type_flag("rg -t"));
+    assert!(!has_rg_type_flag("rg --type"));
+    assert!(!has_rg_type_flag("rg -t /path/to/file"));
+    assert!(!has_rg_type_flag("rg --type=-flag"));
+    assert!(!has_rg_type_flag("rg --type=file.rs"));
+
+    // Non-rg commands should not match
+    assert!(!has_rg_type_flag("grep -t rust"));
+    assert!(!has_rg_type_flag("cat file.rs"));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Rhizome enforcement tests
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn grep_tool_symbol_blocked_when_enforce_enabled() {
-    let envelope = ClaudeCodeHookEnvelope::parse(
+    let _envelope = ClaudeCodeHookEnvelope::parse(
         r#"{
             "tool_name": "Grep",
             "tool_input": {"pattern": "AuthService"},
@@ -592,11 +643,12 @@ fn grep_tool_non_symbol_not_blocked_by_enforce() {
 }
 
 #[test]
-fn rhizome_enforce_default_is_on() {
+fn rhizome_enforce_default_is_off() {
+    // Advisory-only is the safe default; operators opt in to blocking via CORTINA_RHIZOME_ENFORCE=1.
     let policy = CapturePolicy::from_reader(|_| None);
     assert!(
-        policy.rhizome_enforce,
-        "rhizome_enforce must default to true"
+        !policy.rhizome_enforce,
+        "rhizome_enforce must default to false (advisory-only)"
     );
 }
 
