@@ -75,6 +75,7 @@ impl TriggerWordProcessor {
     fn store_single(payload: &TriggerWordPayload) -> std::io::Result<()> {
         // Topic is always context/inline for trigger words
         const TOPIC: &str = "context/inline";
+        const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
         // Use resolved_command to discover hyphae via spore
         let Some(mut cmd) = crate::utils::resolved_command("hyphae") else {
@@ -96,7 +97,21 @@ impl TriggerWordProcessor {
             "medium",
         ]);
 
-        let output = cmd.output()?;
+        // Use timeout pattern: spawn thread, wait with deadline
+        let (tx, rx) = std::sync::mpsc::channel::<std::io::Result<std::process::Output>>();
+        std::thread::spawn(move || {
+            let _ = tx.send(cmd.output());
+        });
+
+        let output = if let Ok(result) = rx.recv_timeout(TIMEOUT) {
+            result?
+        } else {
+            tracing::warn!("cortina: hyphae trigger-word store timed out after 5s");
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "hyphae store timed out",
+            ));
+        };
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

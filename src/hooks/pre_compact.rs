@@ -19,6 +19,9 @@ const MAX_RECORDED_SNAPSHOTS: usize = 16;
 const SNAPSHOT_SESSION_TASK: &str = "pre compact snapshot";
 const SUMMARY_REQUEST: &str = "Please summarize the current work before compaction.";
 
+/// Snapshot of an active error during pre-compaction.
+/// Reads from the same file written by [`ErrorEntry`] in `hooks/post_tool_use/bash.rs`.
+/// Field names must stay in sync; only a subset is needed here.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 struct ActiveErrorEntry {
     command: String,

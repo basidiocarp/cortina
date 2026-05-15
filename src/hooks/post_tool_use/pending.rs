@@ -15,6 +15,7 @@ use super::annotate_outcome_with_session;
 
 const HYPHAE_INGEST_LABEL: &str = "hyphae ingest";
 const HYPHAE_INGEST_SUBCOMMAND: &str = "ingest";
+const MAX_PENDING_ENTRIES: usize = 200;
 
 fn pending_files_path(hash: &str) -> PathBuf {
     temp_state_path("pending-exports", hash, "json")
@@ -42,6 +43,11 @@ pub(super) fn track_pending_file(file_path: &str, hash: &str) {
         if !files.iter().any(|existing| existing == file_path) {
             files.push(file_path.to_string());
         }
+        if files.len() > MAX_PENDING_ENTRIES {
+            let overflow = files.len().saturating_sub(MAX_PENDING_ENTRIES);
+            tracing::debug!(overflow, "pending list truncated to cap");
+            files.drain(0..overflow);
+        }
     });
 }
 
@@ -50,6 +56,11 @@ pub(super) fn track_pending_document(file_path: &str, hash: &str) {
     let _ = update_json_file::<Vec<String>, _, _>(&path, |files| {
         if !files.iter().any(|existing| existing == file_path) {
             files.push(file_path.to_string());
+        }
+        if files.len() > MAX_PENDING_ENTRIES {
+            let overflow = files.len().saturating_sub(MAX_PENDING_ENTRIES);
+            tracing::debug!(overflow, "pending list truncated to cap");
+            files.drain(0..overflow);
         }
     });
 }
@@ -154,6 +165,11 @@ fn requeue_pending_batch(path: &Path, files: &[String]) {
             if !entries.iter().any(|existing| existing == file) {
                 entries.push(file.clone());
             }
+        }
+        if entries.len() > MAX_PENDING_ENTRIES {
+            let overflow = entries.len().saturating_sub(MAX_PENDING_ENTRIES);
+            tracing::debug!(overflow, "pending list truncated to cap");
+            entries.drain(0..overflow);
         }
     });
 }

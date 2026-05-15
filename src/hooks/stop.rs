@@ -16,7 +16,7 @@ use crate::policy::capture_policy;
 use crate::rules::{DEFAULT_RULES, any_recommended_called, matching_rules};
 use crate::utils::{
     command_exists, end_scoped_hyphae_session, load_session_state,
-    log_hyphae_feedback_signal_for_session, project_name_for_cwd, scope_hash,
+    log_hyphae_feedback_signal_for_session, project_name_for_cwd, resolved_command, scope_hash,
     session_outcome_feedback,
 };
 
@@ -42,6 +42,9 @@ pub fn handle(input: &str) -> Result<()> {
         return Ok(());
     };
 
+    let span = tracing::info_span!("cortina.stop", session_id = ?&event.cwd);
+    let _enter = span.enter();
+
     let hash = scope_hash(Some(&event.cwd));
     let cached_session = load_session_state(&hash);
 
@@ -50,15 +53,19 @@ pub fn handle(input: &str) -> Result<()> {
         return Ok(());
     }
 
+    tracing::debug!("transcript_read");
     let (project_name, summary, structured_outcomes) =
         load_session_summary(&event, &hash, cached_session.as_ref());
 
+    tracing::debug!("fact_capture");
     run_handoff_checks(&event, &summary);
 
     let text = build_summary_text(&project_name, &summary, &structured_outcomes);
 
+    tracing::debug!("invalidation");
     write_session_to_hyphae_and_emit_signals(&event, &hash, &summary, &text);
 
+    tracing::debug!("hyphae_write");
     run_post_processing(&event, &summary);
 
     Ok(())
@@ -517,7 +524,10 @@ fn read_transcript_text(path: Option<&str>) -> String {
 /// This lightweight check looks for changes to Cargo.toml, package.json, pyproject.toml,
 /// or Cargo.lock in the session's file modifications.
 fn trigger_compile_env_invalidation_if_needed(files_modified: &[String], cwd: &str) {
-    // Structural file patterns that should trigger invalidation
+    // Structural file patterns that should trigger compile-environment invalidation.
+    // These are manifests and lock files for build systems. Does not overlap with
+    // CODE_SOURCE_DIRS in pre_tool_use.rs, which identifies directories to search
+    // for code patterns (src/, lib/, etc.). See pre_tool_use.rs:372 for comparison.
     const STRUCTURAL_FILES: &[&str] = &[
         "Cargo.toml",
         "Cargo.lock",
@@ -552,9 +562,12 @@ fn trigger_compile_env_invalidation_if_needed(files_modified: &[String], cwd: &s
             .to_string()
     });
 
-    let _ = std::process::Command::new("rhizome")
-        .args(["compile-env", "--invalidate", "--name", &project_name])
-        .spawn();
+    if let Some(mut cmd) = resolved_command("rhizome") {
+        cmd.args(["compile-env", "--invalidate", "--name", &project_name]);
+        if let Err(e) = cmd.spawn() {
+            tracing::warn!("cortina: rhizome compile-env invalidation spawn failed: {e}");
+        }
+    }
 }
 
 fn extract_final_message(transcript_text: &str) -> String {

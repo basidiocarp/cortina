@@ -127,7 +127,7 @@ fn track_edit(
     let now = current_timestamp_ms();
     let cutoff = now.saturating_sub(capture_policy().edit_cleanup_age_ms);
 
-    let _ = update_json_file::<Vec<EditEntry>, _, _>(track_file, |edits| {
+    if let Err(e) = update_json_file::<Vec<EditEntry>, _, _>(track_file, |edits| {
         edits.retain(|e| e.timestamp > cutoff);
         edits.push(EditEntry {
             file: file_path.to_string(),
@@ -139,7 +139,12 @@ fn track_edit(
             project_root: session.and_then(|value| value.project_root.clone()),
             worktree_id: session.and_then(|value| value.worktree_id.clone()),
         });
-    });
+    }) {
+        tracing::warn!(
+            "cortina: track_edit write failed: file={:?}, error={e}",
+            track_file
+        );
+    }
 }
 
 fn find_correction(file_path: &str, old_str: &str, track_file: &Path) -> Option<EditEntry> {

@@ -30,7 +30,8 @@ pub fn handle_hook_event(input: &str) -> Result<()> {
         return Err(error);
     }
 
-    let _normalized = NormalizedLifecycleEvent::from_volva_hook(&event);
+    let normalized = NormalizedLifecycleEvent::from_volva_hook(&event);
+    tracing::debug!(normalized = ?normalized, "volva hook normalized");
     Ok(())
 }
 

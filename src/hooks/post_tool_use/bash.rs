@@ -323,6 +323,7 @@ fn extract_and_store_facts(command: &str, output: &str, scope_cwd: Option<&str>)
             FactKind::Preference => 0.5,
             _ => 0.3,
         };
+        let kind = fact.kind;
         if fact.confidence >= min_confidence {
             store_in_hyphae(
                 topic,
@@ -331,6 +332,8 @@ fn extract_and_store_facts(command: &str, output: &str, scope_cwd: Option<&str>)
                 project_name_for_cwd(scope_cwd).as_deref(),
                 current_agent_id_for_cwd(scope_cwd).as_deref(),
             );
+        } else {
+            tracing::debug!(kind = ?kind, confidence = %fact.confidence, threshold = %min_confidence, "fact rejected sub-threshold");
         }
     }
 }

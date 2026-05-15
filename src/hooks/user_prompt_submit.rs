@@ -77,7 +77,9 @@ fn capture_prompt_submit(event: &UserPromptSubmitEvent) {
             "matched_lines": error_lines,
         })
         .to_string();
-        let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(PROMPT_SESSION_TASK));
+        if ensure_scoped_hyphae_session(Some(&event.cwd), Some(PROMPT_SESSION_TASK)).is_none() {
+            tracing::warn!("cortina: session scoping failed: could not establish session");
+        }
         let agent_id = current_agent_id_for_cwd(Some(&event.cwd));
         store_in_hyphae(
             "errors/active",
@@ -103,7 +105,9 @@ fn capture_prompt_submit(event: &UserPromptSubmitEvent) {
     }
 
     if command_exists("hyphae") {
-        let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(PROMPT_SESSION_TASK));
+        if ensure_scoped_hyphae_session(Some(&event.cwd), Some(PROMPT_SESSION_TASK)).is_none() {
+            tracing::warn!("cortina: session scoping failed: could not establish session");
+        }
         let project = project_name_for_cwd(Some(&event.cwd));
         let agent_id = current_agent_id_for_cwd(Some(&event.cwd));
         store_in_hyphae(
@@ -116,7 +120,11 @@ fn capture_prompt_submit(event: &UserPromptSubmitEvent) {
 
         if let Some(council_content) = council_lifecycle_content(event) {
             if remember_council_capture(&hash, &council_content) {
-                let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(COUNCIL_SESSION_TASK));
+                if ensure_scoped_hyphae_session(Some(&event.cwd), Some(COUNCIL_SESSION_TASK))
+                    .is_none()
+                {
+                    tracing::warn!("cortina: session scoping failed: could not establish session");
+                }
                 store_in_hyphae(
                     COUNCIL_TOPIC,
                     &council_content,

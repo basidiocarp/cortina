@@ -120,7 +120,11 @@ fn init_pipeline() -> Pipeline {
 
 // run_hook always succeeds; the Result<()> return here keeps the public
 // handle_adapter_command / handle_legacy_claude_command signatures stable.
-#[allow(clippy::unnecessary_wraps)]
+// All hook errors are logged internally and never propagated (fail-open policy).
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "Result return type required for stable public API"
+)]
 fn handle_claude_code_event(event: ClaudeCodeEventCommand, input: &str) -> Result<()> {
     // Check env-var gating first: if this event should be skipped based on
     // CORTINA_HOOK_PROFILE or CORTINA_DISABLED_HOOKS (PascalCase event names), return early with success.

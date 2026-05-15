@@ -134,6 +134,27 @@ pub fn is_readonly_git(command: &str) -> bool {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// Template selection
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Return the appropriate template for a given gate key.
+///
+/// Ensures that all paths use the same template selector, preventing divergence
+/// if template strings are updated in the future.
+fn template_for_key(key: &GateKey) -> String {
+    match key.tool.as_str() {
+        "Edit" | "MultiEdit" => EDIT_GATE_TEMPLATE.to_string(),
+        "Write" => WRITE_GATE_TEMPLATE.to_string(),
+        // "Bash:Routine" and "Bash:Destructive" are the keys used by
+        // check_gate_guard. "Bash" alone is kept for symmetry and tests
+        // that call evaluate_gate directly with a plain "Bash" key.
+        // The caller overrides the Block message with the correct template.
+        "Bash" | "Bash:Routine" | "Bash:Destructive" => ROUTINE_BASH_TEMPLATE.to_string(),
+        _ => String::new(), // Unknown tool, allow by default (no template needed).
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // Gate evaluation
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -166,12 +187,7 @@ pub fn evaluate_gate(
             }
         } else {
             // Record first-call advisory for observability.
-            let template = match key.tool.as_str() {
-                "Edit" | "MultiEdit" => EDIT_GATE_TEMPLATE.to_string(),
-                "Write" => WRITE_GATE_TEMPLATE.to_string(),
-                "Bash" | "Bash:Routine" | "Bash:Destructive" => ROUTINE_BASH_TEMPLATE.to_string(),
-                _ => String::new(),
-            };
+            let template = template_for_key(key);
             if !template.is_empty() {
                 map.insert(
                     key.clone(),
@@ -195,16 +211,10 @@ pub fn evaluate_gate(
     match map.get(key) {
         None => {
             // First call: determine which template to use based on tool type.
-            let template = match key.tool.as_str() {
-                "Edit" | "MultiEdit" => EDIT_GATE_TEMPLATE.to_string(),
-                "Write" => WRITE_GATE_TEMPLATE.to_string(),
-                // "Bash:Routine" and "Bash:Destructive" are the keys used by
-                // check_gate_guard. "Bash" alone is kept for symmetry and tests
-                // that call evaluate_gate directly with a plain "Bash" key.
-                // The caller overrides the Block message with the correct template.
-                "Bash" | "Bash:Routine" | "Bash:Destructive" => ROUTINE_BASH_TEMPLATE.to_string(),
-                _ => return GateDecision::Allow, // Unknown tool, allow by default.
-            };
+            let template = template_for_key(key);
+            if template.is_empty() {
+                return GateDecision::Allow; // Unknown tool, allow by default.
+            }
 
             map.insert(
                 key.clone(),
@@ -244,11 +254,7 @@ pub fn evaluate_gate(
                 GateDecision::Allow
             } else {
                 // Still investigating. Keep blocking until facts arrive.
-                let template = match key.tool.as_str() {
-                    "Edit" | "MultiEdit" => EDIT_GATE_TEMPLATE.to_string(),
-                    "Write" => WRITE_GATE_TEMPLATE.to_string(),
-                    _ => ROUTINE_BASH_TEMPLATE.to_string(),
-                };
+                let template = template_for_key(key);
                 GateDecision::Block { message: template }
             }
         }

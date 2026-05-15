@@ -427,13 +427,18 @@ where
                 let _ = store.end_orphaned(&state.session_id);
             }
             let _handle = spawn_async_session_end_confirmed(cmd, state.session_id.clone());
-            // Caller can join the handle if needed before process exit
+            // NOTE: The JoinHandle is detached (dropped without joining). This is a known limitation:
+            // cortina is a short-lived process, so if it exits before the background thread completes,
+            // the SQLite write may be interrupted. A proper fix would thread the handle to the Stop
+            // hook caller and join before process exit, but this is invasive to the call stack.
+            // For now, rely on the thread's 5-second internal timeout to limit stalls.
+            warn!("cortina: async session end background thread detached — not awaited at process exit");
             return with_file_lock(&path, || Ok(Some(state)));
         }
 
         // Synchronous fallback (CORTINA_ASYNC_SESSION_END=false)
         let Ok(output) = run_command(&mut cmd) else {
-            warn!("Failed to execute hyphae session end");
+            warn!("Failed to execute hyphae session end, state_file = {}", path.display());
             // Mark session orphaned in SQLite; state file was already removed above.
             let db_store = SessionStore::open().ok();
             if let Some(store) = db_store {
@@ -448,8 +453,9 @@ where
 
         if !output.status.success() {
             warn!(
-                "Hyphae session end exited non-zero for session {}",
-                state.session_id
+                "Hyphae session end exited non-zero for session {}, state_file = {}",
+                state.session_id,
+                path.display()
             );
             // Mark session orphaned in SQLite instead of leaving file behind
             let db_store = SessionStore::open().ok();

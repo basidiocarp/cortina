@@ -124,6 +124,7 @@ where
     cmd.current_dir(cwd).args(args);
     let output = run_command(&mut cmd).ok()?;
     if !output.status.success() {
+        tracing::debug!("git_command_output: git unavailable or failed, using path-based fallback");
         return None;
     }
 

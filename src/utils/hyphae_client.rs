@@ -179,7 +179,7 @@ pub fn store_in_hyphae(
     }
 
     // [COMPATIBILITY FALLBACK] hyphae socket endpoint unavailable — CLI only
-    warn!("hyphae socket endpoint unavailable; using CLI fallback for store_in_hyphae");
+    debug!("hyphae socket endpoint unavailable; using CLI fallback for store_in_hyphae");
     store_in_hyphae_cli(topic, content, importance, project, agent_id, &span_ctx);
 }
 

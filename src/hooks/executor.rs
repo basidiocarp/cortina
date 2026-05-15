@@ -1,13 +1,5 @@
 // HookExecutor and related types are infrastructure for a future multi-hook dispatch system.
 // They are tested in this module but not yet wired into main().
-#![allow(
-    dead_code,
-    clippy::doc_markdown,
-    clippy::manual_let_else,
-    clippy::single_match_else,
-    clippy::uninlined_format_args,
-    clippy::unused_self
-)]
 
 use std::fs;
 use std::io::Write;
@@ -18,7 +10,15 @@ use std::time::Duration;
 
 use super::types::{HookInput, HookOutput, HookType};
 
+#[allow(
+    dead_code,
+    reason = "HookExecutor is infrastructure for future multi-hook dispatch"
+)]
 const HOOK_TIMEOUT: Duration = Duration::from_secs(30);
+#[allow(
+    dead_code,
+    reason = "HookExecutor is infrastructure for future multi-hook dispatch"
+)]
 const CONTEXT_MOD_LIMIT: usize = 50 * 1024; // 50KB
 
 /// Executor for hook processes.
@@ -26,6 +26,10 @@ const CONTEXT_MOD_LIMIT: usize = 50 * 1024; // 50KB
 /// Runs hook executables found in configured directories, spawning each as a
 /// subprocess with input serialized to JSON on stdin. Enforces a 30-second
 /// timeout per hook and aggregates outputs across all matching hooks.
+#[allow(
+    dead_code,
+    reason = "HookExecutor is infrastructure for future multi-hook dispatch"
+)]
 pub struct HookExecutor {
     /// Directories to search for hook executables.
     pub hooks_dirs: Vec<PathBuf>,
@@ -34,13 +38,17 @@ pub struct HookExecutor {
 impl HookExecutor {
     /// Create a new hook executor with the given hook directories.
     #[must_use]
+    #[allow(
+        dead_code,
+        reason = "HookExecutor is infrastructure for future multi-hook dispatch"
+    )]
     pub fn new(hooks_dirs: Vec<PathBuf>) -> Self {
         HookExecutor { hooks_dirs }
     }
 
     /// Run all hooks matching the given hook type.
     ///
-    /// Searches `hooks_dirs` for executables named after `hook_type` (snake_case),
+    /// Searches `hooks_dirs` for executables named after `hook_type` (`snake_case`),
     /// runs each with input serialized to JSON on stdin, and aggregates outputs.
     ///
     /// Exit code mapping:
@@ -53,8 +61,12 @@ impl HookExecutor {
     /// If multiple hooks match, outputs are merged: `cancel` and `halt_turn` are OR'd;
     /// `context_modification` from the last hook that sets it wins;
     /// `error` messages are concatenated.
+    #[allow(
+        dead_code,
+        reason = "HookExecutor is infrastructure for future multi-hook dispatch"
+    )]
     pub fn run_hooks(&self, hook_type: HookType, input: &HookInput) -> HookOutput {
-        let hook_name = format!("{:?}", hook_type)
+        let hook_name = format!("{hook_type:?}")
             .chars()
             .fold(String::new(), |mut acc, c| {
                 if c.is_uppercase() && !acc.is_empty() {
@@ -70,7 +82,7 @@ impl HookExecutor {
         let input_json = match serde_json::to_string(input) {
             Ok(j) => j,
             Err(e) => {
-                eprintln!("Warning: failed to serialize hook input: {}", e);
+                eprintln!("Warning: failed to serialize hook input: {e}");
                 return HookOutput::default();
             }
         };
@@ -104,6 +116,12 @@ impl HookExecutor {
         aggregated_output
     }
 
+    #[allow(
+        clippy::unused_self,
+        clippy::uninlined_format_args,
+        dead_code,
+        reason = "HookExecutor is infrastructure for future multi-hook dispatch"
+    )]
     fn execute_hook(&self, hook_path: &PathBuf, input_json: &str) -> HookOutput {
         let mut child = match Command::new(hook_path)
             .stdin(Stdio::piped())
@@ -135,29 +153,20 @@ impl HookExecutor {
             drop(stdin);
         }
 
-        // Wait for process with timeout
-        let join_handle = thread::spawn(move || child.wait_with_output());
+        // Use channel-based timeout pattern instead of busy-poll
+        let (tx, rx) = std::sync::mpsc::channel::<std::io::Result<std::process::Output>>();
+        thread::spawn(move || {
+            let _ = tx.send(child.wait_with_output());
+        });
 
-        let output = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // Poll for completion with timeout
-            let start = std::time::Instant::now();
-            loop {
-                if start.elapsed() > HOOK_TIMEOUT {
-                    return None; // Timeout
-                }
-                thread::sleep(Duration::from_millis(50));
-                // Check if the thread is done (simplified timeout approach)
-                if join_handle.is_finished() {
-                    return join_handle.join().ok();
-                }
+        let output = match rx.recv_timeout(HOOK_TIMEOUT) {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => {
+                eprintln!("Warning: hook {} wait failed: {}", hook_path.display(), e);
+                return HookOutput::default();
             }
-        })) {
-            Ok(Some(Ok(output))) => output,
-            _ => {
-                eprintln!(
-                    "Warning: hook {} timed out or panicked",
-                    hook_path.display()
-                );
+            Err(_) => {
+                eprintln!("Warning: hook {} timed out", hook_path.display());
                 return HookOutput::default();
             }
         };
@@ -201,6 +210,11 @@ impl HookExecutor {
         }
     }
 
+    #[allow(
+        clippy::unused_self,
+        dead_code,
+        reason = "HookExecutor is infrastructure for future multi-hook dispatch"
+    )]
     fn merge_outputs(&self, aggregated: &mut HookOutput, new_output: HookOutput) {
         aggregated.cancel = aggregated.cancel || new_output.cancel;
         aggregated.halt_turn = aggregated.halt_turn || new_output.halt_turn;
@@ -211,8 +225,7 @@ impl HookExecutor {
                 aggregated.context_modification = Some(new_mod);
             } else {
                 eprintln!(
-                    "Warning: context modification exceeds {} byte limit, discarding",
-                    CONTEXT_MOD_LIMIT
+                    "Warning: context modification exceeds {CONTEXT_MOD_LIMIT} byte limit, discarding"
                 );
             }
         }

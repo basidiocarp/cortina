@@ -43,6 +43,9 @@ struct ToolUsageEventV1 {
 /// year. Code that runs past 2100 will produce off-by-one day errors for dates
 /// in leap-century years (2200, 2300, …). Replace this with `chrono` or
 /// `humantime` when either becomes available as a project dependency.
+///
+/// O(years since 1970) — adequate for near-present timestamps.
+/// FIXME: replace with chrono when available in the dependency graph.
 fn ms_to_iso8601(ms: u64) -> String {
     const SECS_PER_DAY: u64 = 86_400;
     const SECS_PER_HOUR: u64 = 3_600;

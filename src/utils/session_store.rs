@@ -164,12 +164,13 @@ impl SessionStore {
 
 fn now_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    #[allow(clippy::cast_possible_truncation)]
-    let ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
-    ms
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(dur) => i64::try_from(dur.as_millis()).unwrap_or(i64::MAX),
+        Err(e) => {
+            tracing::warn!("cortina: system clock before UNIX epoch: {e}");
+            0
+        }
+    }
 }
 
 #[cfg(test)]

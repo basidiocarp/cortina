@@ -369,6 +369,9 @@ fn resolve_read_path(file_path: &str, cwd: Option<&str>) -> String {
 }
 
 /// Source directories that, when targeted with a recursive grep, indicate a code search.
+/// Used to classify bash grep/rg commands as code searches vs. documentation searches.
+/// Does not overlap with `STRUCTURAL_FILES` in `stop.rs:527`, which identifies build manifests
+/// and lock files (Cargo.toml, package.json, etc.). See `stop.rs` for comparison.
 const CODE_SOURCE_DIRS: &[&str] = &["src/", "lib/", "crates/", "app/", "pkg/", "packages/"];
 
 /// Helper: check if command has recursive flag AND targets a known source directory

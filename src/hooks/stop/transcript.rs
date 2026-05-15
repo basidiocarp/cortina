@@ -14,7 +14,10 @@ pub(super) fn parse_transcript(transcript_path: Option<&str>) -> TranscriptSumma
 
     match std::fs::read_to_string(path) {
         Ok(content) => parse_jsonl_transcript(&content),
-        Err(_) => TranscriptSummary::default(),
+        Err(e) => {
+            tracing::warn!(path = ?path, error = %e, "cortina: transcript parse failed");
+            TranscriptSummary::default()
+        }
     }
 }
 
