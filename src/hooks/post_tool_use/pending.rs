@@ -46,7 +46,9 @@ pub(super) fn track_pending_file(file_path: &str, hash: &str) {
         if files.len() > MAX_PENDING_ENTRIES {
             let overflow = files.len().saturating_sub(MAX_PENDING_ENTRIES);
             tracing::debug!(overflow, "pending list truncated to cap");
-            files.drain(0..overflow);
+            for evicted in files.drain(0..overflow) {
+                tracing::warn!(key = %evicted, "pending queue full, dropping entry");
+            }
         }
     });
 }
@@ -60,7 +62,9 @@ pub(super) fn track_pending_document(file_path: &str, hash: &str) {
         if files.len() > MAX_PENDING_ENTRIES {
             let overflow = files.len().saturating_sub(MAX_PENDING_ENTRIES);
             tracing::debug!(overflow, "pending list truncated to cap");
-            files.drain(0..overflow);
+            for evicted in files.drain(0..overflow) {
+                tracing::warn!(key = %evicted, "pending queue full, dropping entry");
+            }
         }
     });
 }
@@ -169,7 +173,9 @@ fn requeue_pending_batch(path: &Path, files: &[String]) {
         if entries.len() > MAX_PENDING_ENTRIES {
             let overflow = entries.len().saturating_sub(MAX_PENDING_ENTRIES);
             tracing::debug!(overflow, "pending list truncated to cap");
-            entries.drain(0..overflow);
+            for evicted in entries.drain(0..overflow) {
+                tracing::warn!(key = %evicted, "pending queue full, dropping entry");
+            }
         }
     });
 }

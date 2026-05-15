@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -17,7 +18,36 @@ const LOCK_STALE_MS: u64 = 30_000;
 const LOCK_WAIT_ATTEMPTS: usize = 1_000;
 const LOCK_WAIT_MS: u64 = 10;
 const LOCK_HEARTBEAT_MS: u64 = 5_000;
+const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Run a git command with a timeout using the channel+thread pattern.
+/// On timeout, returns None; on error, logs debug and returns None.
+fn run_git_with_timeout(cmd: &mut Command) -> Option<Output> {
+    let Ok(child) = cmd.spawn() else {
+        tracing::debug!("Failed to spawn git command");
+        return None;
+    };
+    let (tx, rx) = mpsc::channel::<std::io::Result<Output>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(GIT_TIMEOUT) {
+        Ok(Ok(output)) => Some(output),
+        Ok(Err(_)) => {
+            tracing::debug!("git command execution failed");
+            None
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            tracing::debug!("git command timed out after 5s");
+            None
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            tracing::debug!("git command thread exited before sending result");
+            None
+        }
+    }
+}
 
 pub fn scope_hash(cwd: Option<&str>) -> String {
     scope_hash_with(cwd, Command::output)
@@ -75,7 +105,9 @@ where
     let cwd = resolved_cwd(cwd)?;
     let project_root = cwd.to_string_lossy().to_string();
     let project = project_name_from_root(&cwd)?;
-    let worktree_id = git_command_output(&cwd, &["rev-parse", "--absolute-git-dir"], run_command)
+    // Try the timeout version first, fall back to the legacy version if needed
+    let worktree_id = git_command_output_with_timeout(&cwd, &["rev-parse", "--absolute-git-dir"])
+        .or_else(|| git_command_output(&cwd, &["rev-parse", "--absolute-git-dir"], run_command))
         .map(PathBuf::from)
         .map(canonicalize_path)
         .map_or_else(
@@ -125,6 +157,20 @@ where
     let output = run_command(&mut cmd).ok()?;
     if !output.status.success() {
         tracing::debug!("git_command_output: git unavailable or failed, using path-based fallback");
+        return None;
+    }
+
+    let output = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!output.is_empty()).then_some(output)
+}
+
+/// Run a git command with a timeout. Used for git calls during session scope initialization.
+pub(crate) fn git_command_output_with_timeout(cwd: &Path, args: &[&str]) -> Option<String> {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(cwd).args(args);
+    let output = run_git_with_timeout(&mut cmd)?;
+    if !output.status.success() {
+        tracing::debug!("git command returned non-zero exit code");
         return None;
     }
 

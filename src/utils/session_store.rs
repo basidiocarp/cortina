@@ -134,7 +134,7 @@ impl SessionStore {
     /// Returns an error if the database query fails.
     #[allow(dead_code)]
     pub fn find_active(&self, project: &str, worktree_id: Option<&str>) -> Result<Option<String>> {
-        let threshold_ms = now_ms() - SESSION_ORPHAN_THRESHOLD_HOURS * 3_600_000;
+        let threshold_ms = now_ms().saturating_sub(SESSION_ORPHAN_THRESHOLD_HOURS * 3_600_000);
 
         // Mark stale 'active' sessions as orphaned first
         self.conn

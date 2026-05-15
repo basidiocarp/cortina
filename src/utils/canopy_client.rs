@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,8 @@ use crate::outcomes::bridge_signals;
 use super::hyphae_client::resolved_command;
 use super::session_scope::scope_identity_for_cwd;
 use super::state::{load_json_file, temp_state_path, update_json_file};
+
+const CANOPY_CLIENT_TIMEOUT: Duration = Duration::from_secs(10);
 
 fn span_context(
     project_root: Option<&str>,
@@ -33,6 +36,33 @@ fn span_context(
             context.with_workspace_root(project_root.to_string())
         }
         _ => context,
+    }
+}
+
+/// Run a command with a timeout using the channel+thread pattern.
+/// On timeout, logs a warning and returns an IO error.
+fn run_command_with_timeout(cmd: &mut Command) -> std::io::Result<std::process::Output> {
+    let child = cmd.spawn()?;
+    let (tx, rx) = mpsc::channel::<std::io::Result<std::process::Output>>();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(CANOPY_CLIENT_TIMEOUT) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            warn!("canopy client subprocess timed out after 10s");
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "canopy client subprocess timed out after 10s",
+            ))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            warn!("canopy client subprocess thread exited before sending result");
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "canopy client subprocess thread exited unexpectedly",
+            ))
+        }
     }
 }
 
@@ -170,7 +200,14 @@ fn active_task_id(project_root: &str, worktree_id: &str) -> Option<String> {
     }
 
     let _subprocess_span = subprocess_span("canopy agent list", &context).entered();
-    let output = command.arg("agent").arg("list").output().ok()?;
+    command.arg("agent").arg("list");
+    let output = match run_command_with_timeout(&mut command) {
+        Ok(output) => output,
+        Err(err) => {
+            warn!("canopy agent list timeout or execution failed: {err}");
+            return None;
+        }
+    };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.trim().is_empty() {
@@ -206,7 +243,14 @@ fn active_agent_id(project_root: &str, worktree_id: &str) -> Option<String> {
     }
 
     let _subprocess_span = subprocess_span("canopy agent list", &context).entered();
-    let output = command.arg("agent").arg("list").output().ok()?;
+    command.arg("agent").arg("list");
+    let output = match run_command_with_timeout(&mut command) {
+        Ok(output) => output,
+        Err(err) => {
+            warn!("canopy agent list timeout or execution failed: {err}");
+            return None;
+        }
+    };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if stderr.trim().is_empty() {
@@ -252,11 +296,8 @@ fn attempt_outcome_evidence_write(
     }
 
     let _subprocess_span = subprocess_span("canopy evidence add", &context).entered();
-    let output = match command
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-    {
+    command.stdout(Stdio::null()).stderr(Stdio::piped());
+    let output = match run_command_with_timeout(&mut command) {
         Ok(output) => output,
         Err(err) => {
             warn!("Failed to execute canopy evidence add: {err}");

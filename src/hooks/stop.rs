@@ -567,6 +567,8 @@ fn trigger_compile_env_invalidation_if_needed(files_modified: &[String], cwd: &s
         if let Err(e) = cmd.spawn() {
             tracing::warn!("cortina: rhizome compile-env invalidation spawn failed: {e}");
         }
+    } else {
+        tracing::warn!("stop: rhizome not found, skipping rhizome shutdown");
     }
 }
 

@@ -46,8 +46,9 @@ use super::hyphae_client::{command_exists, resolved_command};
 use super::session_store::SessionStore;
 use super::state::{
     canonicalize_path, current_runtime_session_id, current_timestamp_ms, git_command_output,
-    load_json_file, project_name_from_root, resolved_cwd, save_json_file, scope_hash,
-    stable_identity_hash, temp_state_path, with_file_lock, with_lock_path,
+    git_command_output_with_timeout, load_json_file, project_name_from_root, resolved_cwd,
+    save_json_file, scope_hash, stable_identity_hash, temp_state_path, with_file_lock,
+    with_lock_path,
 };
 use crate::events::OutcomeKind;
 use crate::outcomes::load_outcomes;
@@ -634,15 +635,23 @@ where
 {
     let context = span_context(Some(project_root), "git_branch_for_workspace");
     let _subprocess_span = subprocess_span("git rev-parse --abbrev-ref HEAD", &context).entered();
-    let mut cmd = Command::new("git");
-    cmd.args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(project_root);
-    let output = run_command(&mut cmd).ok()?;
-    if !output.status.success() {
-        return None;
-    }
+    // Use the timeout version; fall back to legacy version if needed for test compatibility
+    let path = PathBuf::from(project_root);
+    let output = git_command_output_with_timeout(&path, &["rev-parse", "--abbrev-ref", "HEAD"])
+        .or_else(|| {
+            let mut cmd = Command::new("git");
+            cmd.args(["rev-parse", "--abbrev-ref", "HEAD"])
+                .current_dir(project_root);
+            run_command(&mut cmd).ok().and_then(|output| {
+                if output.status.success() {
+                    String::from_utf8(output.stdout).ok()
+                } else {
+                    None
+                }
+            })
+        })?;
 
-    let branch = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    let branch = output.trim().to_string();
     if branch.is_empty() || matches!(branch.as_str(), "HEAD" | "main" | "master" | "develop") {
         None
     } else {
@@ -931,19 +940,21 @@ where
 
     // Use the git dir path when available so linked worktrees get distinct stable ids.
     // Outside git, fall back to the canonical root path and mark the source explicitly.
-    let worktree_id =
-        git_command_output(&cwd, &["rev-parse", "--absolute-git-dir"], &mut run_command)
-            .map(PathBuf::from)
-            .map(canonicalize_path)
-            .map_or_else(
-                || format!("path:{}", stable_identity_hash(project_root.as_str())),
-                |path| {
-                    format!(
-                        "git:{}",
-                        stable_identity_hash(path.to_string_lossy().as_ref())
-                    )
-                },
-            );
+    let worktree_id = git_command_output_with_timeout(&cwd, &["rev-parse", "--absolute-git-dir"])
+        .or_else(|| {
+            git_command_output(&cwd, &["rev-parse", "--absolute-git-dir"], &mut run_command)
+        })
+        .map(PathBuf::from)
+        .map(canonicalize_path)
+        .map_or_else(
+            || format!("path:{}", stable_identity_hash(project_root.as_str())),
+            |path| {
+                format!(
+                    "git:{}",
+                    stable_identity_hash(path.to_string_lossy().as_ref())
+                )
+            },
+        );
 
     Some(SessionIdentity {
         project: project_name_from_root(&cwd)?,

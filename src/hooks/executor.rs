@@ -5,6 +5,7 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -153,10 +154,18 @@ impl HookExecutor {
             drop(stdin);
         }
 
+        // Wrap child in Arc<Mutex<Option>> to share ownership and allow extraction
+        let child = Arc::new(Mutex::new(Some(child)));
+        let child_for_thread = Arc::clone(&child);
+
         // Use channel-based timeout pattern instead of busy-poll
         let (tx, rx) = std::sync::mpsc::channel::<std::io::Result<std::process::Output>>();
         thread::spawn(move || {
-            let _ = tx.send(child.wait_with_output());
+            if let Ok(mut guard) = child_for_thread.lock() {
+                if let Some(child_inner) = guard.take() {
+                    let _ = tx.send(child_inner.wait_with_output());
+                }
+            }
         });
 
         let output = match rx.recv_timeout(HOOK_TIMEOUT) {
@@ -167,6 +176,12 @@ impl HookExecutor {
             }
             Err(_) => {
                 eprintln!("Warning: hook {} timed out", hook_path.display());
+                if let Ok(mut guard) = child.lock() {
+                    if let Some(mut c) = guard.take() {
+                        let _ = c.kill();
+                        let _ = c.wait();
+                    }
+                }
                 return HookOutput::default();
             }
         };
