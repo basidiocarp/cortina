@@ -21,20 +21,46 @@ const HYPHAE_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Spawns the subprocess, moves it into a background thread that calls
 /// [`wait_with_output`], and waits on a channel for at most
 /// `HYPHAE_WRITE_TIMEOUT`. Returns `Err(TimedOut)` if the deadline fires.
-/// The background thread continues until the process exits on its own (the
-/// lamella hook timeout will reap it when cortina is killed).
+/// On timeout the child process is killed so the background thread exits promptly
+/// rather than accumulating as an orphan.
 fn run_with_timeout(cmd: &mut Command) -> std::io::Result<Output> {
     let child = cmd.spawn()?;
+
+    // Share the child handle so we can kill it from the timeout branch.
+    let child_handle = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
+    let child_handle_clone = std::sync::Arc::clone(&child_handle);
+
     let (tx, rx) = mpsc::channel::<std::io::Result<Output>>();
     std::thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
+        // Take ownership so wait_with_output (which consumes self) can be called.
+        let result = child_handle_clone
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
+            .map(|c| c.wait_with_output())
+            .unwrap_or_else(|| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "hyphae child was killed before wait",
+                ))
+            });
+        let _ = tx.send(result);
     });
+
     match rx.recv_timeout(HYPHAE_WRITE_TIMEOUT) {
         Ok(result) => result,
-        Err(mpsc::RecvTimeoutError::Timeout) => Err(std::io::Error::new(
-            std::io::ErrorKind::TimedOut,
-            "hyphae session end timed out after 5s",
-        )),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            // Kill the child so the background thread exits promptly.
+            if let Ok(mut guard) = child_handle.lock() {
+                if let Some(mut c) = guard.take() {
+                    let _ = c.kill();
+                }
+            }
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "hyphae session end timed out after 5s",
+            ))
+        }
         Err(mpsc::RecvTimeoutError::Disconnected) => Err(std::io::Error::new(
             std::io::ErrorKind::BrokenPipe,
             "hyphae session end thread exited before sending result",
@@ -427,13 +453,12 @@ where
             if let Ok(store) = SessionStore::open() {
                 let _ = store.end_orphaned(&state.session_id);
             }
-            let _handle = spawn_async_session_end_confirmed(cmd, state.session_id.clone());
-            // NOTE: The JoinHandle is detached (dropped without joining). This is a known limitation:
-            // cortina is a short-lived process, so if it exits before the background thread completes,
-            // the SQLite write may be interrupted. A proper fix would thread the handle to the Stop
-            // hook caller and join before process exit, but this is invasive to the call stack.
-            // For now, rely on the thread's 5-second internal timeout to limit stalls.
-            warn!("cortina: async session end background thread detached — not awaited at process exit");
+            let handle = spawn_async_session_end_confirmed(cmd, state.session_id.clone());
+            // Join before returning so the SQLite end_clean write completes before the process
+            // exits. Cortina is short-lived; without joining the OS kills the thread first,
+            // leaving every session permanently orphaned. The join is unbounded — hyphae is
+            // expected to return quickly, but a hung hyphae process will stall cortina here.
+            let _ = handle.join();
             return with_file_lock(&path, || Ok(Some(state)));
         }
 
@@ -635,21 +660,39 @@ where
 {
     let context = span_context(Some(project_root), "git_branch_for_workspace");
     let _subprocess_span = subprocess_span("git rev-parse --abbrev-ref HEAD", &context).entered();
-    // Use the timeout version; fall back to legacy version if needed for test compatibility
-    let path = PathBuf::from(project_root);
-    let output = git_command_output_with_timeout(&path, &["rev-parse", "--abbrev-ref", "HEAD"])
-        .or_else(|| {
-            let mut cmd = Command::new("git");
-            cmd.args(["rev-parse", "--abbrev-ref", "HEAD"])
-                .current_dir(project_root);
-            run_command(&mut cmd).ok().and_then(|output| {
-                if output.status.success() {
-                    String::from_utf8(output.stdout).ok()
-                } else {
-                    None
-                }
+
+    let mut cmd = Command::new("git");
+    cmd.args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .current_dir(project_root);
+
+    // In production, prefer the timeout-protected real git call so a hung process
+    // cannot stall the session-op lock holder. In tests, use the injected run_command
+    // so the test mock controls the result without spawning a real git process.
+    #[cfg(not(test))]
+    let output = {
+        let path = PathBuf::from(project_root);
+        git_command_output_with_timeout(&path, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .or_else(|| {
+                run_command(&mut cmd).ok().and_then(|output| {
+                    if output.status.success() {
+                        String::from_utf8(output.stdout).ok()
+                    } else {
+                        None
+                    }
+                })
             })
-        })?;
+    };
+
+    #[cfg(test)]
+    let output = run_command(&mut cmd).ok().and_then(|output| {
+        if output.status.success() {
+            String::from_utf8(output.stdout).ok()
+        } else {
+            None
+        }
+    });
+
+    let output = output?;
 
     let branch = output.trim().to_string();
     if branch.is_empty() || matches!(branch.as_str(), "HEAD" | "main" | "master" | "develop") {
@@ -808,7 +851,14 @@ where
     cmd.args(["session", "status", "--id", session_id]);
 
     let _subprocess_span = subprocess_span("hyphae session status", &context).entered();
-    let Ok(output) = run_command(&mut cmd) else {
+    // In production use run_with_timeout so a hung hyphae process cannot stall the
+    // entire session-end hook indefinitely. In tests, use the injected run_command
+    // so tests can provide fake hyphae output without spawning real subprocesses.
+    #[cfg(not(test))]
+    let status_result = run_with_timeout(&mut cmd);
+    #[cfg(test)]
+    let status_result = run_command(&mut cmd);
+    let Ok(output) = status_result else {
         debug!("Failed to execute hyphae session status for session {session_id}");
         return None;
     };

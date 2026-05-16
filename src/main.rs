@@ -1,4 +1,4 @@
-use std::io::{self, Read};
+use std::io::{self, BufWriter, Read, Write as _};
 
 use anyhow::Result;
 use clap::Parser;
@@ -121,45 +121,69 @@ fn main() -> Result<()> {
     }
 }
 
+/// Maximum bytes read from stdin. Hook payloads are small JSON blobs; this cap
+/// prevents an OOM kill from a malformed or adversarial oversized input.
+const MAX_STDIN_BYTES: usize = 10 * 1024 * 1024; // 10 MiB
+
 fn read_stdin() -> Result<String> {
     let mut input = String::new();
-    io::stdin().read_to_string(&mut input)?;
+    io::stdin()
+        .take(MAX_STDIN_BYTES as u64)
+        .read_to_string(&mut input)?;
     Ok(input)
 }
 
 fn print_policy(json: bool) -> Result<()> {
     let policy = policy::capture_policy();
     if json {
-        println!("{}", serde_json::to_string_pretty(policy)?);
+        // Use writeln! so a broken-pipe reader does not panic.
+        let _ = writeln!(
+            io::stdout().lock(),
+            "{}",
+            serde_json::to_string_pretty(policy)?
+        );
         return Ok(());
     }
 
-    println!("Cortina capture policy");
-    println!(
+    // Use BufWriter + writeln! so broken-pipe errors are silently swallowed
+    // rather than panicking with "failed printing to stdout".
+    let stdout = io::stdout();
+    let mut out = BufWriter::new(stdout.lock());
+    let _ = writeln!(out, "Cortina capture policy");
+    let _ = writeln!(
+        out,
         "outcome_dedupe_window_ms={}",
         policy.outcome_dedupe_window_ms
     );
-    println!("correction_window_ms={}", policy.correction_window_ms);
-    println!("edit_cleanup_age_ms={}", policy.edit_cleanup_age_ms);
-    println!("export_threshold={}", policy.export_threshold);
-    println!("ingest_threshold={}", policy.ingest_threshold);
-    println!(
+    let _ = writeln!(out, "correction_window_ms={}", policy.correction_window_ms);
+    let _ = writeln!(out, "edit_cleanup_age_ms={}", policy.edit_cleanup_age_ms);
+    let _ = writeln!(out, "export_threshold={}", policy.export_threshold);
+    let _ = writeln!(out, "ingest_threshold={}", policy.ingest_threshold);
+    let _ = writeln!(
+        out,
         "stale_handoff_detection_enabled={}",
         policy.stale_handoff_detection_enabled
     );
-    println!("handoff_lint_enabled={}", policy.handoff_lint_enabled);
-    println!(
+    let _ = writeln!(out, "handoff_lint_enabled={}", policy.handoff_lint_enabled);
+    let _ = writeln!(
+        out,
         "rhizome_suggest_threshold={}",
         policy.rhizome_suggest_threshold
     );
-    println!("rhizome_suggest_every={}", policy.rhizome_suggest_every);
-    println!("rhizome_suggest_enabled={}", policy.rhizome_suggest_enabled);
-    println!(
+    let _ = writeln!(out, "rhizome_suggest_every={}", policy.rhizome_suggest_every);
+    let _ = writeln!(
+        out,
+        "rhizome_suggest_enabled={}",
+        policy.rhizome_suggest_enabled
+    );
+    let _ = writeln!(
+        out,
         "outcome_attribution_grace_ms={}",
         policy.outcome_attribution_grace_ms
     );
-    println!("max_outcome_events={}", policy.max_outcome_events);
-    println!(
+    let _ = writeln!(out, "max_outcome_events={}", policy.max_outcome_events);
+    let _ = writeln!(
+        out,
         "fallback_session_memory_on_end_failure={}",
         policy.fallback_session_memory_on_end_failure
     );

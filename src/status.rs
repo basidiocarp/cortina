@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use serde::Serialize;
+use std::io::{BufWriter, Write as _};
 
 use crate::hooks::pre_tool_use::ADVISORY_STATE_NAME;
 use crate::policy::{CapturePolicy, capture_policy};
@@ -88,11 +89,20 @@ pub struct FileHealth {
 pub fn print_status(json: bool, cwd: Option<&str>) -> Result<()> {
     let report = collect_status(cwd);
     if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        // Use writeln! so a broken-pipe reader does not panic.
+        let _ = writeln!(
+            std::io::stdout().lock(),
+            "{}",
+            serde_json::to_string_pretty(&report)?
+        );
         return Ok(());
     }
 
-    println!("{}", render_status(&report));
+    // Use BufWriter + writeln! so broken-pipe errors are silently swallowed
+    // rather than panicking with "failed printing to stdout".
+    let stdout = std::io::stdout();
+    let mut out = BufWriter::new(stdout.lock());
+    let _ = writeln!(out, "{}", render_status(&report));
     Ok(())
 }
 
@@ -187,33 +197,46 @@ fn render_status(report: &StatusReport) -> String {
 pub fn print_doctor(json: bool, cwd: Option<&str>) -> Result<()> {
     let report = collect_doctor(cwd);
     if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        // Use writeln! so a broken-pipe reader does not panic.
+        let _ = writeln!(
+            std::io::stdout().lock(),
+            "{}",
+            serde_json::to_string_pretty(&report)?
+        );
         return Ok(());
     }
 
-    println!("Cortina doctor");
-    println!("cwd={}", report.cwd);
-    println!("scope_hash={}", report.scope_hash);
-    println!("temp_dir={}", report.temp_dir);
-    println!("temp_dir_writable={}", report.temp_dir_writable);
-    println!("hyphae_available={}", report.hyphae_available);
-    println!("rhizome_available={}", report.rhizome_available);
+    // Use BufWriter + writeln! so broken-pipe errors are silently swallowed
+    // rather than panicking with "failed printing to stdout".
+    let stdout = std::io::stdout();
+    let mut out = BufWriter::new(stdout.lock());
+    let _ = writeln!(out, "Cortina doctor");
+    let _ = writeln!(out, "cwd={}", report.cwd);
+    let _ = writeln!(out, "scope_hash={}", report.scope_hash);
+    let _ = writeln!(out, "temp_dir={}", report.temp_dir);
+    let _ = writeln!(out, "temp_dir_writable={}", report.temp_dir_writable);
+    let _ = writeln!(out, "hyphae_available={}", report.hyphae_available);
+    let _ = writeln!(out, "rhizome_available={}", report.rhizome_available);
     if let Some(session_live) = report.session_live {
-        println!("session_live={session_live}");
+        let _ = writeln!(out, "session_live={session_live}");
     }
-    print_file_health("session_state", &report.session_state);
-    print_file_health("outcomes", &report.outcomes);
-    print_file_health("volva_hook_events", &report.volva_hook_events);
-    print_file_health("pending_exports", &report.pending_exports);
-    print_file_health("pending_ingest", &report.pending_ingest);
-    print_file_health("evidence_bridge", &report.evidence_bridge);
-    println!("evidence_refs_written={}", report.evidence_refs_written);
-    println!("evidence_write_failures={}", report.evidence_write_failures);
+    print_file_health(&mut out, "session_state", &report.session_state);
+    print_file_health(&mut out, "outcomes", &report.outcomes);
+    print_file_health(&mut out, "volva_hook_events", &report.volva_hook_events);
+    print_file_health(&mut out, "pending_exports", &report.pending_exports);
+    print_file_health(&mut out, "pending_ingest", &report.pending_ingest);
+    print_file_health(&mut out, "evidence_bridge", &report.evidence_bridge);
+    let _ = writeln!(out, "evidence_refs_written={}", report.evidence_refs_written);
+    let _ = writeln!(
+        out,
+        "evidence_write_failures={}",
+        report.evidence_write_failures
+    );
     if report.warnings.is_empty() {
-        println!("warnings=none");
+        let _ = writeln!(out, "warnings=none");
     } else {
         for warning in &report.warnings {
-            println!("warning={warning}");
+            let _ = writeln!(out, "warning={warning}");
         }
     }
     Ok(())
@@ -334,10 +357,10 @@ pub fn collect_doctor(cwd: Option<&str>) -> DoctorReport {
     }
 }
 
-fn print_file_health(label: &str, health: &FileHealth) {
-    println!("{label}_path={}", health.path);
-    println!("{label}_exists={}", health.exists);
-    println!("{label}_valid_json={}", health.valid_json);
+fn print_file_health(out: &mut impl std::io::Write, label: &str, health: &FileHealth) {
+    let _ = writeln!(out, "{label}_path={}", health.path);
+    let _ = writeln!(out, "{label}_exists={}", health.exists);
+    let _ = writeln!(out, "{label}_valid_json={}", health.valid_json);
 }
 
 fn normalized_cwd(cwd: Option<&str>) -> String {

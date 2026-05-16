@@ -35,7 +35,7 @@ pub fn record_tool_call(tool_name: &str, source: ToolSource, hash: &str) {
     let now = current_timestamp_ms();
     let _ = update_json_file::<Vec<ToolCallEntry>, _, _>(&path, |entries| {
         if let Some(entry) = entries.iter_mut().find(|e| e.tool_name == tool_name) {
-            entry.call_count += 1;
+            entry.call_count = entry.call_count.saturating_add(1);
             entry.last_call_at_ms = now;
         } else {
             entries.push(ToolCallEntry {

@@ -50,11 +50,14 @@ fn ms_to_iso8601(ms: u64) -> String {
     const SECS_PER_DAY: u64 = 86_400;
     const SECS_PER_HOUR: u64 = 3_600;
     const SECS_PER_MINUTE: u64 = 60;
+    // 9999-12-31 — any timestamp beyond this is clamped to avoid the O(n-days)
+    // year-counting loop running for millions of iterations on corrupted input.
+    const MAX_DAYS: u64 = 2_932_896;
 
     let secs = ms / 1000;
     let subsec_millis = (ms % 1000) as u32;
 
-    let days_since_epoch = secs / SECS_PER_DAY;
+    let days_since_epoch = (secs / SECS_PER_DAY).min(MAX_DAYS);
     let secs_today = secs % SECS_PER_DAY;
 
     let hours = secs_today / SECS_PER_HOUR;
@@ -63,8 +66,8 @@ fn ms_to_iso8601(ms: u64) -> String {
     let seconds = remaining % SECS_PER_MINUTE;
 
     let mut year: i32 = 1970;
-    let mut days_remaining: i32 =
-        i32::try_from(days_since_epoch.min(i32::MAX as u64)).unwrap_or(i32::MAX);
+    // Safe cast: MAX_DAYS (2_932_896) fits well within i32::MAX.
+    let mut days_remaining: i32 = days_since_epoch as i32;
 
     loop {
         let days_in_year = if is_leap_year(year) { 366 } else { 365 };

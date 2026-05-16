@@ -1,8 +1,8 @@
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::io::Write;
-use std::path::PathBuf;
-use std::sync::mpsc;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 
 /// Maximum bytes forwarded to stderr per recall injection.
@@ -90,8 +90,23 @@ fn capture_prompt_submit(event: &UserPromptSubmitEvent) {
         );
     }
 
-    // B3: extract file references and track them as pending exports
-    let file_refs = extract_file_refs(&event.prompt);
+    // B3: extract file references and track them as pending exports.
+    // Only track paths that are contained within the project root to prevent
+    // path-traversal attacks from adversarial prompt content.
+    let project_root: Option<PathBuf> = if event.cwd.is_empty() {
+        std::env::current_dir().ok()
+    } else {
+        Some(PathBuf::from(&event.cwd))
+    }
+    .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+    let file_refs: Vec<String> = extract_file_refs(&event.prompt)
+        .into_iter()
+        .filter(|p| {
+            project_root
+                .as_ref()
+                .is_some_and(|root| is_safe_path(Path::new(p), root))
+        })
+        .collect();
     if !file_refs.is_empty() {
         super::post_tool_use::track_prompt_file_refs(&file_refs, &hash);
     }
@@ -234,6 +249,24 @@ fn detect_prompt_error_patterns(prompt: &str) -> Vec<String> {
         .collect()
 }
 
+/// Check whether a path is safely contained within `root`.
+///
+/// Canonicalizes both paths to resolve symlinks and `..` components before
+/// comparison. Paths that do not exist on disk are rejected — `canonicalize`
+/// returns `Err` for non-existent paths, which is treated as unsafe.
+///
+/// Note: forward references (paths that do not exist yet at prompt time but will
+/// be created by the tool call being submitted) are silently dropped here. This
+/// is intentional: we cannot safely canonicalize a path that has no filesystem
+/// entry, and accepting unverified paths would open a traversal vector.
+fn is_safe_path(path: &Path, root: &Path) -> bool {
+    match path.canonicalize() {
+        Ok(canonical) => canonical.starts_with(root),
+        // Non-existent or unresolvable path — skip silently to avoid feedback loops
+        Err(_) => false,
+    }
+}
+
 /// Extract tokens from the prompt that look like file paths.
 /// A token qualifies when it contains `/`, has a file extension,
 /// and is between 3 and 512 chars long. Returns at most 10 unique results.
@@ -339,15 +372,33 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
         return;
     };
 
+    // Share the child handle so we can kill it from the timeout branch.
+    let child_handle: Arc<Mutex<Option<std::process::Child>>> =
+        Arc::new(Mutex::new(Some(child)));
+    let child_handle_clone = Arc::clone(&child_handle);
+
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
+        // Take ownership of the child out of the Mutex so wait_with_output
+        // can consume it (wait_with_output takes self by value).
+        let output = child_handle_clone
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
+            .and_then(|c| c.wait_with_output().ok());
+        let _ = tx.send(output);
     });
 
     let output = match rx.recv_timeout(RECALL_TIMEOUT) {
-        Ok(Ok(out)) => out,
-        Ok(Err(_)) => return,
+        Ok(Some(out)) => out,
+        Ok(None) => return,
         Err(_) => {
+            // Kill the child so the background thread exits promptly.
+            if let Ok(mut guard) = child_handle.lock() {
+                if let Some(mut c) = guard.take() {
+                    let _ = c.kill();
+                }
+            }
             tracing::warn!("hyphae auto-recall timed out after 2s — skipping recall injection");
             return;
         }

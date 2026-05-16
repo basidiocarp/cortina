@@ -67,7 +67,7 @@ impl SessionStore {
     ///
     /// Returns an error if the database write fails.
     pub fn create(&self, session_id: &str, project: &str, worktree_id: Option<&str>) -> Result<()> {
-        let now = now_ms();
+        let now = now_ms().context("cannot create session: system clock is invalid")?;
         self.conn
             .execute(
                 "INSERT INTO sessions (session_id, project, worktree_id, status, created_at, last_seen_at)
@@ -84,10 +84,11 @@ impl SessionStore {
     ///
     /// Returns an error if the database write fails.
     pub fn end_clean(&self, session_id: &str) -> Result<()> {
+        let now = now_ms().unwrap_or(i64::MAX);
         self.conn
             .execute(
                 "UPDATE sessions SET status = 'ended', last_seen_at = ?1 WHERE session_id = ?2",
-                params![now_ms(), session_id],
+                params![now, session_id],
             )
             .context("update session status to ended")?;
         Ok(())
@@ -99,10 +100,11 @@ impl SessionStore {
     ///
     /// Returns an error if the database write fails.
     pub fn end_orphaned(&self, session_id: &str) -> Result<()> {
+        let now = now_ms().unwrap_or(i64::MAX);
         self.conn
             .execute(
                 "UPDATE sessions SET status = 'orphaned', last_seen_at = ?1 WHERE session_id = ?2",
-                params![now_ms(), session_id],
+                params![now, session_id],
             )
             .context("update session status to orphaned")?;
         Ok(())
@@ -115,10 +117,11 @@ impl SessionStore {
     /// Returns an error if the database write fails.
     #[allow(dead_code)]
     pub fn heartbeat(&self, session_id: &str) -> Result<()> {
+        let now = now_ms().unwrap_or(i64::MAX);
         self.conn
             .execute(
                 "UPDATE sessions SET last_seen_at = ?1 WHERE session_id = ?2 AND status = 'active'",
-                params![now_ms(), session_id],
+                params![now, session_id],
             )
             .context("update session heartbeat")?;
         Ok(())
@@ -134,43 +137,59 @@ impl SessionStore {
     /// Returns an error if the database query fails.
     #[allow(dead_code)]
     pub fn find_active(&self, project: &str, worktree_id: Option<&str>) -> Result<Option<String>> {
-        let threshold_ms = now_ms().saturating_sub(SESSION_ORPHAN_THRESHOLD_HOURS * 3_600_000);
+        let now = now_ms().unwrap_or(i64::MAX);
+        let threshold_ms = now.saturating_sub(SESSION_ORPHAN_THRESHOLD_HOURS * 3_600_000);
+
+        // Wrap both statements in a single IMMEDIATE transaction so that a concurrent
+        // process cannot insert a new active row between the orphan UPDATE and the SELECT,
+        // which would otherwise allow two processes to each believe they are the sole owner.
+        // Use raw SQL rather than the rusqlite transaction API because `execute` takes &self
+        // while `transaction_with_behavior` requires &mut self.
+        self.conn
+            .execute("BEGIN IMMEDIATE", [])
+            .context("begin immediate transaction for find_active")?;
 
         // Mark stale 'active' sessions as orphaned first
-        self.conn
-            .execute(
-                "UPDATE sessions SET status = 'orphaned'
-                 WHERE status = 'active' AND project = ?1 AND last_seen_at < ?2",
-                params![project, threshold_ms],
-            )
-            .context("mark stale sessions as orphaned")?;
+        let update_result = self.conn.execute(
+            "UPDATE sessions SET status = 'orphaned'
+             WHERE status = 'active' AND project = ?1 AND last_seen_at < ?2",
+            params![project, threshold_ms],
+        );
 
         // Find current active session
-        let session_id: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT session_id FROM sessions
-                 WHERE status = 'active' AND project = ?1 AND (worktree_id = ?2 OR (?2 IS NULL AND worktree_id IS NULL))
-                 ORDER BY created_at DESC LIMIT 1",
-                params![project, worktree_id],
-                |row| row.get(0),
-            )
-            .optional()
-            .context("query active session")?;
+        let select_result = update_result.and_then(|_| {
+            self.conn
+                .query_row(
+                    "SELECT session_id FROM sessions
+                     WHERE status = 'active' AND project = ?1 AND (worktree_id = ?2 OR (?2 IS NULL AND worktree_id IS NULL))
+                     ORDER BY created_at DESC LIMIT 1",
+                    params![project, worktree_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+        });
 
-        Ok(session_id)
+        match select_result {
+            Ok(session_id) => {
+                self.conn
+                    .execute("COMMIT", [])
+                    .context("commit find_active transaction")?;
+                Ok(session_id)
+            }
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e).context("find_active query failed")
+            }
+        }
     }
 }
 
-fn now_ms() -> i64 {
+fn now_ms() -> Result<i64> {
     use std::time::{SystemTime, UNIX_EPOCH};
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(dur) => i64::try_from(dur.as_millis()).unwrap_or(i64::MAX),
-        Err(e) => {
-            tracing::warn!("cortina: system clock before UNIX epoch: {e}");
-            0
-        }
-    }
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+        .map_err(|e| anyhow::anyhow!("system clock before Unix epoch: {e}"))
 }
 
 #[cfg(test)]

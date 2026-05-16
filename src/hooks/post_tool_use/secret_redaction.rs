@@ -191,8 +191,8 @@ fn redact_aws_keys(text: &str) -> String {
             }
 
             if potential_key.to_uppercase().starts_with("AKIA")
-                && potential_key.len() == 20
-                && potential_key[4..].chars().all(char::is_alphanumeric)
+                && potential_key.chars().count() == 20
+                && potential_key.chars().skip(4).all(char::is_alphanumeric)
             {
                 // Skip the matched characters in the main iterator
                 for _ in 0..19 {

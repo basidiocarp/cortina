@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader};
 
 use serde_json::Value;
 
@@ -12,8 +13,8 @@ pub(super) fn parse_transcript(transcript_path: Option<&str>) -> TranscriptSumma
         _ => return TranscriptSummary::default(),
     };
 
-    match std::fs::read_to_string(path) {
-        Ok(content) => parse_jsonl_transcript(&content),
+    match std::fs::File::open(path) {
+        Ok(file) => parse_jsonl_transcript_streaming(BufReader::new(file)),
         Err(e) => {
             tracing::warn!(path = ?path, error = %e, "cortina: transcript parse failed");
             TranscriptSummary::default()
@@ -21,14 +22,32 @@ pub(super) fn parse_transcript(transcript_path: Option<&str>) -> TranscriptSumma
     }
 }
 
+/// Parse a JSONL transcript from a `&str` (used in tests).
+///
+/// In production, `parse_transcript` uses the streaming `BufReader` path to
+/// avoid loading the full file into memory. This wrapper lets existing tests
+/// continue to call a `&str`-accepting signature without modification.
+#[cfg(test)]
 pub(super) fn parse_jsonl_transcript(content: &str) -> TranscriptSummary {
+    parse_jsonl_transcript_streaming(std::io::Cursor::new(content))
+}
+
+/// Parse a JSONL transcript from a `BufRead` source, extracting only what
+/// cortina needs (first human message, tool usage counts, file paths, errors).
+/// Using a streaming reader avoids loading the full transcript into memory —
+/// long sessions can produce 100+ MB transcripts.
+fn parse_jsonl_transcript_streaming(reader: impl BufRead) -> TranscriptSummary {
     let mut summary = TranscriptSummary::default();
     let mut tool_usage: HashMap<String, usize> = HashMap::new();
     let mut first_user_message = false;
     let mut file_set = HashSet::new();
 
-    for line in content.lines() {
-        let line = line.trim();
+    for line_result in reader.lines() {
+        let raw = match line_result {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        let line = raw.trim();
         if line.is_empty() {
             continue;
         }

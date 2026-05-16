@@ -33,13 +33,13 @@ pub struct StaleHandoffWarning {
     pub suggestion: String,
 }
 
-#[allow(
-    clippy::unnecessary_wraps,
-    reason = "Result return type required by dispatch match in main"
-)]
 pub fn handle(input: &str) -> Result<()> {
-    let Some(event) = parse_and_validate_envelope(input) else {
-        return Ok(());
+    let event = match parse_and_validate_envelope(input) {
+        Ok(Some(event)) => event,
+        // Wrong event type (e.g. PostToolUse arriving at the Stop handler) — not an error.
+        Ok(None) => return Ok(()),
+        // True JSON parse failure — exit non-zero so the hook chain surfaces the bad input.
+        Err(e) => anyhow::bail!("cortina stop: unrecognizable or empty hook envelope: {e}"),
     };
 
     let span = tracing::info_span!("cortina.stop", session_id = ?&event.cwd);
@@ -72,23 +72,28 @@ pub fn handle(input: &str) -> Result<()> {
 }
 
 /// Parse and validate the hook envelope and session stop event.
-/// Returns None if the envelope is invalid or not a session stop event.
-fn parse_and_validate_envelope(input: &str) -> Option<crate::events::SessionStopEvent> {
-    let envelope = match ClaudeCodeHookEnvelope::parse(input) {
-        Ok(envelope) => envelope,
-        Err(e) => {
-            eprintln!("cortina: failed to parse event input: {e}");
-            return None;
-        }
+///
+/// Returns:
+/// - `Ok(Some(event))` for a valid session-stop envelope
+/// - `Ok(None)` for a valid envelope of a different event type
+/// - `Err(_)` when the input cannot be parsed at all (JSON failure)
+fn parse_and_validate_envelope(
+    input: &str,
+) -> Result<Option<crate::events::SessionStopEvent>> {
+    let envelope = ClaudeCodeHookEnvelope::parse(input).map_err(|e| {
+        eprintln!("cortina: failed to parse event input: {e}");
+        e
+    })?;
+
+    let Some(event) = envelope.session_stop_event() else {
+        return Ok(None);
     };
 
-    let event = envelope.session_stop_event()?;
-
     if event.cwd.is_empty() {
-        return None;
+        return Ok(None);
     }
 
-    Some(event)
+    Ok(Some(event))
 }
 
 /// Load and merge session context, outcomes, and transcript.
@@ -564,8 +569,21 @@ fn trigger_compile_env_invalidation_if_needed(files_modified: &[String], cwd: &s
 
     if let Some(mut cmd) = resolved_command("rhizome") {
         cmd.args(["compile-env", "--invalidate", "--name", &project_name]);
-        if let Err(e) = cmd.spawn() {
-            tracing::warn!("cortina: rhizome compile-env invalidation spawn failed: {e}");
+        match cmd.spawn() {
+            Ok(mut child) => {
+                match child.wait() {
+                    Ok(status) if !status.success() => {
+                        tracing::warn!(
+                            "cortina: rhizome compile-env invalidation exited with {status}"
+                        );
+                    }
+                    Err(e) => tracing::warn!("cortina: rhizome compile-env wait failed: {e}"),
+                    _ => {}
+                }
+            }
+            Err(e) => {
+                tracing::warn!("cortina: rhizome compile-env invalidation spawn failed: {e}");
+            }
         }
     } else {
         tracing::warn!("stop: rhizome not found, skipping rhizome shutdown");

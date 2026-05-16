@@ -7,7 +7,7 @@ use std::io::SeekFrom;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
@@ -15,23 +15,42 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 const LOCK_STALE_MS: u64 = 30_000;
-const LOCK_WAIT_ATTEMPTS: usize = 1_000;
-const LOCK_WAIT_MS: u64 = 10;
+// 20 attempts × 100ms = 2s maximum wait — short enough to not stall the agent event loop.
+const LOCK_WAIT_ATTEMPTS: usize = 20;
+const LOCK_WAIT_MS: u64 = 100;
 const LOCK_HEARTBEAT_MS: u64 = 5_000;
 const GIT_TIMEOUT: Duration = Duration::from_secs(5);
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Run a git command with a timeout using the channel+thread pattern.
-/// On timeout, returns None; on error, logs debug and returns None.
+/// On timeout, kills the child process and returns None; on error, logs debug and returns None.
 fn run_git_with_timeout(cmd: &mut Command) -> Option<Output> {
     let Ok(child) = cmd.spawn() else {
         tracing::debug!("Failed to spawn git command");
         return None;
     };
+
+    // Share the child handle so we can kill it from the timeout branch.
+    let child_handle = Arc::new(Mutex::new(Some(child)));
+    let child_handle_clone = Arc::clone(&child_handle);
+
     let (tx, rx) = mpsc::channel::<std::io::Result<Output>>();
     std::thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
+        // Take ownership so wait_with_output (which consumes self) can be called.
+        let result = child_handle_clone
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
+            .map(|c| c.wait_with_output())
+            .unwrap_or_else(|| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "child was already taken (killed on timeout)",
+                ))
+            });
+        let _ = tx.send(result);
     });
+
     match rx.recv_timeout(GIT_TIMEOUT) {
         Ok(Ok(output)) => Some(output),
         Ok(Err(_)) => {
@@ -39,7 +58,12 @@ fn run_git_with_timeout(cmd: &mut Command) -> Option<Output> {
             None
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
-            tracing::debug!("git command timed out after 5s");
+            tracing::debug!("git command timed out after 5s — killing child process");
+            if let Ok(mut guard) = child_handle.lock() {
+                if let Some(mut c) = guard.take() {
+                    let _ = c.kill();
+                }
+            }
             None
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -274,6 +298,9 @@ struct FileLockGuard {
     )]
     file: Option<std::sync::Arc<Mutex<fs::File>>>,
     stop_heartbeat: std::sync::Arc<AtomicBool>,
+    /// Dropping this sender wakes the heartbeat thread immediately (via Disconnected
+    /// on recv_timeout) so Drop does not block for up to `LOCK_HEARTBEAT_MS`.
+    heartbeat_stop_tx: Option<mpsc::Sender<()>>,
     heartbeat: Option<JoinHandle<()>>,
 }
 
@@ -303,14 +330,20 @@ impl FileLockGuard {
                         return Err(error);
                     }
                     let stop_heartbeat = std::sync::Arc::new(AtomicBool::new(false));
-                    let heartbeat = heartbeat.then(|| {
+                    let (heartbeat_stop_tx, heartbeat) = if heartbeat {
+                        // The heartbeat thread uses recv_timeout instead of thread::sleep.
+                        // Dropping the sender causes recv_timeout to return Err(Disconnected)
+                        // immediately, waking the heartbeat without waiting for the full sleep.
+                        let (tx, rx) = mpsc::channel::<()>();
                         let heartbeat_stop = std::sync::Arc::clone(&stop_heartbeat);
                         let heartbeat_token = token.clone();
                         let heartbeat_path = lock_path.to_path_buf();
                         let heartbeat_file = std::sync::Arc::clone(&file);
-                        thread::spawn(move || {
-                            while !heartbeat_stop.load(Ordering::Relaxed) {
-                                thread::sleep(Duration::from_millis(LOCK_HEARTBEAT_MS));
+                        let handle = thread::spawn(move || {
+                            loop {
+                                // recv_timeout returns Err on timeout (normal) or if sender
+                                // dropped (Drop called). Either way, check stop flag.
+                                let _ = rx.recv_timeout(Duration::from_millis(LOCK_HEARTBEAT_MS));
                                 if heartbeat_stop.load(Ordering::Relaxed) {
                                     break;
                                 }
@@ -322,13 +355,17 @@ impl FileLockGuard {
                                     break;
                                 }
                             }
-                        })
-                    });
+                        });
+                        (Some(tx), Some(handle))
+                    } else {
+                        (None, None)
+                    };
                     return Ok(Self {
                         lock_path: lock_path.to_path_buf(),
                         token,
                         file: Some(file),
                         stop_heartbeat,
+                        heartbeat_stop_tx,
                         heartbeat,
                     });
                 }
@@ -352,11 +389,25 @@ impl FileLockGuard {
 
 impl Drop for FileLockGuard {
     fn drop(&mut self) {
+        // Signal the heartbeat to stop and wake it immediately from its recv_timeout sleep.
         self.stop_heartbeat.store(true, Ordering::Relaxed);
+        // Drop the sender first: this causes recv_timeout in the heartbeat to return
+        // Err(Disconnected), which (combined with the stop flag) causes the heartbeat
+        // thread to exit without waiting for the full LOCK_HEARTBEAT_MS sleep.
+        drop(self.heartbeat_stop_tx.take());
         if let Some(heartbeat) = self.heartbeat.take() {
             let _ = heartbeat.join();
         }
+        // Close the file handle before removing the path. This avoids a partial
+        // read by other processes on the now-unlinked file.
         let _ = self.file.take();
+        // Check the token before removing to narrow the TOCTOU window: if another
+        // process reclaimed the stale lock and wrote its own token between our
+        // heartbeat stopping and this remove, we skip the remove and leave the
+        // new owner's lock intact. The check-then-act is still advisory and not
+        // perfectly race-free, but it prevents the most common case of deleting
+        // a lock freshly acquired by a concurrent thread or process.
+        // See lock-release-toctou handoff for full rationale.
         if lock_token_matches(&self.lock_path, &self.token) {
             let _ = fs::remove_file(&self.lock_path);
         }

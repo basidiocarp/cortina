@@ -29,17 +29,20 @@ impl Importance {
 }
 
 fn command_path(name: &str) -> Option<PathBuf> {
-    let tool = Tool::from_binary_name(name)?;
-    discover(tool).map(|info| info.binary_path).or({
-        #[cfg(test)]
-        {
-            Some(PathBuf::from(name))
-        }
-        #[cfg(not(test))]
-        {
-            None
-        }
-    })
+    // In tests, skip the discovery probe (which spawns a real process and can
+    // stall for up to 5 s) and return the bare binary name so the injected mock
+    // runner controls all I/O without real subprocess overhead.
+    #[cfg(test)]
+    {
+        Tool::from_binary_name(name)?;
+        return Some(PathBuf::from(name));
+    }
+
+    #[cfg(not(test))]
+    {
+        let tool = Tool::from_binary_name(name)?;
+        discover(tool).map(|info| info.binary_path)
+    }
 }
 
 fn span_context(tool: &str) -> SpanContext {
