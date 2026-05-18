@@ -151,7 +151,7 @@ impl crate::pipeline::StageHandler for HookExecutorHandler {
 
         let input = HookInput {
             hook_type,
-            tool_name: ctx.tool_name.map(|s| s.to_string()),
+            tool_name: ctx.tool_name.map(std::string::ToString::to_string),
             context: ctx.payload.clone(),
         };
 
