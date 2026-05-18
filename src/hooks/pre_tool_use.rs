@@ -303,6 +303,42 @@ fn grep_advisory_for_pattern(pattern: &str) -> Option<ToolAdvisory> {
     })
 }
 
+/// Filter tool calls by the check window defined in a rule.
+/// Returns the filtered tool calls that fall within the check window.
+/// Currently, only "session" (all calls) is supported; future windows could be
+/// "recent_10" (last 10 calls) or "recent_5" (last 5 calls).
+fn filter_tool_calls_by_window(
+    tool_calls: &[crate::tool_usage::ToolCallEntry],
+    check_window: &str,
+) -> Vec<crate::tool_usage::ToolCallEntry> {
+    match check_window {
+        "session" => {
+            // Include all calls in the session
+            tool_calls.to_vec()
+        }
+        "recent_10" => {
+            // Include only the last 10 calls
+            if tool_calls.len() > 10 {
+                tool_calls[tool_calls.len() - 10..].to_vec()
+            } else {
+                tool_calls.to_vec()
+            }
+        }
+        "recent_5" => {
+            // Include only the last 5 calls
+            if tool_calls.len() > 5 {
+                tool_calls[tool_calls.len() - 5..].to_vec()
+            } else {
+                tool_calls.to_vec()
+            }
+        }
+        _ => {
+            // Default to session for unknown windows
+            tool_calls.to_vec()
+        }
+    }
+}
+
 fn write_advisory(
     cwd: Option<&str>,
     operation: &str,
@@ -316,20 +352,40 @@ fn write_advisory(
         return None;
     }
 
-    let called_names: Vec<&str> = tool_calls.iter().map(|e| e.tool_name.as_str()).collect();
     let rules = matching_rules(DEFAULT_RULES, operation, file_path);
 
     let rule = rules
         .into_iter()
-        .find(|rule| !any_recommended_called(rule, &called_names))?;
+        .find(|rule| {
+            // Apply check_window filter to determine which tool calls to consider
+            let filtered_calls = filter_tool_calls_by_window(&tool_calls, rule.check_window);
+            let filtered_names: Vec<&str> = filtered_calls.iter().map(|e| e.tool_name.as_str()).collect();
+            !any_recommended_called(rule, &filtered_names)
+        })?;
 
     let extension = file_path.and_then(code_extension).unwrap_or_default();
     let tools_list = rule.recommended_tools.join(", ");
     let file_label = file_path.unwrap_or("this file");
-    let message = format!(
-        "[cortina] Consider calling {tools_list} before editing {file_label} — \
-        rhizome tools can help with structure and symbol navigation"
-    );
+
+    // Use rule.severity to vary the advisory message strength.
+    // "required" → stricter wording; "recommended" → softer.
+    let advisory_text = match rule.severity {
+        "required" => {
+            format!(
+                "[cortina] Must call {tools_list} before editing {file_label} — \
+                rhizome tools are required for safe code modification"
+            )
+        }
+        _ => {
+            // "recommended" and all other levels use the softer advisory
+            format!(
+                "[cortina] Consider calling {tools_list} before editing {file_label} — \
+                rhizome tools can help with structure and symbol navigation"
+            )
+        }
+    };
+
+    let message = advisory_text;
 
     Some(ToolAdvisory {
         message,

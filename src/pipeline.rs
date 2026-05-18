@@ -16,17 +16,7 @@ use std::fmt;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PipelineStage {
     ToolCallReceived,
-    #[allow(dead_code)]
-    ToolCallValidated,
-    #[allow(dead_code)]
-    ToolCallDispatched,
     ToolCallCompleted,
-    #[allow(dead_code)]
-    OutputCaptured,
-    #[allow(dead_code)]
-    OutputFiltered,
-    #[allow(dead_code)]
-    OutputStored,
     SessionSignalEmitted,
 }
 
@@ -34,12 +24,7 @@ impl fmt::Display for PipelineStage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PipelineStage::ToolCallReceived => write!(f, "ToolCallReceived"),
-            PipelineStage::ToolCallValidated => write!(f, "ToolCallValidated"),
-            PipelineStage::ToolCallDispatched => write!(f, "ToolCallDispatched"),
             PipelineStage::ToolCallCompleted => write!(f, "ToolCallCompleted"),
-            PipelineStage::OutputCaptured => write!(f, "OutputCaptured"),
-            PipelineStage::OutputFiltered => write!(f, "OutputFiltered"),
-            PipelineStage::OutputStored => write!(f, "OutputStored"),
             PipelineStage::SessionSignalEmitted => write!(f, "SessionSignalEmitted"),
         }
     }

@@ -105,6 +105,63 @@ fn is_leap_year(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
 }
 
+/// Return the list of known available tools with their source.
+fn available_ecosystem_tools() -> Vec<ToolAvailableItem> {
+    vec![
+        // Hyphae tools
+        ToolAvailableItem {
+            tool_name: "mcp__hyphae__hyphae_memory_recall".to_string(),
+            source: "hyphae".to_string(),
+        },
+        ToolAvailableItem {
+            tool_name: "mcp__hyphae__hyphae_memory_store".to_string(),
+            source: "hyphae".to_string(),
+        },
+        ToolAvailableItem {
+            tool_name: "mcp__hyphae__hyphae_memory_consolidate".to_string(),
+            source: "hyphae".to_string(),
+        },
+        // Rhizome tools
+        ToolAvailableItem {
+            tool_name: "mcp__rhizome__search_symbols".to_string(),
+            source: "rhizome".to_string(),
+        },
+        ToolAvailableItem {
+            tool_name: "mcp__rhizome__find_references".to_string(),
+            source: "rhizome".to_string(),
+        },
+        ToolAvailableItem {
+            tool_name: "mcp__rhizome__get_definition".to_string(),
+            source: "rhizome".to_string(),
+        },
+        ToolAvailableItem {
+            tool_name: "mcp__rhizome__get_structure".to_string(),
+            source: "rhizome".to_string(),
+        },
+        ToolAvailableItem {
+            tool_name: "mcp__rhizome__get_symbols".to_string(),
+            source: "rhizome".to_string(),
+        },
+        // Standard tools (available via Claude)
+        ToolAvailableItem {
+            tool_name: "Bash".to_string(),
+            source: "native".to_string(),
+        },
+        ToolAvailableItem {
+            tool_name: "Read".to_string(),
+            source: "native".to_string(),
+        },
+        ToolAvailableItem {
+            tool_name: "Write".to_string(),
+            source: "native".to_string(),
+        },
+        ToolAvailableItem {
+            tool_name: "Edit".to_string(),
+            source: "native".to_string(),
+        },
+    ]
+}
+
 pub(super) fn emit_tool_usage_event(
     session_id: &str,
     task_id: Option<&str>,
@@ -146,7 +203,7 @@ pub(super) fn emit_tool_usage_event(
         session_id: session_id.to_string(),
         host: "claude_code".to_string(),
         timestamp,
-        tools_available: Vec::new(),
+        tools_available: available_ecosystem_tools(),
         tools_called,
         tools_relevant_unused,
         task_id: task_id.map(str::to_string),

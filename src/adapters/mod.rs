@@ -1,8 +1,11 @@
 use anyhow::Result;
 use clap::Subcommand;
+use std::path::PathBuf;
 
 use crate::env_gate::EnvGate;
 use crate::hooks;
+use crate::hooks::executor::HookExecutor;
+use crate::hooks::types::{HookInput, HookType};
 use crate::pipeline::{LoggingHandler, Pipeline, PipelineContext, PipelineStage};
 use crate::policy::{CapturePolicy, capture_policy};
 
@@ -115,7 +118,69 @@ fn init_pipeline() -> Pipeline {
     pipeline.register(Box::new(LoggingHandler::new(
         PipelineStage::SessionSignalEmitted,
     )));
+    // Register hook executor handler. For now, hook directories are empty;
+    // in the future, CORTINA_HOOKS_DIR env var can be used to configure them.
+    pipeline.register(Box::new(HookExecutorHandler::new(vec![])));
     pipeline
+}
+
+/// Handler that executes external hook scripts via HookExecutor.
+struct HookExecutorHandler {
+    executor: HookExecutor,
+}
+
+impl HookExecutorHandler {
+    fn new(hooks_dirs: Vec<PathBuf>) -> Self {
+        HookExecutorHandler {
+            executor: HookExecutor::new(hooks_dirs),
+        }
+    }
+}
+
+impl crate::pipeline::StageHandler for HookExecutorHandler {
+    fn stage(&self) -> PipelineStage {
+        PipelineStage::ToolCallReceived
+    }
+
+    fn handle(&self, ctx: &PipelineContext<'_>) -> Result<(), Box<dyn std::error::Error>> {
+        // Map pipeline stage and tool info to HookType and construct HookInput
+        let hook_type = match ctx.tool_name {
+            Some(_) => HookType::PreToolUse,
+            None => HookType::PreCompact, // Default for non-tool events
+        };
+
+        let input = HookInput {
+            hook_type,
+            tool_name: ctx.tool_name.map(|s| s.to_string()),
+            context: ctx.payload.clone(),
+        };
+
+        let output = self.executor.run_hooks(hook_type, &input);
+
+        // Emit hook signal based on outcome
+        let signal_type = if output.halt_turn {
+            "halt_turn"
+        } else if output.cancel {
+            "block_tool"
+        } else {
+            "allow"
+        };
+
+        let exit_code = match signal_type {
+            "block_tool" => 2,
+            "halt_turn" => 49,
+            _ => 0,
+        };
+
+        let signal = crate::signals::HookSignal::new(signal_type, exit_code);
+        if let Ok(json) = serde_json::to_string(&signal) {
+            eprintln!("cortina: hook-signal: {json}");
+        }
+
+        // For now, we don't act on the output (fail-open). In the future,
+        // output.cancel and output.halt_turn could be used to block the operation.
+        Ok(())
+    }
 }
 
 // run_hook always succeeds; the Result<()> return here keeps the public
