@@ -464,7 +464,10 @@ where
 
         // Synchronous fallback (CORTINA_ASYNC_SESSION_END=false)
         let Ok(output) = run_command(&mut cmd) else {
-            warn!("Failed to execute hyphae session end, state_file = {}", path.display());
+            warn!(
+                "Failed to execute hyphae session end, state_file = {}",
+                path.display()
+            );
             // Mark session orphaned in SQLite; state file was already removed above.
             let db_store = SessionStore::open().ok();
             if let Some(store) = db_store {
@@ -671,8 +674,8 @@ where
     #[cfg(not(test))]
     let output = {
         let path = PathBuf::from(project_root);
-        git_command_output_with_timeout(&path, &["rev-parse", "--abbrev-ref", "HEAD"])
-            .or_else(|| {
+        git_command_output_with_timeout(&path, &["rev-parse", "--abbrev-ref", "HEAD"]).or_else(
+            || {
                 run_command(&mut cmd).ok().and_then(|output| {
                     if output.status.success() {
                         String::from_utf8(output.stdout).ok()
@@ -680,7 +683,8 @@ where
                         None
                     }
                 })
-            })
+            },
+        )
     };
 
     #[cfg(test)]

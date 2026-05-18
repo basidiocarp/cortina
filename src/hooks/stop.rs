@@ -77,9 +77,7 @@ pub fn handle(input: &str) -> Result<()> {
 /// - `Ok(Some(event))` for a valid session-stop envelope
 /// - `Ok(None)` for a valid envelope of a different event type
 /// - `Err(_)` when the input cannot be parsed at all (JSON failure)
-fn parse_and_validate_envelope(
-    input: &str,
-) -> Result<Option<crate::events::SessionStopEvent>> {
+fn parse_and_validate_envelope(input: &str) -> Result<Option<crate::events::SessionStopEvent>> {
     let envelope = ClaudeCodeHookEnvelope::parse(input).map_err(|e| {
         eprintln!("cortina: failed to parse event input: {e}");
         e
@@ -570,17 +568,15 @@ fn trigger_compile_env_invalidation_if_needed(files_modified: &[String], cwd: &s
     if let Some(mut cmd) = resolved_command("rhizome") {
         cmd.args(["compile-env", "--invalidate", "--name", &project_name]);
         match cmd.spawn() {
-            Ok(mut child) => {
-                match child.wait() {
-                    Ok(status) if !status.success() => {
-                        tracing::warn!(
-                            "cortina: rhizome compile-env invalidation exited with {status}"
-                        );
-                    }
-                    Err(e) => tracing::warn!("cortina: rhizome compile-env wait failed: {e}"),
-                    _ => {}
+            Ok(mut child) => match child.wait() {
+                Ok(status) if !status.success() => {
+                    tracing::warn!(
+                        "cortina: rhizome compile-env invalidation exited with {status}"
+                    );
                 }
-            }
+                Err(e) => tracing::warn!("cortina: rhizome compile-env wait failed: {e}"),
+                _ => {}
+            },
             Err(e) => {
                 tracing::warn!("cortina: rhizome compile-env invalidation spawn failed: {e}");
             }

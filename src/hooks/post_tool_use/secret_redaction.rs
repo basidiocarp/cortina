@@ -82,7 +82,10 @@ fn redact_single_key_assignment<'a>(text: Cow<'a, str>, key_name: &str) -> Cow<'
 
             // Look for = or : after the key
             if let Some(eq_pos) = after_key_lower.find('=') {
-                result.push_str(line.get(..key_pos + key_name.len() + eq_pos).unwrap_or(line));
+                result.push_str(
+                    line.get(..key_pos + key_name.len() + eq_pos)
+                        .unwrap_or(line),
+                );
                 result.push('=');
                 result.push_str("[REDACTED]");
                 let remaining = match after_key.get(eq_pos + 1..) {
@@ -96,7 +99,10 @@ fn redact_single_key_assignment<'a>(text: Cow<'a, str>, key_name: &str) -> Cow<'
                 result.push('\n');
                 continue;
             } else if let Some(colon_pos) = after_key_lower.find(':') {
-                result.push_str(line.get(..key_pos + key_name.len() + colon_pos).unwrap_or(line));
+                result.push_str(
+                    line.get(..key_pos + key_name.len() + colon_pos)
+                        .unwrap_or(line),
+                );
                 result.push(':');
                 result.push_str(" [REDACTED]");
                 let remaining = match after_key.get(colon_pos + 1..) {

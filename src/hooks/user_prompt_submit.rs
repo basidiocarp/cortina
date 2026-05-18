@@ -373,8 +373,7 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
     };
 
     // Share the child handle so we can kill it from the timeout branch.
-    let child_handle: Arc<Mutex<Option<std::process::Child>>> =
-        Arc::new(Mutex::new(Some(child)));
+    let child_handle: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(Some(child)));
     let child_handle_clone = Arc::clone(&child_handle);
 
     let (tx, rx) = mpsc::channel();

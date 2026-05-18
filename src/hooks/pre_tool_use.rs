@@ -354,14 +354,15 @@ fn write_advisory(
 
     let rules = matching_rules(DEFAULT_RULES, operation, file_path);
 
-    let rule = rules
-        .into_iter()
-        .find(|rule| {
-            // Apply check_window filter to determine which tool calls to consider
-            let filtered_calls = filter_tool_calls_by_window(&tool_calls, rule.check_window);
-            let filtered_names: Vec<&str> = filtered_calls.iter().map(|e| e.tool_name.as_str()).collect();
-            !any_recommended_called(rule, &filtered_names)
-        })?;
+    let rule = rules.into_iter().find(|rule| {
+        // Apply check_window filter to determine which tool calls to consider
+        let filtered_calls = filter_tool_calls_by_window(&tool_calls, rule.check_window);
+        let filtered_names: Vec<&str> = filtered_calls
+            .iter()
+            .map(|e| e.tool_name.as_str())
+            .collect();
+        !any_recommended_called(rule, &filtered_names)
+    })?;
 
     let extension = file_path.and_then(code_extension).unwrap_or_default();
     let tools_list = rule.recommended_tools.join(", ");

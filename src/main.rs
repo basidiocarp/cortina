@@ -169,7 +169,11 @@ fn print_policy(json: bool) -> Result<()> {
         "rhizome_suggest_threshold={}",
         policy.rhizome_suggest_threshold
     );
-    let _ = writeln!(out, "rhizome_suggest_every={}", policy.rhizome_suggest_every);
+    let _ = writeln!(
+        out,
+        "rhizome_suggest_every={}",
+        policy.rhizome_suggest_every
+    );
     let _ = writeln!(
         out,
         "rhizome_suggest_enabled={}",

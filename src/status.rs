@@ -226,7 +226,11 @@ pub fn print_doctor(json: bool, cwd: Option<&str>) -> Result<()> {
     print_file_health(&mut out, "pending_exports", &report.pending_exports);
     print_file_health(&mut out, "pending_ingest", &report.pending_ingest);
     print_file_health(&mut out, "evidence_bridge", &report.evidence_bridge);
-    let _ = writeln!(out, "evidence_refs_written={}", report.evidence_refs_written);
+    let _ = writeln!(
+        out,
+        "evidence_refs_written={}",
+        report.evidence_refs_written
+    );
     let _ = writeln!(
         out,
         "evidence_write_failures={}",
