@@ -356,9 +356,9 @@ EOF
         let hooks_dir = TempDir::new().expect("create temp dir");
         let hook_path = hooks_dir.path().join("pre_tool_use");
 
-        let script = r#"#!/bin/sh
+        let script = r"#!/bin/sh
 exit 2
-"#;
+";
 
         std::fs::write(&hook_path, script).expect("write hook script");
         #[cfg(unix)]

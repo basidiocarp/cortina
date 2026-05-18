@@ -26,7 +26,7 @@ pub fn redact_secrets(s: &str) -> String {
 }
 
 /// Redacts key=value or key: value assignments.
-fn redact_key_assignments<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
+fn redact_key_assignments(text: Cow<'_, str>) -> Cow<'_, str> {
     let keys = [
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
@@ -69,14 +69,11 @@ fn redact_single_key_assignment<'a>(text: Cow<'a, str>, key_name: &str) -> Cow<'
 
         // Check if this line contains the key
         if let Some(key_pos) = line_lower.find(&key_lower) {
-            let after_key = match line.get(key_pos + key_name.len()..) {
-                Some(s) => s,
-                None => {
-                    // Key is at the end of line, nothing more to redact
-                    result.push_str(line);
-                    result.push('\n');
-                    continue;
-                }
+            let Some(after_key) = line.get(key_pos + key_name.len()..) else {
+                // Key is at the end of line, nothing more to redact
+                result.push_str(line);
+                result.push('\n');
+                continue;
             };
             let after_key_lower = after_key.to_ascii_lowercase();
 
@@ -88,10 +85,7 @@ fn redact_single_key_assignment<'a>(text: Cow<'a, str>, key_name: &str) -> Cow<'
                 );
                 result.push('=');
                 result.push_str("[REDACTED]");
-                let remaining = match after_key.get(eq_pos + 1..) {
-                    Some(s) => s,
-                    None => "",
-                };
+                let remaining = after_key.get(eq_pos + 1..).unwrap_or_default();
                 // Find next space
                 if let Some(space_pos) = remaining.find(' ') {
                     result.push_str(remaining.get(space_pos..).unwrap_or(""));
@@ -105,10 +99,7 @@ fn redact_single_key_assignment<'a>(text: Cow<'a, str>, key_name: &str) -> Cow<'
                 );
                 result.push(':');
                 result.push_str(" [REDACTED]");
-                let remaining = match after_key.get(colon_pos + 1..) {
-                    Some(s) => s,
-                    None => "",
-                };
+                let remaining = after_key.get(colon_pos + 1..).unwrap_or_default();
                 // Skip whitespace after colon
                 let trimmed_remaining = remaining.trim_start();
                 if trimmed_remaining.is_empty() {
@@ -138,7 +129,7 @@ fn redact_single_key_assignment<'a>(text: Cow<'a, str>, key_name: &str) -> Cow<'
 /// Redacts bearer token values.
 ///
 /// Returns `Cow::Borrowed` when no bearer token is found, avoiding allocation.
-fn redact_bearer_tokens<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
+fn redact_bearer_tokens(text: Cow<'_, str>) -> Cow<'_, str> {
     // Quick pre-check before allocating.
     if !text.to_lowercase().contains("bearer") {
         return text;
@@ -190,7 +181,7 @@ fn redact_bearer_tokens<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
 /// Redacts Authorization header values.
 ///
 /// Returns `Cow::Borrowed` when no authorization header is found, avoiding allocation.
-fn redact_authorization_header<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
+fn redact_authorization_header(text: Cow<'_, str>) -> Cow<'_, str> {
     // Quick pre-check before allocating.
     if !text.to_lowercase().contains("authorization") {
         return text;
@@ -225,7 +216,7 @@ fn redact_authorization_header<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
 /// Matches exactly AKIA + 16 alphanumeric characters (20 total).
 ///
 /// Returns `Cow::Borrowed` when no AKIA key is found, avoiding allocation.
-fn redact_aws_keys<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
+fn redact_aws_keys(text: Cow<'_, str>) -> Cow<'_, str> {
     // Quick pre-check before allocating.
     if !text.to_uppercase().contains("AKIA") {
         return text;
@@ -271,7 +262,7 @@ fn redact_aws_keys<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
 /// Redacts credentials in URLs (e.g. `https://user:pass@host`).
 ///
 /// Returns `Cow::Borrowed` when no URL credentials are found, avoiding allocation.
-fn redact_url_credentials<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
+fn redact_url_credentials(text: Cow<'_, str>) -> Cow<'_, str> {
     // Quick pre-check before allocating.
     let has_url = text.contains("http://") || text.contains("https://");
     if !has_url || !text.contains('@') {

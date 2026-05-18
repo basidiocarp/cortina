@@ -43,9 +43,8 @@ fn parse_jsonl_transcript_streaming(reader: impl BufRead) -> TranscriptSummary {
     let mut file_set = HashSet::new();
 
     for line_result in reader.lines() {
-        let raw = match line_result {
-            Ok(l) => l,
-            Err(_) => break,
+        let Ok(raw) = line_result else {
+            break;
         };
         let line = raw.trim();
         if line.is_empty() {

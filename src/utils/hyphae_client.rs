@@ -5,9 +5,11 @@ use std::sync::OnceLock;
 #[cfg(unix)]
 use std::time::Duration;
 
+use spore::Tool;
+#[cfg(not(test))]
+use spore::discover;
 use spore::logging::{SpanContext, subprocess_span, tool_span};
 use spore::telemetry::TraceContextCarrier;
-use spore::{Tool, discover};
 use tracing::{debug, warn};
 
 #[derive(Debug, Clone, Copy)]
@@ -35,7 +37,7 @@ fn command_path(name: &str) -> Option<PathBuf> {
     #[cfg(test)]
     {
         Tool::from_binary_name(name)?;
-        return Some(PathBuf::from(name));
+        Some(PathBuf::from(name))
     }
 
     #[cfg(not(test))]

@@ -37,13 +37,10 @@ fn run_with_timeout(cmd: &mut Command) -> std::io::Result<Output> {
             .lock()
             .ok()
             .and_then(|mut guard| guard.take())
-            .map(|c| c.wait_with_output())
-            .unwrap_or_else(|| {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "hyphae child was killed before wait",
-                ))
-            });
+            .map_or_else(
+                || Err(std::io::Error::other("hyphae child was killed before wait")),
+                std::process::Child::wait_with_output,
+            );
         let _ = tx.send(result);
     });
 
@@ -841,6 +838,7 @@ where
     })
 }
 
+#[cfg_attr(not(test), allow(unused_variables, unused_mut))]
 fn match_active_session<F>(
     identity: &SessionIdentity,
     session_id: &str,
@@ -914,11 +912,55 @@ where
     })
 }
 
+fn session_identity_for_cwd(cwd: Option<&str>) -> Option<SessionIdentity> {
+    session_identity_for_cwd_with(cwd, Command::output)
+}
+
+pub(crate) fn scope_identity_for_cwd(cwd: Option<&str>) -> Option<(String, String)> {
+    let identity = session_identity_for_cwd(cwd)?;
+    Some((identity.project_root, identity.worktree_id))
+}
+
+pub(super) fn session_identity_for_cwd_with<F>(
+    cwd: Option<&str>,
+    mut run_command: F,
+) -> Option<SessionIdentity>
+where
+    F: FnMut(&mut Command) -> std::io::Result<Output>,
+{
+    let scope = scope_hash(cwd);
+    let cwd = resolved_cwd(cwd)?;
+    let project_root = cwd.to_string_lossy().to_string();
+
+    // Use the git dir path when available so linked worktrees get distinct stable ids.
+    // Outside git, fall back to the canonical root path and mark the source explicitly.
+    let worktree_id = git_command_output_with_timeout(&cwd, &["rev-parse", "--absolute-git-dir"])
+        .or_else(|| {
+            git_command_output(&cwd, &["rev-parse", "--absolute-git-dir"], &mut run_command)
+        })
+        .map(PathBuf::from)
+        .map(canonicalize_path)
+        .map_or_else(
+            || format!("path:{}", stable_identity_hash(project_root.as_str())),
+            |path| {
+                format!(
+                    "git:{}",
+                    stable_identity_hash(path.to_string_lossy().as_ref())
+                )
+            },
+        );
+
+    Some(SessionIdentity {
+        project: project_name_from_root(&cwd)?,
+        project_root,
+        worktree_id,
+        scope,
+    })
+}
+
 #[cfg(test)]
 #[allow(unsafe_code)]
 mod tests {
-    use super::*;
-
     #[test]
     fn async_disabled_by_default_in_tests() {
         unsafe {
@@ -970,50 +1012,4 @@ mod tests {
             std::env::remove_var("CORTINA_ASYNC_SESSION_END");
         }
     }
-}
-
-fn session_identity_for_cwd(cwd: Option<&str>) -> Option<SessionIdentity> {
-    session_identity_for_cwd_with(cwd, Command::output)
-}
-
-pub(crate) fn scope_identity_for_cwd(cwd: Option<&str>) -> Option<(String, String)> {
-    let identity = session_identity_for_cwd(cwd)?;
-    Some((identity.project_root, identity.worktree_id))
-}
-
-pub(super) fn session_identity_for_cwd_with<F>(
-    cwd: Option<&str>,
-    mut run_command: F,
-) -> Option<SessionIdentity>
-where
-    F: FnMut(&mut Command) -> std::io::Result<Output>,
-{
-    let scope = scope_hash(cwd);
-    let cwd = resolved_cwd(cwd)?;
-    let project_root = cwd.to_string_lossy().to_string();
-
-    // Use the git dir path when available so linked worktrees get distinct stable ids.
-    // Outside git, fall back to the canonical root path and mark the source explicitly.
-    let worktree_id = git_command_output_with_timeout(&cwd, &["rev-parse", "--absolute-git-dir"])
-        .or_else(|| {
-            git_command_output(&cwd, &["rev-parse", "--absolute-git-dir"], &mut run_command)
-        })
-        .map(PathBuf::from)
-        .map(canonicalize_path)
-        .map_or_else(
-            || format!("path:{}", stable_identity_hash(project_root.as_str())),
-            |path| {
-                format!(
-                    "git:{}",
-                    stable_identity_hash(path.to_string_lossy().as_ref())
-                )
-            },
-        );
-
-    Some(SessionIdentity {
-        project: project_name_from_root(&cwd)?,
-        project_root,
-        worktree_id,
-        scope,
-    })
 }
