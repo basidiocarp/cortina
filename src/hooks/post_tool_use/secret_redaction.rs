@@ -1,3 +1,7 @@
+// Keep in sync with hyphae/crates/hyphae-core/src/secrets.rs.
+// Cortina uses hand-rolled string matching; hyphae uses regex. When adding
+// or removing a pattern category, update both files.
+
 use std::borrow::Cow;
 
 /// Redacts secrets and sensitive information from strings.
