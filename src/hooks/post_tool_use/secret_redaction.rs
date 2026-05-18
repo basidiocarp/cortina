@@ -44,6 +44,7 @@ fn redact_key_assignments(text: &str) -> String {
 /// Redacts a single key assignment.
 /// Uses `to_ascii_lowercase` to preserve byte positions for ASCII key names.
 /// This is safe because key names (`API_KEY`, `PASSWORD`, etc.) are pure ASCII.
+/// Uses safe byte-indexing via `find()` to avoid panicking on multi-byte UTF-8 boundaries.
 fn redact_single_key_assignment(text: &str, key_name: &str) -> String {
     let mut result = String::new();
     let key_lower = key_name.to_ascii_lowercase();
@@ -53,26 +54,40 @@ fn redact_single_key_assignment(text: &str, key_name: &str) -> String {
 
         // Check if this line contains the key
         if let Some(key_pos) = line_lower.find(&key_lower) {
-            let after_key = &line[key_pos + key_name.len()..];
+            let after_key = match line.get(key_pos + key_name.len()..) {
+                Some(s) => s,
+                None => {
+                    // Key is at the end of line, nothing more to redact
+                    result.push_str(line);
+                    result.push('\n');
+                    continue;
+                }
+            };
             let after_key_lower = after_key.to_ascii_lowercase();
 
             // Look for = or : after the key
             if let Some(eq_pos) = after_key_lower.find('=') {
-                result.push_str(&line[..key_pos + key_name.len() + eq_pos]);
+                result.push_str(line.get(..key_pos + key_name.len() + eq_pos).unwrap_or(line));
                 result.push('=');
                 result.push_str("[REDACTED]");
-                let remaining = &after_key[eq_pos + 1..];
+                let remaining = match after_key.get(eq_pos + 1..) {
+                    Some(s) => s,
+                    None => "",
+                };
                 // Find next space
                 if let Some(space_pos) = remaining.find(' ') {
-                    result.push_str(&remaining[space_pos..]);
+                    result.push_str(remaining.get(space_pos..).unwrap_or(""));
                 }
                 result.push('\n');
                 continue;
             } else if let Some(colon_pos) = after_key_lower.find(':') {
-                result.push_str(&line[..key_pos + key_name.len() + colon_pos]);
+                result.push_str(line.get(..key_pos + key_name.len() + colon_pos).unwrap_or(line));
                 result.push(':');
                 result.push_str(" [REDACTED]");
-                let remaining = &after_key[colon_pos + 1..];
+                let remaining = match after_key.get(colon_pos + 1..) {
+                    Some(s) => s,
+                    None => "",
+                };
                 // Skip whitespace after colon
                 let trimmed_remaining = remaining.trim_start();
                 if trimmed_remaining.is_empty() {
@@ -81,7 +96,7 @@ fn redact_single_key_assignment(text: &str, key_name: &str) -> String {
                 }
                 // Find next space to preserve rest of line
                 if let Some(space_pos) = trimmed_remaining.find(' ') {
-                    result.push_str(&trimmed_remaining[space_pos..]);
+                    result.push_str(trimmed_remaining.get(space_pos..).unwrap_or(""));
                 }
                 result.push('\n');
                 continue;
@@ -172,6 +187,7 @@ fn redact_authorization_header(text: &str) -> String {
 }
 
 /// Redacts AWS-style keys (AKIA prefix).
+/// Matches exactly AKIA + 16 alphanumeric characters (20 total).
 fn redact_aws_keys(text: &str) -> String {
     let mut result = String::new();
     let mut chars = text.chars().peekable();
@@ -194,7 +210,7 @@ fn redact_aws_keys(text: &str) -> String {
                 && potential_key.chars().count() == 20
                 && potential_key.chars().skip(4).all(char::is_alphanumeric)
             {
-                // Skip the matched characters in the main iterator
+                // Skip the matched characters in the main iterator (19 more chars after the 'A' we already consumed)
                 for _ in 0..19 {
                     chars.next();
                 }
@@ -320,5 +336,19 @@ mod tests {
         assert!(output.contains("Test passed"));
         assert!(output.contains("[REDACTED]"));
         assert!(!output.contains("secret123"));
+    }
+
+    #[test]
+    fn test_redact_multibyte_safe() {
+        let input = "token_🔑=supersecretvalue123";
+        let _ = redact_secrets(input); // must not panic
+    }
+
+    #[test]
+    fn test_redact_aws_key_full_coverage() {
+        let input = "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE";
+        let output = redact_secrets(input);
+        assert!(!output.contains("AKIAIOSFODNN7EXAMPLE"));
+        assert!(!output.contains("EXAMPLE")); // last 7 chars of the key body
     }
 }
