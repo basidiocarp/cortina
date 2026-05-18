@@ -41,13 +41,14 @@ fn run_git_with_timeout(cmd: &mut Command) -> Option<Output> {
             .lock()
             .ok()
             .and_then(|mut guard| guard.take())
-            .map(|c| c.wait_with_output())
-            .unwrap_or_else(|| {
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "child was already taken (killed on timeout)",
-                ))
-            });
+            .map_or_else(
+                || {
+                    Err(std::io::Error::other(
+                        "child was already taken (killed on timeout)",
+                    ))
+                },
+                std::process::Child::wait_with_output,
+            );
         let _ = tx.send(result);
     });
 
@@ -299,7 +300,7 @@ struct FileLockGuard {
     file: Option<std::sync::Arc<Mutex<fs::File>>>,
     stop_heartbeat: std::sync::Arc<AtomicBool>,
     /// Dropping this sender wakes the heartbeat thread immediately (via Disconnected
-    /// on recv_timeout) so Drop does not block for up to `LOCK_HEARTBEAT_MS`.
+    /// on `recv_timeout`) so Drop does not block for up to `LOCK_HEARTBEAT_MS`.
     heartbeat_stop_tx: Option<mpsc::Sender<()>>,
     heartbeat: Option<JoinHandle<()>>,
 }

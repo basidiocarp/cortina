@@ -124,7 +124,7 @@ fn init_pipeline() -> Pipeline {
     pipeline
 }
 
-/// Handler that executes external hook scripts via HookExecutor.
+/// Handler that executes external hook scripts via `HookExecutor`.
 struct HookExecutorHandler {
     executor: HookExecutor,
 }

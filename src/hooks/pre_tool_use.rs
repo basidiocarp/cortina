@@ -306,7 +306,7 @@ fn grep_advisory_for_pattern(pattern: &str) -> Option<ToolAdvisory> {
 /// Filter tool calls by the check window defined in a rule.
 /// Returns the filtered tool calls that fall within the check window.
 /// Currently, only "session" (all calls) is supported; future windows could be
-/// "recent_10" (last 10 calls) or "recent_5" (last 5 calls).
+/// "`recent_10`" (last 10 calls) or "`recent_5`" (last 5 calls).
 fn filter_tool_calls_by_window(
     tool_calls: &[crate::tool_usage::ToolCallEntry],
     check_window: &str,
