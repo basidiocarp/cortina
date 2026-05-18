@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 /// Redacts secrets and sensitive information from strings.
 ///
 /// This function replaces secret-like patterns with placeholder text to prevent
@@ -7,20 +9,20 @@
 /// - Authorization headers
 /// - Generic secrets and passwords
 pub fn redact_secrets(s: &str) -> String {
-    let mut result = s.to_string();
-
-    // Redact in this order to handle overlapping patterns
-    result = redact_key_assignments(&result);
-    result = redact_bearer_tokens(&result);
-    result = redact_authorization_header(&result);
-    result = redact_aws_keys(&result);
-    result = redact_url_credentials(&result);
-
-    result
+    // Use Cow<str> to avoid allocations when a stage produces no changes.
+    // Each stage borrows from the previous result; only stages that find a
+    // match convert to an owned String.
+    let result: Cow<str> = Cow::Borrowed(s);
+    let result = redact_key_assignments(result);
+    let result = redact_bearer_tokens(result);
+    let result = redact_authorization_header(result);
+    let result = redact_aws_keys(result);
+    let result = redact_url_credentials(result);
+    result.into_owned()
 }
 
 /// Redacts key=value or key: value assignments.
-fn redact_key_assignments(text: &str) -> String {
+fn redact_key_assignments<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
     let keys = [
         "ANTHROPIC_API_KEY",
         "OPENAI_API_KEY",
@@ -32,10 +34,10 @@ fn redact_key_assignments(text: &str) -> String {
         "SK_TEST",
     ];
 
-    let mut result = text.to_string();
+    let mut result = text;
 
     for key in &keys {
-        result = redact_single_key_assignment(&result, key);
+        result = redact_single_key_assignment(result, key);
     }
 
     result
@@ -45,9 +47,18 @@ fn redact_key_assignments(text: &str) -> String {
 /// Uses `to_ascii_lowercase` to preserve byte positions for ASCII key names.
 /// This is safe because key names (`API_KEY`, `PASSWORD`, etc.) are pure ASCII.
 /// Uses safe byte-indexing via `find()` to avoid panicking on multi-byte UTF-8 boundaries.
-fn redact_single_key_assignment(text: &str, key_name: &str) -> String {
-    let mut result = String::new();
+///
+/// Returns `Cow::Borrowed` when no match is found, avoiding allocation.
+fn redact_single_key_assignment<'a>(text: Cow<'a, str>, key_name: &str) -> Cow<'a, str> {
+    let text_lower = text.to_ascii_lowercase();
     let key_lower = key_name.to_ascii_lowercase();
+
+    // Quick pre-check: if the key isn't present at all, borrow the original.
+    if !text_lower.contains(key_lower.as_str()) {
+        return text;
+    }
+
+    let mut result = String::new();
 
     for line in text.lines() {
         let line_lower = line.to_ascii_lowercase();
@@ -111,11 +122,18 @@ fn redact_single_key_assignment(text: &str, key_name: &str) -> String {
     if !text.ends_with('\n') && result.ends_with('\n') {
         result.pop();
     }
-    result
+    Cow::Owned(result)
 }
 
 /// Redacts bearer token values.
-fn redact_bearer_tokens(text: &str) -> String {
+///
+/// Returns `Cow::Borrowed` when no bearer token is found, avoiding allocation.
+fn redact_bearer_tokens<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
+    // Quick pre-check before allocating.
+    if !text.to_lowercase().contains("bearer") {
+        return text;
+    }
+
     let mut result = String::new();
 
     for line in text.lines() {
@@ -156,11 +174,18 @@ fn redact_bearer_tokens(text: &str) -> String {
     if !text.ends_with('\n') && result.ends_with('\n') {
         result.pop();
     }
-    result
+    Cow::Owned(result)
 }
 
 /// Redacts Authorization header values.
-fn redact_authorization_header(text: &str) -> String {
+///
+/// Returns `Cow::Borrowed` when no authorization header is found, avoiding allocation.
+fn redact_authorization_header<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
+    // Quick pre-check before allocating.
+    if !text.to_lowercase().contains("authorization") {
+        return text;
+    }
+
     let mut result = String::new();
 
     for line in text.lines() {
@@ -183,12 +208,19 @@ fn redact_authorization_header(text: &str) -> String {
     if !text.ends_with('\n') && result.ends_with('\n') {
         result.pop();
     }
-    result
+    Cow::Owned(result)
 }
 
 /// Redacts AWS-style keys (AKIA prefix).
 /// Matches exactly AKIA + 16 alphanumeric characters (20 total).
-fn redact_aws_keys(text: &str) -> String {
+///
+/// Returns `Cow::Borrowed` when no AKIA key is found, avoiding allocation.
+fn redact_aws_keys<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
+    // Quick pre-check before allocating.
+    if !text.to_uppercase().contains("AKIA") {
+        return text;
+    }
+
     let mut result = String::new();
     let mut chars = text.chars().peekable();
 
@@ -223,11 +255,19 @@ fn redact_aws_keys(text: &str) -> String {
         }
     }
 
-    result
+    Cow::Owned(result)
 }
 
 /// Redacts credentials in URLs (e.g. `https://user:pass@host`).
-fn redact_url_credentials(text: &str) -> String {
+///
+/// Returns `Cow::Borrowed` when no URL credentials are found, avoiding allocation.
+fn redact_url_credentials<'a>(text: Cow<'a, str>) -> Cow<'a, str> {
+    // Quick pre-check before allocating.
+    let has_url = text.contains("http://") || text.contains("https://");
+    if !has_url || !text.contains('@') {
+        return text;
+    }
+
     let mut result = String::new();
 
     for line in text.lines() {
@@ -257,7 +297,7 @@ fn redact_url_credentials(text: &str) -> String {
     if !text.ends_with('\n') && result.ends_with('\n') {
         result.pop();
     }
-    result
+    Cow::Owned(result)
 }
 
 #[cfg(test)]
