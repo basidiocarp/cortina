@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use std::path::Path;
 
 const SESSIONS_DB_FILENAME: &str = "cortina-sessions.db";
@@ -143,44 +143,31 @@ impl SessionStore {
         // Wrap both statements in a single IMMEDIATE transaction so that a concurrent
         // process cannot insert a new active row between the orphan UPDATE and the SELECT,
         // which would otherwise allow two processes to each believe they are the sole owner.
-        // Use raw SQL rather than the rusqlite transaction API because `execute` takes &self
-        // while `transaction_with_behavior` requires &mut self.
-        self.conn
-            .execute("BEGIN IMMEDIATE", [])
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)
             .context("begin immediate transaction for find_active")?;
 
-        // Mark stale 'active' sessions as orphaned first
-        let update_result = self.conn.execute(
+        tx.execute(
             "UPDATE sessions SET status = 'orphaned'
              WHERE status = 'active' AND project = ?1 AND last_seen_at < ?2",
             params![project, threshold_ms],
-        );
+        )
+        .context("orphan stale sessions in find_active")?;
 
-        // Find current active session
-        let select_result = update_result.and_then(|_| {
-            self.conn
-                .query_row(
-                    "SELECT session_id FROM sessions
-                     WHERE status = 'active' AND project = ?1 AND (worktree_id = ?2 OR (?2 IS NULL AND worktree_id IS NULL))
-                     ORDER BY created_at DESC LIMIT 1",
-                    params![project, worktree_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()
-        });
+        let session_id = tx
+            .query_row(
+                "SELECT session_id FROM sessions
+                 WHERE status = 'active' AND project = ?1
+                   AND (worktree_id = ?2 OR (?2 IS NULL AND worktree_id IS NULL))
+                 ORDER BY created_at DESC LIMIT 1",
+                params![project, worktree_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("find_active query failed")?;
 
-        match select_result {
-            Ok(session_id) => {
-                self.conn
-                    .execute("COMMIT", [])
-                    .context("commit find_active transaction")?;
-                Ok(session_id)
-            }
-            Err(e) => {
-                let _ = self.conn.execute("ROLLBACK", []);
-                Err(e).context("find_active query failed")
-            }
-        }
+        tx.commit().context("commit find_active transaction")?;
+        Ok(session_id)
+        // On panic: tx drops and issues ROLLBACK (unwind mode) or WAL recovers (abort mode).
     }
 }
 
