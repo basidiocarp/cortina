@@ -6,7 +6,7 @@ use std::io::Seek as _;
 use std::io::SeekFrom;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -25,6 +25,7 @@ static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Run a git command with a timeout using the channel+thread pattern.
 /// On timeout, kills the child process and returns None; on error, logs debug and returns None.
 fn run_git_with_timeout(cmd: &mut Command) -> Option<Output> {
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let Ok(child) = cmd.spawn() else {
         tracing::debug!("Failed to spawn git command");
         return None;
