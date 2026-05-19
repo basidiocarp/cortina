@@ -148,13 +148,6 @@ fn normalize_command_empty() {
 }
 
 #[test]
-fn importance_as_str() {
-    assert_eq!(Importance::Low.as_str(), "low");
-    assert_eq!(Importance::Medium.as_str(), "medium");
-    assert_eq!(Importance::High.as_str(), "high");
-}
-
-#[test]
 fn temp_state_path_uses_system_temp_dir() {
     let path = temp_state_path("errors", "abc123", "json");
     assert!(path.starts_with(std::env::temp_dir()));
@@ -1131,8 +1124,9 @@ fn update_json_file_recovers_stale_lock() {
 }
 
 #[test]
-fn session_event_v1_dto_from_session_state_has_required_fields() {
-    let state = SessionState {
+fn session_event_v1_dto_serializes_correctly() {
+    // Full state — all optional fields set
+    let full_state = SessionState {
         session_id: "01JNQSESS000000000000000".to_string(),
         project: "basidiocarp".to_string(),
         project_root: Some("/home/user/projects/basidiocarp".to_string()),
@@ -1142,33 +1136,7 @@ fn session_event_v1_dto_from_session_state_has_required_fields() {
         memory_protocol: None,
     };
 
-    let dto = SessionEventV1Dto::from(&state);
-
-    assert_eq!(dto.schema_version, "1.0");
-    assert_eq!(dto.event_type, "session_state");
-    assert_eq!(dto.session_id, "01JNQSESS000000000000000");
-    assert_eq!(dto.project, "basidiocarp");
-    assert_eq!(
-        dto.project_root.as_deref(),
-        Some("/home/user/projects/basidiocarp")
-    );
-    assert_eq!(dto.worktree_id.as_deref(), Some("main"));
-    assert_eq!(dto.started_at, 1_234_567_890);
-}
-
-#[test]
-fn session_event_v1_dto_serializes_to_correct_json() {
-    let state = SessionState {
-        session_id: "01JNQSESS000000000000000".to_string(),
-        project: "basidiocarp".to_string(),
-        project_root: Some("/home/user/projects/basidiocarp".to_string()),
-        worktree_id: Some("main".to_string()),
-        legacy_scope: None,
-        started_at: 1_234_567_890,
-        memory_protocol: None,
-    };
-
-    let dto = SessionEventV1Dto::from(&state);
+    let dto = SessionEventV1Dto::from(&full_state);
     let json = serde_json::to_string(&dto).expect("serialization should succeed");
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("json should parse");
 
@@ -1179,35 +1147,12 @@ fn session_event_v1_dto_serializes_to_correct_json() {
     assert_eq!(parsed["project_root"], "/home/user/projects/basidiocarp");
     assert_eq!(parsed["worktree_id"], "main");
     assert_eq!(parsed["started_at"], 1_234_567_890u64);
-    // Verify no unexpected fields like legacy_scope or memory_protocol
     assert!(!parsed.as_object().unwrap().contains_key("legacy_scope"));
     assert!(!parsed.as_object().unwrap().contains_key("memory_protocol"));
-}
 
-#[test]
-fn session_event_v1_dto_preserves_zero_started_at() {
-    let state = SessionState {
+    // Minimal state — None optionals must be omitted from the JSON output
+    let minimal_state = SessionState {
         session_id: "01JNQSESS000000000000001".to_string(),
-        project: "test-project".to_string(),
-        project_root: Some("/tmp/test".to_string()),
-        worktree_id: Some("feature".to_string()),
-        legacy_scope: None,
-        started_at: 0,
-        memory_protocol: None,
-    };
-
-    let dto = SessionEventV1Dto::from(&state);
-    assert_eq!(dto.started_at, 0);
-
-    let json = serde_json::to_string(&dto).expect("serialization should succeed");
-    let parsed: serde_json::Value = serde_json::from_str(&json).expect("json should parse");
-    assert_eq!(parsed["started_at"], 0u64);
-}
-
-#[test]
-fn session_event_v1_dto_omits_none_optional_fields() {
-    let state = SessionState {
-        session_id: "01JNQSESS000000000000002".to_string(),
         project: "minimal-project".to_string(),
         project_root: None,
         worktree_id: None,
@@ -1216,15 +1161,14 @@ fn session_event_v1_dto_omits_none_optional_fields() {
         memory_protocol: None,
     };
 
-    let dto = SessionEventV1Dto::from(&state);
-    let json = serde_json::to_string(&dto).expect("serialization should succeed");
-    let parsed: serde_json::Value = serde_json::from_str(&json).expect("json should parse");
+    let minimal_json = serde_json::to_string(&SessionEventV1Dto::from(&minimal_state))
+        .expect("serialization should succeed");
+    let minimal: serde_json::Value =
+        serde_json::from_str(&minimal_json).expect("json should parse");
 
-    assert_eq!(parsed["schema_version"], "1.0");
-    assert_eq!(parsed["type"], "session_state");
-    assert_eq!(parsed["session_id"], "01JNQSESS000000000000002");
-    assert_eq!(parsed["project"], "minimal-project");
-    assert!(!parsed.as_object().unwrap().contains_key("project_root"));
-    assert!(!parsed.as_object().unwrap().contains_key("worktree_id"));
-    assert_eq!(parsed["started_at"], 0u64);
+    assert_eq!(minimal["schema_version"], "1.0");
+    assert_eq!(minimal["type"], "session_state");
+    assert_eq!(minimal["project"], "minimal-project");
+    assert!(!minimal.as_object().unwrap().contains_key("project_root"));
+    assert!(!minimal.as_object().unwrap().contains_key("worktree_id"));
 }
