@@ -171,6 +171,9 @@ fn template_for_key(key: &GateKey) -> String {
 /// - Expired gates are treated as new gates (restart the cycle).
 /// - Note: process-per-call invocations will lose state between calls, so blocking
 ///   gate state cannot rely on same-process retry counts.
+/// - In process-per-call architectures, `has_investigation` must be derived from persisted
+///   state (e.g., a tool-call file on disk) — in-process gate history does not survive
+///   across invocations.
 pub fn evaluate_gate(
     key: &GateKey,
     map: &mut GateMap,

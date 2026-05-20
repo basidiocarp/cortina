@@ -46,6 +46,10 @@ Use instead:\n\
   mcp__rhizome__find_references   cross-file references\n\
   mcp__rhizome__get_call_sites    callers of a function";
 
+// GATE_MAP is reset on every cortina process invocation (process-per-call architecture).
+// Cross-call investigation state is NOT kept here — it comes from detect_investigation_content,
+// which reads persisted tool-call records from disk. The in-process map only matters for
+// the duration of a single hook call; it is intentionally ephemeral.
 thread_local! {
     static GATE_MAP: RefCell<GateMap> = RefCell::new(HashMap::new());
 }
@@ -700,7 +704,7 @@ fn check_gate_guard(envelope: &ClaudeCodeHookEnvelope) -> Option<GateDecision> {
                 // Destructive commands always gate (no TTL bypass).
                 GateKey {
                     tool: "Bash:Destructive".to_string(),
-                    target: destructive_command_hash(command),
+                    target: destructive_command_key(command),
                 }
             } else {
                 // Routine bash commands gate once per session.
@@ -722,6 +726,12 @@ fn check_gate_guard(envelope: &ClaudeCodeHookEnvelope) -> Option<GateDecision> {
                     GateMode::Advisory
                 };
 
+                // Two-layer gate: the in-process GateMap starts empty every call (process-per-call).
+                // Blocking proceeds as follows:
+                //   1. First call: detect_investigation_content returns false → Block.
+                //   2. Model uses investigation tools → recorded in persisted tool-call file.
+                //   3. Next call: detect_investigation_content returns true from persisted file → Allow.
+                //   4. Key immediately removed (line below) so the next destructive call also re-gates.
                 let mut decision =
                     evaluate_gate(&gate_key, &mut gate_map, has_investigation, gate_mode);
 
@@ -800,12 +810,14 @@ fn detect_investigation_content(envelope: &ClaudeCodeHookEnvelope) -> bool {
     false
 }
 
-/// Hash a destructive command to a stable target identifier.
-fn destructive_command_hash(command: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    let mut hasher = DefaultHasher::new();
-    command.hash(&mut hasher);
-    format!("destructive_{:x}", hasher.finish())
+/// Derive a stable identity key for a destructive command.
+/// A truncated, sanitized prefix is used instead of `DefaultHasher`,
+/// which is not guaranteed stable across Rust versions.
+fn destructive_command_key(command: &str) -> String {
+    let prefix: String = command
+        .chars()
+        .take(64)
+        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .collect();
+    format!("destructive_{prefix}")
 }
