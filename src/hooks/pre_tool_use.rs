@@ -69,6 +69,7 @@ pub fn handle(input: &str) -> Result<()> {
         Err(e) => {
             warn!("Failed to parse pre-tool-use adapter input: {e}");
             eprintln!("cortina: failed to parse event input: {e}");
+            println!("{{}}"); // allow — parse error must not block the tool
             return Ok(());
         }
     };
