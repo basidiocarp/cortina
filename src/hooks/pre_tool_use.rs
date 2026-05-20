@@ -12,6 +12,7 @@ use crate::adapters::claude_code::{ClaudeCodeHookEnvelope, block_response, rewri
 use crate::hooks::gate_guard::{
     GateDecision, GateKey, GateMap, GateMode, evaluate_gate, is_destructive_bash, is_readonly_git,
 };
+use crate::hooks::node_context;
 use crate::hooks::pre_commit::handoff_pre_commit_warnings;
 use crate::policy::{CapturePolicy, capture_policy};
 use crate::rules::{DEFAULT_RULES, any_recommended_called, matching_rules};
@@ -74,6 +75,39 @@ pub fn handle(input: &str) -> Result<()> {
 
     let context = span_context(&envelope);
     let _tool_span = tool_span("pre_tool_use", &context).entered();
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Node context: Load per-node overrides if this session is running inside
+    // a hymenium workflow node.
+    // ─────────────────────────────────────────────────────────────────────────
+    let node_ctx = node_context::load_node_context()
+        .unwrap_or_else(|e| { warn!("Failed to parse CORTINA_NODE_CONTEXT: {e}"); None });
+
+    if let Some(ref ctx) = node_ctx {
+        if let Some(tool_name) = envelope.tool_name() {
+            // Node-level denied_tools takes absolute priority.
+            if ctx.is_denied(tool_name) {
+                let response = block_response(&format!(
+                    "[cortina] Tool '{}' is not permitted in workflow node '{}'",
+                    tool_name,
+                    ctx.node_id.as_deref().unwrap_or("unknown")
+                ));
+                println!("{response}");
+                return Ok(());
+            }
+
+            // Node-level allowed_tools restricts access if non-empty.
+            if ctx.is_not_allowed(tool_name) {
+                let response = block_response(&format!(
+                    "[cortina] Tool '{}' is not in the allowed list for workflow node '{}'",
+                    tool_name,
+                    ctx.node_id.as_deref().unwrap_or("unknown")
+                ));
+                println!("{response}");
+                return Ok(());
+            }
+        }
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // GateGuard: Check for blocked Edit, Write, MultiEdit, and destructive Bash
