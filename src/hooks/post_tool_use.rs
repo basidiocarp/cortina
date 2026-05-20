@@ -63,24 +63,22 @@ pub fn handle(input: &str) -> Result<()> {
             "tool call risk signal emitted"
         );
 
-        // Node context: Append any additional context from node-level post_tool_use hooks.
+        // Node context: emit additional_context messages from node-level post_tool_use hooks
+        // as a Claude Code additionalContext response (appended to the model's next turn).
         let node_ctx = node_context::load_node_context()
             .unwrap_or_else(|e| { tracing::warn!("Failed to parse CORTINA_NODE_CONTEXT: {e}"); None });
 
         if let Some(ref ctx) = node_ctx {
             let extras = ctx.post_tool_additional_context(tool_name);
-            for msg in extras {
+            for msg in &extras {
                 tracing::info!(
                     tool = tool_name,
                     node_id = ctx.node_id.as_deref().unwrap_or("unknown"),
                     "[cortina] Node-level additional context: {msg}"
                 );
-                // TODO: wire to hook additionalContext response
-                // Currently, additional_context from post_tool_use hooks is only logged to stderr.
-                // To properly implement the schema contract ("Text appended to the model's next turn"),
-                // this context must be included in the Claude Code hook response via additionalContext field.
-                // This requires extending the ClaudeCodeHookEnvelope response builders to support PostToolUse responses.
-                eprintln!("[cortina] [{}] {msg}", ctx.node_id.as_deref().unwrap_or("unknown"));
+            }
+            if let Some(response) = crate::adapters::claude_code::additional_context_response(&extras) {
+                println!("{response}");
             }
         }
     }

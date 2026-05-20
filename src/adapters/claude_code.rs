@@ -224,6 +224,16 @@ pub fn halt_turn_response(message: &str) -> Value {
     })
 }
 
+/// Response body that injects text into the model's next turn via PostToolUse.
+/// Claude Code appends the `additionalContext` field to the assistant turn.
+/// Returns `None` when `messages` is empty (no output should be written).
+pub fn additional_context_response(messages: &[&str]) -> Option<Value> {
+    if messages.is_empty() {
+        return None;
+    }
+    Some(json!({ "additionalContext": messages.join("\n") }))
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
