@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::handoff_paths::{ChecklistItem, extract_paths, extract_paths_from_text};
@@ -50,16 +51,16 @@ pub struct AuditOutput {
 pub fn handle(handoff_path: &Path, json: bool) -> Result<()> {
     let result = audit_handoff(handoff_path)?;
     let output = audit_output(&result);
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
 
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&output).context("serializing audit output")?
-        );
+        let json_str = serde_json::to_string_pretty(&output).context("serializing audit output")?;
+        let _ = writeln!(out, "{json_str}");
         return Ok(());
     }
 
-    println!("{}", format_audit_report(&output));
+    let _ = writeln!(out, "{}", format_audit_report(&output));
 
     if output.status == AuditStatus::FlagReview {
         anyhow::bail!(
