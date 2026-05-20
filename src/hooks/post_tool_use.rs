@@ -9,10 +9,10 @@ mod tests;
 use anyhow::Result;
 pub use secret_redaction::redact_secrets;
 
-use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::events::{OutcomeEvent, ToolResultEvent};
 use crate::utils::SessionState;
 use crate::hooks::node_context;
+use super::parse_error::parse_or_allow;
 
 pub(crate) use pending::{get_pending_documents, get_pending_files};
 
@@ -21,13 +21,7 @@ pub(crate) use pending::{get_pending_documents, get_pending_files};
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> Result<()> {
-    let envelope = match ClaudeCodeHookEnvelope::parse(input) {
-        Ok(envelope) => envelope,
-        Err(e) => {
-            eprintln!("cortina: failed to parse event input: {e}");
-            return Ok(());
-        }
-    };
+    let Some(envelope) = parse_or_allow(input) else { return Ok(()); };
 
     match envelope.tool_result_event() {
         Some(ToolResultEvent::Bash(event)) => bash::handle_bash(&event),

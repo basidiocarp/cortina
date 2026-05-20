@@ -2,10 +2,8 @@ use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::events::{NormalizedLifecycleEvent, OutcomeEvent, OutcomeKind};
 use crate::outcomes::{load_outcomes, record_outcome};
-use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 use crate::signals::PreCompactSnapshot;
 use crate::utils::{
     Importance, command_exists, current_agent_id_for_cwd, current_task_id_for_cwd,
@@ -14,6 +12,7 @@ use crate::utils::{
 };
 
 use super::post_tool_use::{get_pending_documents, get_pending_files};
+use super::parse_error::parse_or_allow;
 
 const MAX_RECORDED_SNAPSHOTS: usize = 16;
 const SNAPSHOT_SESSION_TASK: &str = "pre compact snapshot";
@@ -34,14 +33,7 @@ struct ActiveErrorEntry {
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> anyhow::Result<()> {
-    let envelope = match ClaudeCodeHookEnvelope::parse(input) {
-        Ok(envelope) => envelope,
-        Err(e) => {
-            eprintln!("cortina: failed to parse event input: {e}");
-            const { assert!(FAIL_OPEN_LIFECYCLE_CAPTURE) };
-            return Ok(());
-        }
-    };
+    let Some(envelope) = parse_or_allow(input) else { return Ok(()); };
 
     let Some(event) = envelope.pre_compact_event() else {
         return Ok(());

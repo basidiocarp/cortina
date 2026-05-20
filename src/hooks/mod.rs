@@ -2,6 +2,7 @@ pub mod executor;
 pub mod fp_check;
 pub mod gate_guard;
 pub mod node_context;
+pub mod parse_error;
 pub mod post_tool_use;
 pub mod pre_commit;
 pub mod pre_compact;

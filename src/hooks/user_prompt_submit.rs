@@ -12,7 +12,6 @@ const RECALL_INJECT_MAX_BYTES: usize = 2048;
 /// Deadline for the `hyphae auto-recall` subprocess before it is killed.
 const RECALL_TIMEOUT: Duration = Duration::from_secs(2);
 
-use crate::adapters::claude_code::ClaudeCodeHookEnvelope;
 use crate::events::{
     NormalizedLifecycleEvent, OutcomeEvent, OutcomeKind, UserPromptSubmitEvent, is_council_prompt,
 };
@@ -25,6 +24,7 @@ use crate::utils::{
     ensure_scoped_hyphae_session, project_name_for_cwd, resolved_command, scope_hash,
     scope_identity_for_cwd, store_in_hyphae, temp_state_path, update_json_file,
 };
+use super::parse_error::parse_or_allow;
 
 const MAX_RECORDED_PROMPTS: usize = 32;
 const MAX_RECORDED_COUNCIL_EVENTS: usize = 16;
@@ -42,14 +42,7 @@ const RECALL_QUERY_MAX_CHARS: usize = 200;
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> anyhow::Result<()> {
-    let envelope = match ClaudeCodeHookEnvelope::parse(input) {
-        Ok(envelope) => envelope,
-        Err(e) => {
-            eprintln!("cortina: failed to parse event input: {e}");
-            const { assert!(FAIL_OPEN_LIFECYCLE_CAPTURE) };
-            return Ok(());
-        }
-    };
+    let Some(envelope) = parse_or_allow(input) else { return Ok(()); };
 
     let Some(event) = envelope.user_prompt_submit_event() else {
         return Ok(());
