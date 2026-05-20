@@ -85,8 +85,10 @@ pub fn handle(input: &str) -> Result<()> {
     // Node context: Load per-node overrides if this session is running inside
     // a hymenium workflow node.
     // ─────────────────────────────────────────────────────────────────────────
-    let node_ctx = node_context::load_node_context()
-        .unwrap_or_else(|e| { warn!("Failed to parse CORTINA_NODE_CONTEXT: {e}"); None });
+    let node_ctx = node_context::load_node_context().unwrap_or_else(|e| {
+        warn!("Failed to parse CORTINA_NODE_CONTEXT: {e}");
+        None
+    });
 
     if let Some(ref ctx) = node_ctx {
         if let Some(tool_name) = envelope.tool_name() {
@@ -817,7 +819,13 @@ fn destructive_command_key(command: &str) -> String {
     let prefix: String = command
         .chars()
         .take(64)
-        .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     format!("destructive_{prefix}")
 }

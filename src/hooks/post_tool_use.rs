@@ -9,10 +9,10 @@ mod tests;
 use anyhow::Result;
 pub use secret_redaction::redact_secrets;
 
-use crate::events::{OutcomeEvent, ToolResultEvent};
-use crate::utils::SessionState;
-use crate::hooks::node_context;
 use super::parse_error::parse_or_allow;
+use crate::events::{OutcomeEvent, ToolResultEvent};
+use crate::hooks::node_context;
+use crate::utils::SessionState;
 
 pub(crate) use pending::{get_pending_documents, get_pending_files};
 
@@ -21,7 +21,9 @@ pub(crate) use pending::{get_pending_documents, get_pending_files};
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> Result<()> {
-    let Some(envelope) = parse_or_allow(input) else { return Ok(()); };
+    let Some(envelope) = parse_or_allow(input) else {
+        return Ok(());
+    };
 
     match envelope.tool_result_event() {
         Some(ToolResultEvent::Bash(event)) => bash::handle_bash(&event),
@@ -59,8 +61,10 @@ pub fn handle(input: &str) -> Result<()> {
 
         // Node context: emit additional_context messages from node-level post_tool_use hooks
         // as a Claude Code additionalContext response (appended to the model's next turn).
-        let node_ctx = node_context::load_node_context()
-            .unwrap_or_else(|e| { tracing::warn!("Failed to parse CORTINA_NODE_CONTEXT: {e}"); None });
+        let node_ctx = node_context::load_node_context().unwrap_or_else(|e| {
+            tracing::warn!("Failed to parse CORTINA_NODE_CONTEXT: {e}");
+            None
+        });
 
         if let Some(ref ctx) = node_ctx {
             let extras = ctx.post_tool_additional_context(tool_name);
@@ -71,7 +75,9 @@ pub fn handle(input: &str) -> Result<()> {
                     "[cortina] Node-level additional context: {msg}"
                 );
             }
-            if let Some(response) = crate::adapters::claude_code::additional_context_response(&extras) {
+            if let Some(response) =
+                crate::adapters::claude_code::additional_context_response(&extras)
+            {
                 println!("{response}");
             }
         }

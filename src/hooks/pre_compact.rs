@@ -11,8 +11,8 @@ use crate::utils::{
     scope_hash, store_compact_summary_artifact, store_in_hyphae, temp_state_path, update_json_file,
 };
 
-use super::post_tool_use::{get_pending_documents, get_pending_files};
 use super::parse_error::parse_or_allow;
+use super::post_tool_use::{get_pending_documents, get_pending_files};
 
 const MAX_RECORDED_SNAPSHOTS: usize = 16;
 const SNAPSHOT_SESSION_TASK: &str = "pre compact snapshot";
@@ -33,7 +33,9 @@ struct ActiveErrorEntry {
     reason = "Result return type required by dispatch match in main"
 )]
 pub fn handle(input: &str) -> anyhow::Result<()> {
-    let Some(envelope) = parse_or_allow(input) else { return Ok(()); };
+    let Some(envelope) = parse_or_allow(input) else {
+        return Ok(());
+    };
 
     let Some(event) = envelope.pre_compact_event() else {
         return Ok(());

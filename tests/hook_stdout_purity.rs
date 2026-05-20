@@ -42,8 +42,7 @@ fn cortina_pre_tool_use_stdout_is_clean_json_or_empty() {
 
     // Build the synthetic pre-tool-use event with the temp git directory
     let git_dir_str = temp_path.to_string_lossy();
-    let synthetic_input = SYNTHETIC_PRE_TOOL_USE_TEMPLATE
-        .replace("{git_dir}", &git_dir_str);
+    let synthetic_input = SYNTHETIC_PRE_TOOL_USE_TEMPLATE.replace("{git_dir}", &git_dir_str);
 
     let binary = env!("CARGO_BIN_EXE_cortina");
 
@@ -59,7 +58,8 @@ fn cortina_pre_tool_use_stdout_is_clean_json_or_empty() {
     use std::io::Write;
     if let Some(stdin) = child.stdin.take() {
         let mut stdin = stdin;
-        stdin.write_all(synthetic_input.as_bytes())
+        stdin
+            .write_all(synthetic_input.as_bytes())
             .expect("write synthetic payload to cortina stdin");
     }
 
@@ -69,7 +69,8 @@ fn cortina_pre_tool_use_stdout_is_clean_json_or_empty() {
         tx.send(child.wait_with_output()).ok();
     });
 
-    let output = rx.recv_timeout(Duration::from_secs(30))
+    let output = rx
+        .recv_timeout(Duration::from_secs(30))
         .expect("cortina timed out after 30s — possible hang in hook handler")
         .expect("cortina should exit cleanly");
 
@@ -79,9 +80,7 @@ fn cortina_pre_tool_use_stdout_is_clean_json_or_empty() {
     // Any non-JSON content (git log lines, debug output, etc.) is a bug.
     if !stdout.trim().is_empty() {
         serde_json::from_str::<serde_json::Value>(stdout.trim())
-            .unwrap_or_else(|_| panic!(
-                "cortina pre-tool-use stdout is not valid JSON:\n{stdout}"
-            ));
+            .unwrap_or_else(|_| panic!("cortina pre-tool-use stdout is not valid JSON:\n{stdout}"));
     }
 
     // temp_dir is dropped here and cleaned up automatically.
