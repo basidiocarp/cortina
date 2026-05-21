@@ -10,6 +10,10 @@ repository = "https://github.com/basidiocarp/cortina"
 keywords = ["basidiocarp", "hooks", "mcp", "feedback", "cli"]
 categories = ["command-line-utilities", "development-tools"]
 
+[lib]
+name = "cortina"
+path = "src/lib.rs"
+
 [[bin]]
 name = "cortina"
 path = "src/main.rs"
@@ -22,6 +26,7 @@ serde_json = "1"
 toml = "1"
 spore = { git = "https://github.com/basidiocarp/spore", rev = "967e10c43a1052c9e57e226227621a83e6ac20e4", features = ["otel"] }
 tracing = "0.1"
+memchr = "2"
 
 rusqlite = { version = "0.39", features = ["bundled"] }
 
