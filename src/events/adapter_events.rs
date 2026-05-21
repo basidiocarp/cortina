@@ -44,6 +44,21 @@ pub struct PreCompactEvent {
     pub transcript_path: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PostCompactEvent {
+    pub session_id: String,
+    pub cwd: String,
+    pub transcript_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SubagentStopEvent {
+    pub session_id: String,
+    pub cwd: String,
+    pub agent_id: Option<String>,
+    pub transcript_path: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum VolvaHookPhase {

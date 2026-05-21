@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::events::{
-    BashToolEvent, CommandRewriteRequest, FileEditEvent, PreCompactEvent, SessionStopEvent,
-    ToolResultEvent, UserPromptSubmitEvent,
+    BashToolEvent, CommandRewriteRequest, FileEditEvent, PostCompactEvent, PreCompactEvent,
+    SessionStopEvent, SubagentStopEvent, ToolResultEvent, UserPromptSubmitEvent,
 };
 
 /// Adapter for the current Claude Code hook-event envelope.
@@ -136,6 +136,32 @@ impl ClaudeCodeHookEnvelope {
             cwd,
             trigger,
             custom_instructions,
+            transcript_path: self.transcript_path().map(ToString::to_string),
+        })
+    }
+
+    pub fn post_compact_event(&self) -> Option<PostCompactEvent> {
+        let session_id = self.session_id()?.to_string();
+        let cwd = self.cwd()?.to_string();
+        Some(PostCompactEvent {
+            session_id,
+            cwd,
+            transcript_path: self.transcript_path().map(ToString::to_string),
+        })
+    }
+
+    pub fn subagent_stop_event(&self) -> Option<SubagentStopEvent> {
+        let session_id = self.session_id()?.to_string();
+        let cwd = self.cwd()?.to_string();
+        let agent_id = self
+            .raw
+            .get("agent_id")
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+        Some(SubagentStopEvent {
+            session_id,
+            cwd,
+            agent_id,
             transcript_path: self.transcript_path().map(ToString::to_string),
         })
     }

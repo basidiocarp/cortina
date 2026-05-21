@@ -96,6 +96,8 @@ fn event_to_name(event: ClaudeCodeEventCommand) -> &'static str {
         ClaudeCodeEventCommand::PostToolUse => "PostToolUse",
         ClaudeCodeEventCommand::UserPromptSubmit => "UserPromptSubmit",
         ClaudeCodeEventCommand::PreCompact => "PreCompact",
+        ClaudeCodeEventCommand::PostCompact => "PostCompact",
+        ClaudeCodeEventCommand::SubagentStop => "SubagentStop",
         ClaudeCodeEventCommand::Stop => "Stop",
         ClaudeCodeEventCommand::SessionEnd => "SessionEnd",
     }
@@ -134,6 +136,8 @@ mod tests {
         assert!(gate.should_skip_event(ClaudeCodeEventCommand::PostToolUse));
         assert!(gate.should_skip_event(ClaudeCodeEventCommand::UserPromptSubmit));
         assert!(gate.should_skip_event(ClaudeCodeEventCommand::PreCompact));
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::PostCompact));
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::SubagentStop));
     }
 
     #[test]
@@ -152,6 +156,8 @@ mod tests {
         assert!(!gate.should_skip_event(ClaudeCodeEventCommand::PostToolUse));
         assert!(!gate.should_skip_event(ClaudeCodeEventCommand::UserPromptSubmit));
         assert!(!gate.should_skip_event(ClaudeCodeEventCommand::PreCompact));
+        assert!(!gate.should_skip_event(ClaudeCodeEventCommand::PostCompact));
+        assert!(!gate.should_skip_event(ClaudeCodeEventCommand::SubagentStop));
         assert!(!gate.should_skip_event(ClaudeCodeEventCommand::Stop));
         assert!(!gate.should_skip_event(ClaudeCodeEventCommand::SessionEnd));
     }
@@ -228,6 +234,14 @@ mod tests {
         assert_eq!(
             event_to_name(ClaudeCodeEventCommand::PreCompact),
             "PreCompact"
+        );
+        assert_eq!(
+            event_to_name(ClaudeCodeEventCommand::PostCompact),
+            "PostCompact"
+        );
+        assert_eq!(
+            event_to_name(ClaudeCodeEventCommand::SubagentStop),
+            "SubagentStop"
         );
         assert_eq!(event_to_name(ClaudeCodeEventCommand::Stop), "Stop");
         assert_eq!(

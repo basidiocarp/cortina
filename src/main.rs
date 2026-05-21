@@ -255,6 +255,8 @@ fn adapter_operation_name(adapter: &adapters::AdapterCommand) -> &'static str {
             ClaudeCodeEventCommand::PostToolUse => "adapter_claude_code_post_tool_use",
             ClaudeCodeEventCommand::UserPromptSubmit => "adapter_claude_code_user_prompt_submit",
             ClaudeCodeEventCommand::PreCompact => "adapter_claude_code_pre_compact",
+            ClaudeCodeEventCommand::PostCompact => "adapter_claude_code_post_compact",
+            ClaudeCodeEventCommand::SubagentStop => "adapter_claude_code_subagent_stop",
             ClaudeCodeEventCommand::Stop => "adapter_claude_code_stop",
             ClaudeCodeEventCommand::SessionEnd => "adapter_claude_code_session_end",
         },

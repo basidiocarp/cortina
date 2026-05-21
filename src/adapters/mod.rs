@@ -55,6 +55,14 @@ pub enum ClaudeCodeEventCommand {
     #[command(name = "pre-compact")]
     PreCompact,
 
+    /// Handle `PostCompact` adapter events (post-compaction signal)
+    #[command(name = "post-compact")]
+    PostCompact,
+
+    /// Handle `SubagentStop` adapter events (subagent completion signal)
+    #[command(name = "subagent-stop")]
+    SubagentStop,
+
     /// Handle `Stop` adapter events (session summary)
     #[command(name = "stop")]
     Stop,
@@ -190,6 +198,10 @@ impl crate::pipeline::StageHandler for HookExecutorHandler {
     clippy::unnecessary_wraps,
     reason = "Result return type required for stable public API"
 )]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one arm per event variant; extracting arms reduces locality without improving clarity"
+)]
 fn handle_claude_code_event(event: ClaudeCodeEventCommand, input: &str) -> Result<()> {
     // Check env-var gating first: if this event should be skipped based on
     // CORTINA_HOOK_PROFILE or CORTINA_DISABLED_HOOKS (PascalCase event names), return early with success.
@@ -272,6 +284,30 @@ fn handle_claude_code_event(event: ClaudeCodeEventCommand, input: &str) -> Resul
                 agent_id: None,
                 payload: &payload,
             });
+        }
+        ClaudeCodeEventCommand::PostCompact => {
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallReceived,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
+            run_hook("post_compact", || hooks::post_compact::handle(input));
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallCompleted,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
+        }
+        ClaudeCodeEventCommand::SubagentStop => {
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::SessionSignalEmitted,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
+            run_hook("subagent_stop", || hooks::subagent_stop::handle(input));
         }
         ClaudeCodeEventCommand::Stop => {
             pipeline.run(&PipelineContext {
@@ -422,7 +458,7 @@ mod tests {
     }
 
     #[test]
-    fn env_gate_minimal_profile_skips_tool_use_events() {
+    fn env_gate_minimal_profile_skips_tool_use_and_compaction_events() {
         use crate::env_gate::EnvGate;
 
         let gate = EnvGate::from_reader(|name| match name {
@@ -434,6 +470,8 @@ mod tests {
         assert!(gate.should_skip_event(ClaudeCodeEventCommand::PostToolUse));
         assert!(gate.should_skip_event(ClaudeCodeEventCommand::UserPromptSubmit));
         assert!(gate.should_skip_event(ClaudeCodeEventCommand::PreCompact));
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::PostCompact));
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::SubagentStop));
     }
 
     #[test]

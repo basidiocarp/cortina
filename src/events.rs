@@ -7,9 +7,9 @@ mod outcome_events;
     reason = "Re-exported event types are used by tests, adapter modules, and downstream contract work"
 )]
 pub use adapter_events::{
-    BashToolEvent, CommandRewriteRequest, FileEditEvent, PreCompactEvent, SessionStopEvent,
-    ToolResultEvent, UserPromptSubmitEvent, VolvaBackendKind, VolvaExecutionSession,
-    VolvaHookEvent, VolvaHookPhase,
+    BashToolEvent, CommandRewriteRequest, FileEditEvent, PostCompactEvent, PreCompactEvent,
+    SessionStopEvent, SubagentStopEvent, ToolResultEvent, UserPromptSubmitEvent, VolvaBackendKind,
+    VolvaExecutionSession, VolvaHookEvent, VolvaHookPhase,
 };
 #[allow(
     unused_imports,
