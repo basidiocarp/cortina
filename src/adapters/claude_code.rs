@@ -228,7 +228,7 @@ pub fn block_response(message: &str) -> Value {
     json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "block",
+            "permissionDecision": "deny",
             "permissionDecisionReason": message
         }
     })
@@ -237,14 +237,15 @@ pub fn block_response(message: &str) -> Value {
 /// Response body for halt-turn signal (exit 49).
 ///
 /// Exit code 49 is the real signal to Claude Code; the JSON body carries
-/// a reason string for display. Uses `"halt_turn"` as the decision value so
-/// consumers (Annulus, Cap) can distinguish this from a per-tool block.
+/// a reason string for display. Uses `"deny"` as the permissionDecision so
+/// the JSON validates; the turn-halt behavior is driven by the exit code, not
+/// this field.
 #[allow(dead_code)] // Will be used when halt-turn signal path is wired in handlers
 pub fn halt_turn_response(message: &str) -> Value {
     json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "halt_turn",
+            "permissionDecision": "deny",
             "permissionDecisionReason": message
         }
     })
@@ -468,7 +469,7 @@ mod tests {
                 .get("hookSpecificOutput")
                 .and_then(|value| value.get("permissionDecision"))
                 .and_then(serde_json::Value::as_str),
-            Some("block")
+            Some("deny")
         );
         assert_eq!(
             response
@@ -495,7 +496,7 @@ mod tests {
                 .get("hookSpecificOutput")
                 .and_then(|value| value.get("permissionDecision"))
                 .and_then(serde_json::Value::as_str),
-            Some("halt_turn")
+            Some("deny")
         );
         assert_eq!(
             response
