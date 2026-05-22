@@ -201,7 +201,15 @@ impl ClaudeCodeHookEnvelope {
     }
 
     pub(crate) fn cwd(&self) -> Option<&str> {
-        self.raw.get("cwd").and_then(Value::as_str)
+        self.raw
+            .get("cwd")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                self.raw
+                    .get("workspace")
+                    .and_then(|v| v.get("current_dir"))
+                    .and_then(Value::as_str)
+            })
     }
 
     fn transcript_path(&self) -> Option<&str> {
@@ -251,7 +259,7 @@ pub fn halt_turn_response(message: &str) -> Value {
     })
 }
 
-/// Response body that injects text into the model's next turn via PostToolUse.
+/// Response body that injects text into the model's next turn via `PostToolUse`.
 /// Claude Code appends the `additionalContext` field to the assistant turn.
 /// Returns `None` when `messages` is empty (no output should be written).
 pub fn additional_context_response(messages: &[&str]) -> Option<Value> {
@@ -505,5 +513,50 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("Hook requested turn halt")
         );
+    }
+
+    #[test]
+    fn cwd_returns_top_level_cwd_when_present() {
+        let envelope = ClaudeCodeHookEnvelope::parse(
+            r#"{
+                "cwd": "/top/level/cwd",
+                "workspace": {"current_dir": "/fallback/path"}
+            }"#,
+        )
+        .expect("valid envelope");
+
+        assert_eq!(envelope.cwd(), Some("/top/level/cwd"));
+    }
+
+    #[test]
+    fn cwd_falls_back_to_workspace_current_dir() {
+        let envelope = ClaudeCodeHookEnvelope::parse(
+            r#"{
+                "workspace": {"current_dir": "/fallback/path"}
+            }"#,
+        )
+        .expect("valid envelope");
+
+        assert_eq!(envelope.cwd(), Some("/fallback/path"));
+    }
+
+    #[test]
+    fn cwd_returns_none_when_both_absent() {
+        let envelope = ClaudeCodeHookEnvelope::parse(r#"{}"#).expect("valid envelope");
+
+        assert_eq!(envelope.cwd(), None);
+    }
+
+    #[test]
+    fn cwd_prefers_top_level_over_fallback() {
+        let envelope = ClaudeCodeHookEnvelope::parse(
+            r#"{
+                "cwd": "/preferred/cwd",
+                "workspace": {"current_dir": "/fallback/path"}
+            }"#,
+        )
+        .expect("valid envelope");
+
+        assert_eq!(envelope.cwd(), Some("/preferred/cwd"));
     }
 }

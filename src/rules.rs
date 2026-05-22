@@ -6,9 +6,9 @@ pub struct RelevanceRule {
     pub file_pattern: Option<&'static str>,
     /// Tools that should have been called before this operation
     pub recommended_tools: &'static [&'static str],
-    /// "required" or "recommended" — varies advisory message strength in pre_tool_use evaluation
+    /// "required" or "recommended" — varies advisory message strength in `pre_tool_use` evaluation
     pub severity: &'static str,
-    /// How far back to check: "session" = all calls, "recent_10" / "recent_5" = sliding window
+    /// How far back to check: "session" = all calls, `"recent_10"` / `"recent_5"` = sliding window
     pub check_window: &'static str,
 }
 

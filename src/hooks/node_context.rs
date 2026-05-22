@@ -10,7 +10,7 @@ pub struct NodeHookContext {
     pub node_id: Option<String>,
 
     /// Tools explicitly allowed in this node. If non-empty, any tool NOT in this list
-    /// triggers a deny. Takes priority over session-level allowed_tools.
+    /// triggers a deny. Takes priority over session-level `allowed_tools`.
     #[serde(default)]
     pub allowed_tools: Vec<String>,
 
@@ -50,7 +50,7 @@ pub struct NodeHookEntry {
 
 impl NodeHookContext {
     /// Returns true if `tool_name` matches any entry in `denied_tools` or any
-    /// `deny: true` pre_tool_use hook entry whose matcher covers `tool_name`.
+    /// `deny: true` `pre_tool_use` hook entry whose matcher covers `tool_name`.
     pub fn is_denied(&self, tool_name: &str) -> bool {
         if self.denied_tools.iter().any(|t| t.trim() == tool_name) {
             return true;
@@ -65,7 +65,7 @@ impl NodeHookContext {
         !self.allowed_tools.is_empty() && !self.allowed_tools.iter().any(|t| t == tool_name)
     }
 
-    /// Collect all `additional_context` strings from post_tool_use entries matching `tool_name`.
+    /// Collect all `additional_context` strings from `post_tool_use` entries matching `tool_name`.
     pub fn post_tool_additional_context(&self, tool_name: &str) -> Vec<&str> {
         self.post_tool_use
             .iter()
