@@ -333,6 +333,34 @@ pub fn end_scoped_hyphae_session(
     )
 }
 
+/// Joins a session-end thread, blocking for at most `HYPHAE_WRITE_TIMEOUT`.
+///
+/// On timeout, logs at warn and returns so cortina can proceed rather than
+/// hanging indefinitely on a stalled hyphae process.
+fn join_session_end_thread(handle: std::thread::JoinHandle<()>) {
+    let (done_tx, done_rx) = mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        let _ = handle.join();
+        let _ = done_tx.send(());
+    });
+    match done_rx.recv_timeout(HYPHAE_WRITE_TIMEOUT) {
+        Ok(()) => {}
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            // The hyphae subprocess is owned by the thread inside spawn_async_session_end_confirmed
+            // and cannot be killed from here without a shared handle. Cortina exits within seconds
+            // of returning, so the wrapper thread is self-limiting. If this pattern is reused in a
+            // longer-lived context, expose the child handle and kill on timeout as run_with_timeout does.
+            warn!(
+                "session-end async write timed out after {}s; proceeding without hyphae confirmation",
+                HYPHAE_WRITE_TIMEOUT.as_secs()
+            );
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            warn!("session-end async write thread disconnected before completion");
+        }
+    }
+}
+
 /// Spawn `hyphae session end` asynchronously. Marks the session clean in the session store only
 /// after the child process exits successfully; marks it orphaned otherwise.
 ///
@@ -453,9 +481,9 @@ where
             let handle = spawn_async_session_end_confirmed(cmd, state.session_id.clone());
             // Join before returning so the SQLite end_clean write completes before the process
             // exits. Cortina is short-lived; without joining the OS kills the thread first,
-            // leaving every session permanently orphaned. The join is unbounded — hyphae is
-            // expected to return quickly, but a hung hyphae process will stall cortina here.
-            let _ = handle.join();
+            // leaving every session permanently orphaned. Bounded by HYPHAE_WRITE_TIMEOUT so
+            // a hung hyphae process cannot stall cortina indefinitely.
+            join_session_end_thread(handle);
             return with_file_lock(&path, || Ok(Some(state)));
         }
 
