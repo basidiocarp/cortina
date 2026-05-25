@@ -568,15 +568,9 @@ fn trigger_compile_env_invalidation_if_needed(files_modified: &[String], cwd: &s
     if let Some(mut cmd) = resolved_command("rhizome") {
         cmd.args(["compile-env", "--invalidate", "--name", &project_name]);
         match cmd.spawn() {
-            Ok(mut child) => match child.wait() {
-                Ok(status) if !status.success() => {
-                    tracing::warn!(
-                        "cortina: rhizome compile-env invalidation exited with {status}"
-                    );
-                }
-                Err(e) => tracing::warn!("cortina: rhizome compile-env wait failed: {e}"),
-                _ => {}
-            },
+            Ok(child) => {
+                tracing::debug!(pid = child.id(), "cortina: rhizome env invalidation child spawned");
+            }
             Err(e) => {
                 tracing::warn!("cortina: rhizome compile-env invalidation spawn failed: {e}");
             }
