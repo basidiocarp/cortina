@@ -110,6 +110,7 @@ fn hyphae_socket_path() -> Option<&'static str> {
 #[allow(clippy::needless_pass_by_value)]
 fn socket_call(socket_path: &str, method: &str, params: serde_json::Value) -> anyhow::Result<()> {
     use std::io::{BufRead, BufReader, Write};
+    use std::net::Shutdown;
     use std::os::unix::net::UnixStream;
 
     let stream = UnixStream::connect(socket_path)?;
@@ -128,19 +129,33 @@ fn socket_call(socket_path: &str, method: &str, params: serde_json::Value) -> an
     writer.write_all(b"\n")?;
     writer.flush()?;
 
+    // Explicitly drop write handle before reading to cleanly signal write-side EOF.
+    drop(writer);
+
     let reader = BufReader::new(&stream);
-    let line = reader
-        .lines()
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("no response from hyphae socket"))??;
+    // reader.lines() moves reader, releasing the borrow on stream before any shutdown calls.
+    let next_line = reader.lines().next();
+    let line = match next_line {
+        Some(Ok(line)) => line,
+        Some(Err(e)) => {
+            let _ = stream.shutdown(Shutdown::Both);
+            return Err(e.into());
+        }
+        None => {
+            let _ = stream.shutdown(Shutdown::Both);
+            return Err(anyhow::anyhow!("no response from hyphae socket"));
+        }
+    };
 
     // Validate the response is not a JSON-RPC error object before returning Ok.
     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
         if let Some(error) = parsed.get("error") {
+            let _ = stream.shutdown(Shutdown::Both);
             return Err(anyhow::anyhow!("hyphae socket returned error: {error}"));
         }
     }
 
+    let _ = stream.shutdown(Shutdown::Both);
     Ok(())
 }
 
