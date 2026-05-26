@@ -303,6 +303,9 @@ fn extract_and_store_facts(command: &str, output: &str, scope_cwd: Option<&str>)
         return;
     }
 
+    let redacted_output = redact_secrets(output);
+    let output = redacted_output.as_str();
+
     let mut facts: Vec<FactExtracted> = Vec::new();
 
     if let Some(fact) = extract_commit_fact(command, output) {
@@ -341,6 +344,27 @@ fn extract_and_store_facts(command: &str, output: &str, scope_cwd: Option<&str>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_and_store_facts_redacts_output_before_extraction() {
+        // extract_and_store_facts shadows `output` with redact_secrets(output) before calling
+        // extract_preference_fact or extract_commit_fact. This test exercises that invariant:
+        // extract_preference_fact called on the redacted string must not return the raw secret.
+        let raw = "always use ANTHROPIC_API_KEY=sk-ant-secret123 for auth";
+        let redacted = redact_secrets(raw);
+        let fact = extract_preference_fact(redacted.as_str())
+            .expect("should match preference signal in redacted output");
+        assert!(
+            !fact.content.contains("sk-ant-secret123"),
+            "extractor received redacted input; secret must not appear in fact.content, got: {}",
+            fact.content
+        );
+        assert!(
+            fact.content.contains("[REDACTED]"),
+            "redacted placeholder must appear in fact.content, got: {}",
+            fact.content
+        );
+    }
 
     #[test]
     fn error_entry_causal_signal_preserves_original_session_identity() {
