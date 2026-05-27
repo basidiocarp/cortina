@@ -21,7 +21,7 @@ impl SessionStore {
         let db_path = if let Ok(p) = std::env::var(SESSIONS_DB_ENV_VAR) {
             std::path::PathBuf::from(p)
         } else {
-            spore::paths::data_dir("basidiocarp")
+            spore::paths::data_dir("basidiocarp")?
                 .join("cortina")
                 .join(SESSIONS_DB_FILENAME)
         };
