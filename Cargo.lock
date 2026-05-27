@@ -1091,6 +1091,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex"
+version = "1.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e10754a14b9137dd7b1e3e5b0493cc9171fdd105e0ab477f51b72e7f3ac0e276"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "regex-automata"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1349,15 +1361,17 @@ dependencies = [
 
 [[package]]
 name = "spore"
-version = "0.6.0"
-source = "git+https://github.com/basidiocarp/spore?rev=967e10c43a1052c9e57e226227621a83e6ac20e4#967e10c43a1052c9e57e226227621a83e6ac20e4"
+version = "0.6.2"
+source = "git+https://github.com/basidiocarp/spore?rev=85414a54afc16597297f6cd42edec5985474d767#85414a54afc16597297f6cd42edec5985474d767"
 dependencies = [
  "anyhow",
  "chrono",
  "dirs",
+ "libc",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "regex",
  "serde",
  "serde_json",
  "tempfile",
