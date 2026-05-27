@@ -204,6 +204,7 @@ impl ClaudeCodeHookEnvelope {
         self.raw
             .get("cwd")
             .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
             .or_else(|| {
                 self.raw
                     .get("workspace")
@@ -558,5 +559,18 @@ mod tests {
         .expect("valid envelope");
 
         assert_eq!(envelope.cwd(), Some("/preferred/cwd"));
+    }
+
+    #[test]
+    fn cwd_falls_back_when_primary_is_empty_string() {
+        let envelope = ClaudeCodeHookEnvelope::parse(
+            r#"{
+                "cwd": "",
+                "workspace": {"current_dir": "/fallback/path"}
+            }"#,
+        )
+        .expect("valid envelope");
+
+        assert_eq!(envelope.cwd(), Some("/fallback/path"));
     }
 }
