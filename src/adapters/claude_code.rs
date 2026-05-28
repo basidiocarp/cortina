@@ -543,7 +543,7 @@ mod tests {
 
     #[test]
     fn cwd_returns_none_when_both_absent() {
-        let envelope = ClaudeCodeHookEnvelope::parse(r#"{}"#).expect("valid envelope");
+        let envelope = ClaudeCodeHookEnvelope::parse(r"{}").expect("valid envelope");
 
         assert_eq!(envelope.cwd(), None);
     }

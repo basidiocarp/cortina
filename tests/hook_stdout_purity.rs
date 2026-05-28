@@ -1,9 +1,10 @@
+use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
 /// Minimal Claude Code pre-tool-use envelope accepted by cortina.
-/// Uses "Write" tool which triggers write_advisory -> scope_hash -> git subprocess.
+/// Uses "Write" tool which triggers `write_advisory` -> `scope_hash` -> git subprocess.
 const SYNTHETIC_PRE_TOOL_USE_TEMPLATE: &str = r#"{
     "tool_name": "Write",
     "tool_input": {"file_path": "{git_dir}/test.rs"},
@@ -55,7 +56,6 @@ fn cortina_pre_tool_use_stdout_is_clean_json_or_empty() {
         .expect("cortina binary should spawn");
 
     // Write the synthetic payload to stdin.
-    use std::io::Write;
     if let Some(stdin) = child.stdin.take() {
         let mut stdin = stdin;
         stdin

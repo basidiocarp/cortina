@@ -91,7 +91,9 @@ static HYPHAE_SOCKET_PATH: OnceLock<Option<String>> = OnceLock::new();
 fn hyphae_socket_path() -> Option<&'static str> {
     HYPHAE_SOCKET_PATH
         .get_or_init(|| {
-            let descriptor_path = spore::paths::config_dir("hyphae").ok()?.join("hyphae.endpoint.json");
+            let descriptor_path = spore::paths::config_dir("hyphae")
+                .ok()?
+                .join("hyphae.endpoint.json");
             let json = std::fs::read_to_string(descriptor_path).ok()?;
             let v: serde_json::Value = serde_json::from_str(&json).ok()?;
             if v.get("transport").and_then(|t| t.as_str()) != Some("unix-socket") {

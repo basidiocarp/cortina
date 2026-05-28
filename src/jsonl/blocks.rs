@@ -118,7 +118,7 @@ mod tests {
         let lines: Vec<Vec<u8>> = jsonl
             .split(|&b| b == b'\n')
             .filter(|l| !l.is_empty())
-            .map(|l| l.to_vec())
+            .map(<[u8]>::to_vec)
             .collect();
 
         let blocks = identify_session_blocks(&lines);
@@ -134,7 +134,7 @@ mod tests {
         let lines: Vec<Vec<u8>> = jsonl
             .split(|&b| b == b'\n')
             .filter(|l| !l.is_empty())
-            .map(|l| l.to_vec())
+            .map(<[u8]>::to_vec)
             .collect();
 
         let blocks = identify_session_blocks(&lines);
@@ -151,7 +151,7 @@ mod tests {
         let lines: Vec<Vec<u8>> = jsonl
             .split(|&b| b == b'\n')
             .filter(|l| !l.is_empty())
-            .map(|l| l.to_vec())
+            .map(<[u8]>::to_vec)
             .collect();
 
         let blocks = identify_session_blocks(&lines);
@@ -166,7 +166,7 @@ mod tests {
         let lines: Vec<Vec<u8>> = jsonl
             .split(|&b| b == b'\n')
             .filter(|l| !l.is_empty())
-            .map(|l| l.to_vec())
+            .map(<[u8]>::to_vec)
             .collect();
 
         let blocks = identify_session_blocks(&lines);
@@ -183,7 +183,7 @@ not valid json
         let lines: Vec<Vec<u8>> = jsonl
             .split(|&b| b == b'\n')
             .filter(|l| !l.is_empty())
-            .map(|l| l.to_vec())
+            .map(<[u8]>::to_vec)
             .collect();
 
         let blocks = identify_session_blocks(&lines);
