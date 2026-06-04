@@ -88,6 +88,11 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
     tracing::debug!("pre_compact_snapshot: {:?}", pre_compact_snapshot);
 
     if command_exists("hyphae") {
+        // Snapshot the prior outcomes before the snapshot-marker outcome below is
+        // recorded, so memory extraction lifts real session outcomes and not the
+        // bookkeeping "snapshot stored" marker this function is about to write.
+        let prior_outcomes = load_outcomes(&hash);
+
         let _ = ensure_scoped_hyphae_session(Some(&event.cwd), Some(SNAPSHOT_SESSION_TASK));
         let project = project_name_for_cwd(Some(&event.cwd));
         let topic = project.as_deref().map_or_else(
@@ -118,6 +123,69 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
             &signal_summary,
         );
         store_compact_summary_artifact(&artifact, project.as_deref());
+
+        // Lift discrete high-signal outcomes into durable memory. Runs last so the
+        // existing snapshot and artifact stores complete first; fail-open.
+        extract_and_store_memories(event, &prior_outcomes);
+    }
+}
+
+/// Build the `(topic, content)` pairs for the high-signal outcomes worth lifting
+/// into durable memory at a compaction boundary. Pure (no I/O) so the selection,
+/// most-recent ordering, bound, and topic-formatting logic is unit-testable
+/// without a live hyphae backend.
+///
+/// Only `ErrorResolved`, `KnowledgeExported`, and `ValidationPassed` are kept;
+/// the most recent are preferred and the result is capped at a small constant so
+/// a long session does not fan out into excessive hyphae writes.
+fn pre_compact_memory_entries(
+    outcomes: &[OutcomeEvent],
+    project: Option<&str>,
+) -> Vec<(String, String)> {
+    const MAX_EXTRACTED_MEMORIES: usize = 8;
+    outcomes
+        .iter()
+        .rev()
+        .filter_map(|outcome| {
+            let kind_label = match outcome.kind {
+                OutcomeKind::ErrorResolved => "error-resolved",
+                OutcomeKind::KnowledgeExported => "knowledge-exported",
+                OutcomeKind::ValidationPassed => "validation-passed",
+                _ => return None,
+            };
+            let content = match &outcome.command {
+                Some(command) => format!("{}\ncommand: {command}", outcome.summary),
+                None => outcome.summary.clone(),
+            };
+            let topic = project.map_or_else(
+                || format!("session/pre-compact/memory/{kind_label}"),
+                |name| format!("context/{name}/pre-compact/memory/{kind_label}"),
+            );
+            Some((topic, content))
+        })
+        .take(MAX_EXTRACTED_MEMORIES)
+        .collect()
+}
+
+/// Lift discrete high-signal session outcomes into durable hyphae memories at the
+/// compaction boundary, so the most useful facts survive context compression as
+/// individually-retrievable entries rather than only as one snapshot blob.
+///
+/// Runs only inside the `command_exists("hyphae")` block and only after the
+/// snapshot-dedup guard in `capture_pre_compact` has fired, so a duplicate
+/// compaction never re-extracts. Fail-open: `store_in_hyphae` is fire-and-forget,
+/// so any individual store problem is swallowed and can never break compaction.
+fn extract_and_store_memories(event: &crate::events::PreCompactEvent, outcomes: &[OutcomeEvent]) {
+    let project = project_name_for_cwd(Some(&event.cwd));
+    let agent_id = current_agent_id_for_cwd(Some(&event.cwd));
+    for (topic, content) in pre_compact_memory_entries(outcomes, project.as_deref()) {
+        store_in_hyphae(
+            &topic,
+            &content,
+            Importance::High,
+            project.as_deref(),
+            agent_id.as_deref(),
+        );
     }
 }
 
@@ -390,5 +458,62 @@ mod tests {
         assert_eq!(stored.len(), 1);
 
         let _ = remove_file_with_lock(&path);
+    }
+
+    #[test]
+    fn pre_compact_memory_entries_keeps_only_high_signal_kinds() {
+        let outcomes = vec![
+            OutcomeEvent::new(OutcomeKind::ErrorDetected, "an error appeared"),
+            OutcomeEvent::new(OutcomeKind::ErrorResolved, "fixed the error"),
+            OutcomeEvent::new(OutcomeKind::SelfCorrection, "corrected myself"),
+            OutcomeEvent::new(OutcomeKind::ValidationPassed, "tests pass"),
+            OutcomeEvent::new(OutcomeKind::DocumentIngested, "ingested a doc"),
+            OutcomeEvent::new(OutcomeKind::KnowledgeExported, "exported knowledge"),
+        ];
+
+        let entries = pre_compact_memory_entries(&outcomes, Some("cortina"));
+
+        // Only ErrorResolved, ValidationPassed, KnowledgeExported survive.
+        assert_eq!(entries.len(), 3);
+        let topics: Vec<&str> = entries.iter().map(|(topic, _)| topic.as_str()).collect();
+        assert!(topics.contains(&"context/cortina/pre-compact/memory/error-resolved"));
+        assert!(topics.contains(&"context/cortina/pre-compact/memory/validation-passed"));
+        assert!(topics.contains(&"context/cortina/pre-compact/memory/knowledge-exported"));
+    }
+
+    #[test]
+    fn pre_compact_memory_entries_uses_session_topic_without_project() {
+        let outcomes = vec![OutcomeEvent::new(OutcomeKind::ErrorResolved, "fixed it")];
+
+        let entries = pre_compact_memory_entries(&outcomes, None);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, "session/pre-compact/memory/error-resolved");
+        assert_eq!(entries[0].1, "fixed it");
+    }
+
+    #[test]
+    fn pre_compact_memory_entries_appends_command_to_content() {
+        let mut outcome = OutcomeEvent::new(OutcomeKind::ValidationPassed, "tests pass");
+        outcome.command = Some("cargo test".to_string());
+
+        let entries = pre_compact_memory_entries(&[outcome], Some("cortina"));
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].1, "tests pass\ncommand: cargo test");
+    }
+
+    #[test]
+    fn pre_compact_memory_entries_caps_at_eight_most_recent() {
+        let outcomes: Vec<OutcomeEvent> = (0..10)
+            .map(|i| OutcomeEvent::new(OutcomeKind::ErrorResolved, format!("e{i}")))
+            .collect();
+
+        let entries = pre_compact_memory_entries(&outcomes, Some("cortina"));
+
+        // Bounded to 8, and the most recent (highest index) come first.
+        assert_eq!(entries.len(), 8);
+        assert_eq!(entries[0].1, "e9");
+        assert_eq!(entries[7].1, "e2");
     }
 }
