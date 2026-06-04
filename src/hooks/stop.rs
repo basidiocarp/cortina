@@ -5,6 +5,7 @@ mod tool_usage_emit;
 mod transcript;
 
 use anyhow::Result;
+use serde_json::json;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -15,9 +16,9 @@ use crate::outcomes::{clear_outcomes, load_outcomes};
 use crate::policy::capture_policy;
 use crate::rules::{DEFAULT_RULES, any_recommended_called, matching_rules};
 use crate::utils::{
-    command_exists, end_scoped_hyphae_session, load_session_state,
-    log_hyphae_feedback_signal_for_session, project_name_for_cwd, resolved_command, scope_hash,
-    session_outcome_feedback,
+    Importance, command_exists, current_agent_id_for_cwd, end_scoped_hyphae_session,
+    load_session_state, log_hyphae_feedback_signal_for_session, project_name_for_cwd,
+    resolved_command, scope_hash, session_outcome_feedback, store_in_hyphae,
 };
 
 use self::summary::{
@@ -220,12 +221,54 @@ fn write_session_to_hyphae_and_emit_signals(
         );
         clear_outcomes(hash);
 
+        store_session_end_lifecycle_event(event, summary);
+
         emit_tool_usage_signals(state, hash, &summary.files_modified);
         crate::tool_usage::clear_tool_calls(hash);
     } else {
         // No session was ended; clean up local state
         crate::tool_usage::clear_tool_calls(hash);
     }
+}
+
+/// Emit a `session_end` lifecycle event (`cortina-lifecycle-event-v1`) so `SessionEnd` is a
+/// first-class, individually-retrievable anchor in hyphae alongside the other hooks. Fail-open:
+/// `store_in_hyphae` is fire-and-forget and never blocks or fails the Stop path.
+fn store_session_end_lifecycle_event(
+    event: &crate::events::SessionStopEvent,
+    summary: &summary::TranscriptSummary,
+) {
+    let project = project_name_for_cwd(Some(&event.cwd));
+    let agent_id = current_agent_id_for_cwd(Some(&event.cwd));
+    store_in_hyphae(
+        "session/lifecycle",
+        &session_end_lifecycle_content(summary),
+        Importance::Medium,
+        project.as_deref(),
+        agent_id.as_deref(),
+    );
+}
+
+/// Build the `cortina-lifecycle-event-v1` payload for a completed session. Hand-written (like
+/// `prompt_memory_content` in `user_prompt_submit.rs`) so the emit stays inside this hook module,
+/// but kept schema-complete. The schema requires `summary` to be non-empty (`minLength: 1`), so
+/// the per-session detail lives in `metadata` and `summary` carries a stable human label.
+fn session_end_lifecycle_content(summary: &summary::TranscriptSummary) -> String {
+    json!({
+        "schema_version": crate::events::NORMALIZED_LIFECYCLE_EVENT_SCHEMA_VERSION,
+        "category": "session",
+        "status": "completed",
+        "host": crate::events::LifecycleHost::ClaudeCode,
+        "event_name": "session_end",
+        "summary": "session ended",
+        "fail_open": crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE,
+        "metadata": {
+            "files_modified_count": summary.files_modified.len(),
+            "errors_encountered": summary.errors_encountered,
+            "outcome_summary": summary.outcome,
+        },
+    })
+    .to_string()
 }
 
 /// Load tool calls and emit usage event with adoption gap analysis.

@@ -9,7 +9,7 @@ use super::summary::{
     has_unresolved_errors, merge_structured_outcomes,
 };
 use super::transcript::parse_jsonl_transcript;
-use super::{check_handoff_completion, check_handoff_staleness};
+use super::{check_handoff_completion, check_handoff_staleness, session_end_lifecycle_content};
 
 #[test]
 fn parse_jsonl_transcript_valid() {
@@ -414,4 +414,49 @@ fn check_handoff_completion_warns_for_modified_handoffs() {
     assert!(warnings[0].contains("unchecked checklist items"));
     assert!(warnings[0].contains("empty paste markers"));
     assert!(warnings[0].contains("claiming completion"));
+}
+
+#[test]
+fn session_end_lifecycle_content_is_schema_complete() {
+    let summary = TranscriptSummary {
+        task_desc: "Session work".to_string(),
+        files_modified: vec!["/tmp/a.rs".to_string(), "/tmp/b.rs".to_string()],
+        tool_counts: String::new(),
+        errors_encountered: 2,
+        outcome: "Work completed with two fixes".to_string(),
+    };
+
+    let payload: serde_json::Value =
+        serde_json::from_str(&session_end_lifecycle_content(&summary)).unwrap();
+
+    // Every field the `cortina-lifecycle-event-v1` schema marks required must be present and valid.
+    assert_eq!(payload["schema_version"], "1.0");
+    assert_eq!(payload["category"], "session");
+    assert_eq!(payload["status"], "completed");
+    assert_eq!(payload["host"], "claude_code");
+    assert_eq!(payload["event_name"], "session_end");
+    assert!(
+        payload["summary"].as_str().is_some_and(|s| !s.is_empty()),
+        "summary must satisfy the schema's minLength: 1"
+    );
+    assert!(payload["fail_open"].is_boolean());
+}
+
+#[test]
+fn session_end_lifecycle_content_metadata_reflects_summary() {
+    let summary = TranscriptSummary {
+        task_desc: "Session work".to_string(),
+        files_modified: vec!["/tmp/a.rs".to_string(), "/tmp/b.rs".to_string()],
+        tool_counts: String::new(),
+        errors_encountered: 2,
+        outcome: "Work completed with two fixes".to_string(),
+    };
+
+    let payload: serde_json::Value =
+        serde_json::from_str(&session_end_lifecycle_content(&summary)).unwrap();
+    let metadata = &payload["metadata"];
+
+    assert_eq!(metadata["files_modified_count"], 2);
+    assert_eq!(metadata["errors_encountered"], 2);
+    assert_eq!(metadata["outcome_summary"], "Work completed with two fixes");
 }
