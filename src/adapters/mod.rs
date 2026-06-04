@@ -70,6 +70,10 @@ pub enum ClaudeCodeEventCommand {
     /// Handle `SessionEnd` adapter events (session summary)
     #[command(name = "session-end")]
     SessionEnd,
+
+    /// Handle `MessageDisplay` adapter events (assistant message display capture)
+    #[command(name = "message-display")]
+    MessageDisplay,
 }
 
 #[derive(Clone, Copy, Debug, Subcommand)]
@@ -327,6 +331,24 @@ fn handle_claude_code_event(event: ClaudeCodeEventCommand, input: &str) -> Resul
             });
             run_hook("session_end", || hooks::stop::handle(input));
         }
+        ClaudeCodeEventCommand::MessageDisplay => {
+            // MessageDisplay is an informational observation event (like UserPromptSubmit /
+            // PreCompact), not a session boundary — so it runs through the ToolCallReceived/
+            // Completed capture stages rather than SessionSignalEmitted.
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallReceived,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
+            run_hook("message_display", || hooks::message_display::handle(input));
+            pipeline.run(&PipelineContext {
+                stage: PipelineStage::ToolCallCompleted,
+                tool_name: None,
+                agent_id: None,
+                payload: &payload,
+            });
+        }
     }
     Ok(())
 }
@@ -485,6 +507,18 @@ mod tests {
 
         assert!(!gate.should_skip_event(ClaudeCodeEventCommand::Stop));
         assert!(!gate.should_skip_event(ClaudeCodeEventCommand::SessionEnd));
+    }
+
+    #[test]
+    fn env_gate_minimal_profile_skips_message_display() {
+        use crate::env_gate::EnvGate;
+
+        let gate = EnvGate::from_reader(|name| match name {
+            "CORTINA_HOOK_PROFILE" => Some("minimal".to_string()),
+            _ => None,
+        });
+
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::MessageDisplay));
     }
 
     #[test]

@@ -2,9 +2,12 @@ use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-use super::{BashToolEvent, FileEditEvent, PreCompactEvent, UserPromptSubmitEvent, VolvaHookEvent};
+use super::{
+    BashToolEvent, FileEditEvent, MessageDisplayEvent, PreCompactEvent, UserPromptSubmitEvent,
+    VolvaHookEvent,
+};
 
-pub const NORMALIZED_LIFECYCLE_EVENT_SCHEMA_VERSION: &str = "1.0";
+pub const NORMALIZED_LIFECYCLE_EVENT_SCHEMA_VERSION: &str = "1.1";
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -14,6 +17,7 @@ pub enum LifecycleCategory {
     Session,
     Compaction,
     Council,
+    Message,
 }
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -212,6 +216,22 @@ impl NormalizedLifecycleEvent {
             .insert("transcript_path".to_string(), json!(event.transcript_path));
         normalized
     }
+
+    pub fn from_message_display(event: &MessageDisplayEvent) -> Self {
+        let mut normalized = Self::new(
+            LifecycleCategory::Message,
+            LifecycleStatus::Captured,
+            LifecycleHost::ClaudeCode,
+            "message_display",
+            message_display_summary(&event.message_text),
+        );
+        normalized.session_id = Some(event.session_id.clone());
+        normalized.cwd = Some(event.cwd.clone());
+        normalized
+            .metadata
+            .insert("transcript_path".to_string(), json!(event.transcript_path));
+        normalized
+    }
 }
 
 pub fn is_council_prompt(prompt: &str) -> bool {
@@ -230,6 +250,20 @@ fn prompt_excerpt(prompt: &str) -> String {
         format!("{excerpt}...")
     } else {
         excerpt
+    }
+}
+
+/// Truncate message text to a safe length for use in a lifecycle event summary.
+/// Truncates at a char boundary to avoid splitting multi-byte characters.
+fn message_display_summary(text: &str) -> String {
+    const MAX_SUMMARY_CHARS: usize = 160;
+    let trimmed = text.trim();
+    let mut chars = trimmed.chars();
+    let excerpt: String = chars.by_ref().take(MAX_SUMMARY_CHARS).collect();
+    if chars.next().is_some() {
+        format!("message display: {excerpt}...")
+    } else {
+        format!("message display: {excerpt}")
     }
 }
 

@@ -259,6 +259,7 @@ fn adapter_operation_name(adapter: &adapters::AdapterCommand) -> &'static str {
             ClaudeCodeEventCommand::SubagentStop => "adapter_claude_code_subagent_stop",
             ClaudeCodeEventCommand::Stop => "adapter_claude_code_stop",
             ClaudeCodeEventCommand::SessionEnd => "adapter_claude_code_session_end",
+            ClaudeCodeEventCommand::MessageDisplay => "adapter_claude_code_message_display",
         },
         adapters::AdapterCommand::Volva { .. } => "adapter_volva_hook_event",
         adapters::AdapterCommand::Codex { .. } => "adapter_codex_turn_complete",

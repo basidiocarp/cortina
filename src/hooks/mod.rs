@@ -1,6 +1,7 @@
 pub mod executor;
 pub mod fp_check;
 pub mod gate_guard;
+pub mod message_display;
 pub mod node_context;
 pub mod parse_error;
 pub mod post_compact;

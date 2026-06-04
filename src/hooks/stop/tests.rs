@@ -430,7 +430,10 @@ fn session_end_lifecycle_content_is_schema_complete() {
         serde_json::from_str(&session_end_lifecycle_content(&summary)).unwrap();
 
     // Every field the `cortina-lifecycle-event-v1` schema marks required must be present and valid.
-    assert_eq!(payload["schema_version"], "1.0");
+    assert_eq!(
+        payload["schema_version"],
+        crate::events::NORMALIZED_LIFECYCLE_EVENT_SCHEMA_VERSION
+    );
     assert_eq!(payload["category"], "session");
     assert_eq!(payload["status"], "completed");
     assert_eq!(payload["host"], "claude_code");

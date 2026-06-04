@@ -1,8 +1,8 @@
 use serde_json::{Value, json};
 
 use crate::events::{
-    BashToolEvent, CommandRewriteRequest, FileEditEvent, PostCompactEvent, PreCompactEvent,
-    SessionStopEvent, SubagentStopEvent, ToolResultEvent, UserPromptSubmitEvent,
+    BashToolEvent, CommandRewriteRequest, FileEditEvent, MessageDisplayEvent, PostCompactEvent,
+    PreCompactEvent, SessionStopEvent, SubagentStopEvent, ToolResultEvent, UserPromptSubmitEvent,
 };
 
 /// Adapter for the current Claude Code hook-event envelope.
@@ -118,6 +118,22 @@ impl ClaudeCodeHookEnvelope {
             session_id,
             cwd,
             prompt,
+            transcript_path: self.transcript_path().map(ToString::to_string),
+        })
+    }
+
+    pub fn message_text(&self) -> Option<&str> {
+        self.raw.get("message_text").and_then(Value::as_str)
+    }
+
+    pub fn message_display_event(&self) -> Option<MessageDisplayEvent> {
+        let session_id = self.session_id()?.to_string();
+        let cwd = self.cwd()?.to_string();
+        let message_text = self.message_text()?.to_string();
+        Some(MessageDisplayEvent {
+            session_id,
+            cwd,
+            message_text,
             transcript_path: self.transcript_path().map(ToString::to_string),
         })
     }

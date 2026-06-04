@@ -100,6 +100,7 @@ fn event_to_name(event: ClaudeCodeEventCommand) -> &'static str {
         ClaudeCodeEventCommand::SubagentStop => "SubagentStop",
         ClaudeCodeEventCommand::Stop => "Stop",
         ClaudeCodeEventCommand::SessionEnd => "SessionEnd",
+        ClaudeCodeEventCommand::MessageDisplay => "MessageDisplay",
     }
 }
 
@@ -160,6 +161,7 @@ mod tests {
         assert!(!gate.should_skip_event(ClaudeCodeEventCommand::SubagentStop));
         assert!(!gate.should_skip_event(ClaudeCodeEventCommand::Stop));
         assert!(!gate.should_skip_event(ClaudeCodeEventCommand::SessionEnd));
+        assert!(!gate.should_skip_event(ClaudeCodeEventCommand::MessageDisplay));
     }
 
     #[test]
@@ -248,5 +250,15 @@ mod tests {
             event_to_name(ClaudeCodeEventCommand::SessionEnd),
             "SessionEnd"
         );
+        assert_eq!(
+            event_to_name(ClaudeCodeEventCommand::MessageDisplay),
+            "MessageDisplay"
+        );
+    }
+
+    #[test]
+    fn minimal_profile_skips_message_display() {
+        let gate = gate_with_profile_and_disabled("minimal", &[]);
+        assert!(gate.should_skip_event(ClaudeCodeEventCommand::MessageDisplay));
     }
 }

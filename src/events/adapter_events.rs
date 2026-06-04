@@ -36,6 +36,13 @@ pub struct UserPromptSubmitEvent {
     pub transcript_path: Option<String>,
 }
 
+pub struct MessageDisplayEvent {
+    pub session_id: String,
+    pub cwd: String,
+    pub message_text: String,
+    pub transcript_path: Option<String>,
+}
+
 pub struct PreCompactEvent {
     pub session_id: String,
     pub cwd: String,
