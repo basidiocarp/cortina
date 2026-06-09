@@ -14,3 +14,13 @@ pub mod subagent_stop;
 pub mod trigger_word;
 pub mod types;
 pub mod user_prompt_submit;
+
+use crate::utils::temp_state_path;
+use std::path::PathBuf;
+
+/// Path to the post-compaction recall marker for a session+worktree scope.
+/// Written by the `PostCompact` hook, consumed by the next `UserPromptSubmit` so it
+/// can re-recall with `--post-compaction` after context is compacted.
+pub(crate) fn post_compact_marker_path(hash: &str) -> PathBuf {
+    temp_state_path("post-compact-marker", hash, "json")
+}

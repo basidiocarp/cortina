@@ -13,6 +13,7 @@ const RECALL_INJECT_MAX_BYTES: usize = 2048;
 const RECALL_TIMEOUT: Duration = Duration::from_secs(2);
 
 use super::parse_error::parse_or_allow;
+use super::post_compact_marker_path;
 use crate::events::{
     NormalizedLifecycleEvent, OutcomeEvent, OutcomeKind, UserPromptSubmitEvent, is_council_prompt,
 };
@@ -22,8 +23,8 @@ use crate::policy::FAIL_OPEN_LIFECYCLE_CAPTURE;
 use crate::utils::load_json_file;
 use crate::utils::{
     Importance, command_exists, current_agent_id_for_cwd, current_task_id_for_cwd,
-    ensure_scoped_hyphae_session, project_name_for_cwd, resolved_command, scope_hash,
-    scope_identity_for_cwd, store_in_hyphae, temp_state_path, update_json_file,
+    ensure_scoped_hyphae_session, project_name_for_cwd, remove_file_with_lock, resolved_command,
+    scope_hash, scope_identity_for_cwd, store_in_hyphae, temp_state_path, update_json_file,
 };
 
 const MAX_RECORDED_PROMPTS: usize = 32;
@@ -326,7 +327,7 @@ fn recall_query(prompt: &str) -> String {
 ///
 /// Gracefully degrades: if hyphae is unavailable or any step fails the handler
 /// continues normally without recall.
-fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
+fn inject_recall(event: &UserPromptSubmitEvent, hash: &str) {
     if !command_exists("hyphae") {
         return;
     }
@@ -340,6 +341,8 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
         return;
     };
 
+    let post_compaction = consume_post_compact_marker(hash);
+
     cmd.args([
         "auto-recall",
         "--query",
@@ -351,6 +354,10 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
     let project = project_name_for_cwd(Some(&event.cwd));
     if let Some(ref p) = project {
         cmd.args(["--project", p]);
+    }
+
+    if post_compaction {
+        cmd.arg("--post-compaction");
     }
 
     // Spawn with a 2-second deadline to prevent blocking the hook indefinitely
@@ -450,6 +457,20 @@ fn inject_recall(event: &UserPromptSubmitEvent, _hash: &str) {
     );
 }
 
+fn consume_post_compact_marker(hash: &str) -> bool {
+    let path = post_compact_marker_path(hash);
+    if !path.exists() {
+        return false;
+    }
+    // Consume once: remove so later prompts in this session recall normally.
+    // On remove failure, do NOT bypass (avoids re-firing the bypass every prompt).
+    if let Err(error) = remove_file_with_lock(&path) {
+        tracing::warn!(?error, "cortina: failed to remove post-compaction marker");
+        return false;
+    }
+    true
+}
+
 fn prompt_capture_state_path(hash: &str) -> PathBuf {
     temp_state_path("prompt-captures", hash, "json")
 }
@@ -493,7 +514,8 @@ fn remember_council_capture(hash: &str, content: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::{remove_file_with_lock, scope_hash};
+    use crate::utils::{remove_file_with_lock, scope_hash, update_json_file};
+    use serde_json::json;
 
     #[test]
     fn builds_prompt_memory_content() {
@@ -678,5 +700,36 @@ mod tests {
     fn recall_query_returns_empty_for_empty_prompt() {
         let q = recall_query("   ");
         assert!(q.is_empty());
+    }
+
+    #[test]
+    fn consume_post_compact_marker_returns_true_and_removes_file() {
+        let test_hash = "cortina-test-consume-marker-abc123";
+        let path = post_compact_marker_path(test_hash);
+
+        // Clean up any pre-existing file
+        let _ = remove_file_with_lock(&path);
+
+        // Create the marker file
+        update_json_file::<serde_json::Value, _, _>(&path, |data| {
+            *data = json!({});
+        })
+        .expect("should write marker");
+        assert!(path.exists(), "marker should exist before consume");
+
+        // Consume it
+        let result = consume_post_compact_marker(test_hash);
+        assert!(result, "consume should return true when marker exists");
+        assert!(!path.exists(), "marker should be removed after consume");
+
+        // Second call should return false
+        let result = consume_post_compact_marker(test_hash);
+        assert!(
+            !result,
+            "second consume should return false when marker is gone"
+        );
+
+        // Clean up
+        let _ = remove_file_with_lock(&path);
     }
 }
