@@ -110,7 +110,8 @@ fn capture_pre_compact(event: &crate::events::PreCompactEvent) {
         let outcome = OutcomeEvent::new(
             OutcomeKind::KnowledgeExported,
             format!("pre-compact snapshot stored in hyphae ({topic})"),
-        );
+        )
+        .with_signal_type("compaction_marker");
         let _ = record_outcome(&hash, outcome);
 
         // Emit a typed compact_summary artifact alongside the snapshot. Failures
@@ -147,6 +148,10 @@ fn pre_compact_memory_entries(
         .iter()
         .rev()
         .filter_map(|outcome| {
+            // Skip the self-written compaction marker to avoid accumulating duplicates.
+            if outcome.signal_type.as_deref() == Some("compaction_marker") {
+                return None;
+            }
             let kind_label = match outcome.kind {
                 OutcomeKind::ErrorResolved => "error-resolved",
                 OutcomeKind::KnowledgeExported => "knowledge-exported",
@@ -515,5 +520,33 @@ mod tests {
         assert_eq!(entries.len(), 8);
         assert_eq!(entries[0].1, "e9");
         assert_eq!(entries[7].1, "e2");
+    }
+
+    #[test]
+    fn pre_compact_memory_entries_excludes_snapshot_marker_keeps_genuine() {
+        // Construct a compaction marker the same way production does — via the
+        // `.with_signal_type(...)` builder — so the test exercises the real path.
+        let marker = OutcomeEvent::new(
+            OutcomeKind::KnowledgeExported,
+            "pre-compact snapshot stored in hyphae (context/cortina/pre-compact)",
+        )
+        .with_signal_type("compaction_marker");
+
+        // Construct a genuine KnowledgeExported outcome (no compaction_marker signal_type).
+        let genuine = OutcomeEvent::new(
+            OutcomeKind::KnowledgeExported,
+            "real knowledge was exported",
+        );
+
+        let outcomes = vec![marker, genuine];
+        let entries = pre_compact_memory_entries(&outcomes, Some("cortina"));
+
+        // Only the genuine outcome should survive; the marker should be excluded.
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].0,
+            "context/cortina/pre-compact/memory/knowledge-exported"
+        );
+        assert_eq!(entries[0].1, "real knowledge was exported");
     }
 }
