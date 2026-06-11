@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write as _};
 use std::path::Path;
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::Duration;
 
 use anyhow::Result;
 use spore::logging::{SpanContext, subprocess_span, tool_span};
@@ -18,7 +20,8 @@ use crate::policy::{CapturePolicy, capture_policy};
 use crate::rules::{DEFAULT_RULES, any_recommended_called, matching_rules};
 use crate::tool_usage::load_tool_calls;
 use crate::utils::{
-    command_exists, resolved_command, scope_hash, temp_state_path, update_json_file,
+    command_exists, project_name_for_cwd, resolved_command, scope_hash, temp_state_path,
+    update_json_file,
 };
 
 #[cfg(test)]
@@ -131,6 +134,14 @@ pub fn handle(input: &str) -> Result<()> {
             }
         }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Hyphae recall: best-effort targeted recall before the tool call.
+    // Runs after all gate/advisory decisions so it cannot influence them.
+    // Must run before the command_rewrite_request branch so Bash calls are covered.
+    // Output goes to stderr only — cannot corrupt the stdout rewrite JSON.
+    // ─────────────────────────────────────────────────────────────────────────
+    inject_recall_for_tool(&envelope);
 
     if let Some(event) = envelope.command_rewrite_request() {
         if event.command.is_empty() {
@@ -828,4 +839,144 @@ fn destructive_command_key(command: &str) -> String {
         })
         .collect();
     format!("destructive_{prefix}")
+}
+
+/// Maximum bytes forwarded to stderr per recall injection.
+/// Filtered to `[cortina-recall]` lines only; truncated at a UTF-8 char boundary.
+const TOOL_RECALL_MAX_BYTES: usize = 2048;
+
+/// Deadline for the `hyphae auto-recall` subprocess before it is killed.
+const TOOL_RECALL_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Build a targeted recall query from the pending tool name and available context.
+///
+/// Returns `Some` only for state-modifying tools (`Write`, `Edit`, `MultiEdit`,
+/// `NotebookEdit`, `Bash`) — the "retrieve-before-write" intent. Pure reads
+/// (`Read`, `Grep`, `Glob`) return `None` so recall is skipped, avoiding a 2s
+/// latency hit on every read operation.
+fn tool_recall_query(envelope: &ClaudeCodeHookEnvelope) -> Option<String> {
+    let tool_name = envelope.tool_name()?;
+
+    // For file-editing tools, include the file path for targeted recall.
+    let context = match tool_name {
+        "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => envelope
+            .tool_input_string("file_path")
+            .map(|p| format!("file {p}")),
+        "Bash" => envelope.tool_input_string("command").map(|cmd| {
+            // Use only the first 80 chars of the command to keep the query focused.
+            let excerpt: String = cmd.chars().take(80).collect();
+            format!("command {excerpt}")
+        }),
+        // Pure-read tools: skip recall to avoid latency on every read.
+        "Read" | "Grep" | "Glob" => return None,
+        _ => None,
+    };
+
+    Some(match context {
+        Some(ctx) => format!("{tool_name} {ctx}"),
+        None => tool_name.to_string(),
+    })
+}
+
+/// Perform a best-effort hyphae recall keyed on the pending tool name and context,
+/// injecting any `[cortina-recall]`-prefixed result lines to stderr as an advisory.
+///
+/// Uses `hyphae auto-recall` (the same subcommand as `user_prompt_submit::inject_recall`)
+/// because it emits `[cortina-recall]`-prefixed lines that the filter below expects.
+/// `hyphae search` does NOT emit those prefixed lines, so it would be a silent no-op.
+///
+/// This is purely additive: it runs after all gate and advisory decisions, cannot
+/// block or fail the tool, and degrades silently on any error or timeout.
+fn inject_recall_for_tool(envelope: &ClaudeCodeHookEnvelope) {
+    if !command_exists("hyphae") {
+        return;
+    }
+
+    let Some(query) = tool_recall_query(envelope) else {
+        return;
+    };
+
+    let Some(mut cmd) = resolved_command("hyphae") else {
+        return;
+    };
+
+    // Use auto-recall, not search: auto-recall emits [cortina-recall]-prefixed lines
+    // that the filter below expects. Pass --session-id and --project to mirror
+    // the argument shape used by user_prompt_submit::inject_recall.
+    cmd.args(["auto-recall", "--query", &query]);
+
+    if let Some(session_id) = envelope.session_id() {
+        cmd.args(["--session-id", session_id]);
+    }
+
+    let project = project_name_for_cwd(envelope.cwd());
+    if let Some(ref p) = project {
+        cmd.args(["--project", p]);
+    }
+
+    // Spawn with a 2-second deadline to prevent blocking the hook indefinitely.
+    // Mirror the channel + Arc<Mutex<Child>> pattern from user_prompt_submit::inject_recall.
+    let Ok(child) = cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return;
+    };
+
+    let child_handle: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(Some(child)));
+    let child_handle_clone = Arc::clone(&child_handle);
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let output = child_handle_clone
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
+            .and_then(|c| c.wait_with_output().ok());
+        let _ = tx.send(output);
+    });
+
+    let output = match rx.recv_timeout(TOOL_RECALL_TIMEOUT) {
+        Ok(Some(out)) => out,
+        Ok(None) => return,
+        Err(_) => {
+            if let Ok(mut guard) = child_handle.lock() {
+                if let Some(mut c) = guard.take() {
+                    let _ = c.kill();
+                }
+            }
+            warn!("hyphae auto-recall timed out after 2s in pre_tool_use recall — skipping");
+            return;
+        }
+    };
+
+    if output.stdout.is_empty() {
+        return;
+    }
+
+    // Cap at TOOL_RECALL_MAX_BYTES, truncating at a UTF-8 char boundary.
+    let bytes = &output.stdout;
+    let cap = TOOL_RECALL_MAX_BYTES.min(bytes.len());
+    let safe_cap = (0..=cap)
+        .rev()
+        .find(|&i| std::str::from_utf8(&bytes[..i]).is_ok())
+        .unwrap_or(0);
+    let text = String::from_utf8_lossy(&bytes[..safe_cap]);
+
+    // Only forward lines carrying the expected [cortina-recall] prefix.
+    // This guards against adversarial stored-memory content being injected
+    // verbatim into the agent context.
+    let recall_lines: Vec<&str> = text
+        .lines()
+        .filter(|l| l.starts_with("[cortina-recall]"))
+        .collect();
+
+    if recall_lines.is_empty() {
+        return;
+    }
+
+    let joined = recall_lines.join("\n");
+    let _ = std::io::stderr().write_all(joined.as_bytes());
+    let _ = std::io::stderr().write_all(b"\n");
 }
