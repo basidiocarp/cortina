@@ -28,7 +28,7 @@ spore = { git = "https://github.com/basidiocarp/spore", rev = "d97a226a9a4051e42
 tracing = "0.1"
 memchr = "2"
 
-rusqlite = { version = "0.39", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
