@@ -25,6 +25,7 @@ pub struct CapturePolicy {
     pub max_outcome_events: usize,
     pub fallback_session_memory_on_end_failure: bool,
     pub fail_open_lifecycle_capture: bool,
+    pub stealth_mode: bool,
     /// Hook names that are disabled for this session.
     ///
     /// Set via `CORTINA_DISABLED_HOOKS` as a comma-separated list, e.g.
@@ -95,6 +96,7 @@ impl CapturePolicy {
                 false,
             ),
             fail_open_lifecycle_capture: FAIL_OPEN_LIFECYCLE_CAPTURE,
+            stealth_mode: read_bool(&read_env, "CORTINA_STEALTH_MODE", false),
             disabled_hooks: read_disabled_hooks(&read_env, "CORTINA_DISABLED_HOOKS"),
         }
     }
@@ -210,6 +212,22 @@ mod tests {
         assert!(policy.rhizome_suggest_enabled);
         assert!(!policy.fallback_session_memory_on_end_failure);
         assert!(policy.fail_open_lifecycle_capture);
+        assert!(!policy.stealth_mode);
         assert!(policy.disabled_hooks.is_empty());
+    }
+
+    #[test]
+    fn stealth_mode_defaults_to_false() {
+        let policy = CapturePolicy::from_reader(|_| None);
+        assert!(!policy.stealth_mode);
+    }
+
+    #[test]
+    fn stealth_mode_reads_from_env() {
+        let policy = CapturePolicy::from_reader(|name| match name {
+            "CORTINA_STEALTH_MODE" => Some("1".to_string()),
+            _ => None,
+        });
+        assert!(policy.stealth_mode);
     }
 }

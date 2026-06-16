@@ -68,7 +68,13 @@ pub fn handle(input: &str) -> Result<()> {
     write_session_to_hyphae_and_emit_signals(&event, &hash, &summary, &text, &project_name);
 
     tracing::debug!("hyphae_write");
-    run_post_processing(&event, &summary);
+    // Stealth mode suppresses post-processing as well: the trigger-word processor
+    // writes captured content to hyphae via `hyphae store`, so it must not fire for
+    // a stealth/throwaway session — otherwise "capture nothing" would still leak the
+    // exact sensitive content the operator meant to suppress.
+    if !capture_policy().stealth_mode {
+        run_post_processing(&event, &summary);
+    }
 
     Ok(())
 }
@@ -202,6 +208,14 @@ fn write_session_to_hyphae_and_emit_signals(
     text: &str,
     project_name: &str,
 ) {
+    if capture_policy().stealth_mode {
+        // Stealth: emit no hyphae writes and no terminal notification.
+        // Still clean up local in-memory state so it does not accumulate.
+        clear_outcomes(hash);
+        crate::tool_usage::clear_tool_calls(hash);
+        return;
+    }
+
     let session_feedback = session_outcome_feedback(
         &summary.outcome,
         summary::has_unresolved_errors(&load_outcomes(hash)),
