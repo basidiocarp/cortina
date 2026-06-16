@@ -1,3 +1,4 @@
+pub(crate) mod osc_notify;
 mod summary;
 #[cfg(test)]
 mod tests;
@@ -64,7 +65,7 @@ pub fn handle(input: &str) -> Result<()> {
     let text = build_summary_text(&project_name, &summary, &structured_outcomes);
 
     tracing::debug!("invalidation");
-    write_session_to_hyphae_and_emit_signals(&event, &hash, &summary, &text);
+    write_session_to_hyphae_and_emit_signals(&event, &hash, &summary, &text, &project_name);
 
     tracing::debug!("hyphae_write");
     run_post_processing(&event, &summary);
@@ -199,6 +200,7 @@ fn write_session_to_hyphae_and_emit_signals(
     hash: &str,
     summary: &summary::TranscriptSummary,
     text: &str,
+    project_name: &str,
 ) {
     let session_feedback = session_outcome_feedback(
         &summary.outcome,
@@ -225,6 +227,7 @@ fn write_session_to_hyphae_and_emit_signals(
 
         emit_tool_usage_signals(state, hash, &summary.files_modified);
         crate::tool_usage::clear_tool_calls(hash);
+        osc_notify::emit_osc_notification("cortina: session captured", project_name);
     } else {
         // No session was ended; clean up local state
         crate::tool_usage::clear_tool_calls(hash);

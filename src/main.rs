@@ -117,6 +117,11 @@ fn main() -> Result<()> {
             .entered();
             status::print_doctor(json, cwd.as_deref())
         }
+        Commands::Notify { title, body } => {
+            let _workflow_span = workflow_span("notify", &span_context_for_cwd(None)).entered();
+            hooks::stop::osc_notify::emit_osc_notification(&title, &body);
+            Ok(())
+        }
     }
 }
 

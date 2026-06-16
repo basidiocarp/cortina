@@ -83,6 +83,17 @@ pub enum Commands {
         #[arg(long)]
         cwd: Option<String>,
     },
+
+    /// Emit OSC notification sequences to the terminal
+    Notify {
+        /// Notification title
+        #[arg(long)]
+        title: String,
+
+        /// Notification body
+        #[arg(long)]
+        body: String,
+    },
 }
 
 #[cfg(test)]
@@ -202,5 +213,26 @@ mod tests {
         let help = Cli::command().render_long_help().to_string();
         assert!(help.contains("policy"));
         assert!(help.contains("audit-handoff"));
+    }
+
+    #[test]
+    fn parses_notify_command() {
+        let cli = Cli::try_parse_from([
+            "cortina",
+            "notify",
+            "--title",
+            "test title",
+            "--body",
+            "test body",
+        ])
+        .expect("expected notify command to parse");
+
+        assert!(matches!(
+            cli.command,
+            Commands::Notify {
+                title,
+                body
+            } if title == "test title" && body == "test body"
+        ));
     }
 }
