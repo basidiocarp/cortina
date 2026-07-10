@@ -1050,7 +1050,10 @@ fn inject_recall_for_tool(envelope: &ClaudeCodeHookEnvelope) {
 // so this change stays within the mycelium-hook-consent-and-timeout handoff's
 // allowed-file scope.
 // ─────────────────────────────────────────────────────────────────────────
-#[cfg(test)]
+// Gated on `unix` at the module level: the only test uses a `#!/bin/sh` PATH
+// stub and unix permission bits, so on the Windows cross-check target the module
+// (and its `use super::handle;`) would otherwise be dead code (`-D unused-imports`).
+#[cfg(all(test, unix))]
 mod mycelium_rewrite_timeout_tests {
     use super::handle;
 
@@ -1060,7 +1063,6 @@ mod mycelium_rewrite_timeout_tests {
     /// rather than merely asserting on the fail-open contract already covered
     /// by the subprocess-error tests in `pre_tool_use/tests.rs`.
     #[test]
-    #[cfg(unix)]
     #[allow(
         unsafe_code,
         reason = "PATH manipulation in single-threaded test (RUST_TEST_THREADS=1); restored before return"
