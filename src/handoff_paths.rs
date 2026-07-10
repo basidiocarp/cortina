@@ -125,10 +125,9 @@ fn parse_checklist_item(line: &str, line_number: usize) -> Option<ChecklistItem>
         (false, text)
     } else if let Some(text) = trimmed.strip_prefix("* [x]") {
         (true, text)
-    } else if let Some(text) = trimmed.strip_prefix("* [X]") {
-        (true, text)
     } else {
-        return None;
+        let text = trimmed.strip_prefix("* [X]")?;
+        (true, text)
     };
 
     Some(ChecklistItem {
