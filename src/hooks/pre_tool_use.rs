@@ -49,6 +49,12 @@ Use instead:\n\
   mcp__rhizome__find_references   cross-file references\n\
   mcp__rhizome__get_call_sites    callers of a function";
 
+/// Deadline for the `mycelium rewrite` subprocess before it is treated as failed.
+/// A wedged or slow rewrite must fall open (leave the original command unchanged)
+/// rather than block the hook — same fail-open contract as the other `output`
+/// match arms below.
+const MYCELIUM_REWRITE_TIMEOUT: Duration = Duration::from_secs(1);
+
 // GATE_MAP is reset on every cortina process invocation (process-per-call architecture).
 // Cross-call investigation state is NOT kept here — it comes from detect_investigation_content,
 // which reads persisted tool-call records from disk. The in-process map only matters for
@@ -193,9 +199,22 @@ pub fn handle(input: &str) -> Result<()> {
         }
 
         // ─────────────────────────────────────────────────────────────────────────
-        // Delegate to mycelium rewrite
+        // Delegate to mycelium rewrite, bounded by MYCELIUM_REWRITE_TIMEOUT so a
+        // wedged subprocess cannot block the hook indefinitely. Spawn the child on
+        // the main thread (under the entered subprocess span, so the trace stays
+        // attached to the parent), wait for it on a helper thread, and race that
+        // against a receive timeout. On timeout we fail open; we attempt a
+        // best-effort kill, but because the worker consumes the child to wait on
+        // it, the kill usually no-ops and the subprocess is left for the OS to
+        // reap on our exit (same behavior as inject_recall_for_tool). A guaranteed
+        // kill needs a pid-based approach — tracked as a follow-up. A timeout or
+        // wait failure is treated identically to a subprocess error (fail open,
+        // leave the original command unchanged).
+        // Mirror the channel + Arc<Mutex<Child>> pattern from inject_recall_for_tool.
         // ─────────────────────────────────────────────────────────────────────────
-        let output = resolved_command("mycelium").map_or_else(
+        let _subprocess_span = subprocess_span("mycelium rewrite", &context).entered();
+
+        let child = resolved_command("mycelium").map_or_else(
             || {
                 Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
@@ -203,10 +222,53 @@ pub fn handle(input: &str) -> Result<()> {
                 ))
             },
             |mut command| {
-                let _subprocess_span = subprocess_span("mycelium rewrite", &context).entered();
-                command.args(["rewrite", &event.command]).output()
+                command
+                    .args(["rewrite", &event.command])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
             },
         );
+
+        let output = match child {
+            Ok(child) => {
+                let child_handle: Arc<Mutex<Option<std::process::Child>>> =
+                    Arc::new(Mutex::new(Some(child)));
+                let child_handle_clone = Arc::clone(&child_handle);
+                let (tx, rx) = mpsc::channel();
+                std::thread::spawn(move || {
+                    let out = child_handle_clone
+                        .lock()
+                        .ok()
+                        .and_then(|mut guard| guard.take())
+                        .and_then(|c| c.wait_with_output().ok());
+                    let _ = tx.send(out);
+                });
+
+                match rx.recv_timeout(MYCELIUM_REWRITE_TIMEOUT) {
+                    Ok(Some(out)) => Ok(out),
+                    // wait failed → fail open, leave the command unchanged.
+                    Ok(None) => return Ok(()),
+                    Err(mpsc::RecvTimeoutError::Timeout | mpsc::RecvTimeoutError::Disconnected) => {
+                        // Best-effort kill: usually no-ops because the worker has
+                        // already taken the child to wait on it (guard is None); it
+                        // only fires in the rare race where the worker hasn't taken
+                        // the child yet.
+                        if let Ok(mut guard) = child_handle.lock() {
+                            if let Some(mut c) = guard.take() {
+                                let _ = c.kill();
+                            }
+                        }
+                        warn!(
+                            "mycelium rewrite timed out or worker exited after {MYCELIUM_REWRITE_TIMEOUT:?} — leaving command unchanged"
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+            // spawn/discovery failure flows into the existing Err arm (fail open).
+            Err(error) => Err(error),
+        };
 
         let rewritten = match output {
             Ok(out) if out.status.success() => {
@@ -979,4 +1041,84 @@ fn inject_recall_for_tool(envelope: &ClaudeCodeHookEnvelope) {
     let joined = recall_lines.join("\n");
     let _ = std::io::stderr().write_all(joined.as_bytes());
     let _ = std::io::stderr().write_all(b"\n");
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// mycelium-rewrite timeout tests
+//
+// Kept as a separate inline module (rather than in `pre_tool_use/tests.rs`)
+// so this change stays within the mycelium-hook-consent-and-timeout handoff's
+// allowed-file scope.
+// ─────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod mycelium_rewrite_timeout_tests {
+    use super::handle;
+
+    /// A slow `mycelium` stub (sleeps well past `MYCELIUM_REWRITE_TIMEOUT`) must
+    /// not block `handle()` for the full sleep duration. This proves the
+    /// timeout path actually races and wins against a wedged subprocess,
+    /// rather than merely asserting on the fail-open contract already covered
+    /// by the subprocess-error tests in `pre_tool_use/tests.rs`.
+    #[test]
+    #[cfg(unix)]
+    #[allow(
+        unsafe_code,
+        reason = "PATH manipulation in single-threaded test (RUST_TEST_THREADS=1); restored before return"
+    )]
+    fn handle_times_out_on_slow_mycelium_rewrite_and_leaves_command_unchanged() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        // Stub `mycelium` that sleeps for 3s — well past the 1s
+        // MYCELIUM_REWRITE_TIMEOUT — before ever producing output.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stub_path = tmp.path().join("mycelium");
+        fs::write(&stub_path, "#!/bin/sh\nsleep 3\necho rewritten-command\n")
+            .expect("write mycelium stub");
+        fs::set_permissions(&stub_path, fs::Permissions::from_mode(0o755))
+            .expect("chmod mycelium stub");
+
+        let original_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{original_path}", tmp.path().display());
+        // SAFETY: test runs single-threaded (RUST_TEST_THREADS=1 in
+        // .cargo/config.toml); PATH is restored before the function returns.
+        unsafe { std::env::set_var("PATH", &new_path) };
+
+        let unique_cwd = format!(
+            "/tmp/cortina-mycelium-timeout-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.subsec_nanos())
+        );
+        let input = serde_json::json!({
+            "tool_name": "Bash",
+            "tool_input": {"command": "echo original-unrewritten-command"},
+            "cwd": unique_cwd
+        })
+        .to_string();
+
+        let started = std::time::Instant::now();
+        let result = handle(&input);
+        let elapsed = started.elapsed();
+
+        // Restore PATH regardless of outcome.
+        unsafe { std::env::set_var("PATH", &original_path) };
+
+        assert!(
+            result.is_ok(),
+            "handle must fail open (Ok) when mycelium rewrite times out"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_millis(2500),
+            "handle took {elapsed:?}, expected it to return near the 1s timeout \
+             rather than waiting for the stub's 3s sleep to finish"
+        );
+        assert!(
+            elapsed >= std::time::Duration::from_millis(900),
+            "handle returned in {elapsed:?}, too fast to have hit the 1s timeout — \
+             the mycelium stub was likely not invoked (regression in PATH/spawn), \
+             so this test would be passing for the wrong reason"
+        );
+    }
 }

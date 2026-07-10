@@ -242,9 +242,10 @@ pub fn rewrite_response(updated_input: &Value) -> Value {
     json!({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "permissionDecisionReason": "Mycelium auto-rewrite",
             "updatedInput": updated_input
+            // permissionDecision intentionally omitted: let Claude Code
+            // re-evaluate the rewritten command through the normal permission
+            // flow rather than auto-allowing it.
         }
     })
 }
@@ -380,6 +381,35 @@ mod tests {
                 .and_then(|value| value.get("command"))
                 .and_then(serde_json::Value::as_str),
             Some("cargo check")
+        );
+    }
+
+    #[test]
+    fn rewrite_response_omits_permission_decision() {
+        let response = rewrite_response(&json!({
+            "command": "cargo check",
+            "cwd": "/tmp/demo"
+        }));
+
+        let hook_output = response
+            .get("hookSpecificOutput")
+            .expect("expected hookSpecificOutput");
+
+        assert!(
+            hook_output.get("permissionDecision").is_none(),
+            "rewrite_response must not auto-allow — permissionDecision should be absent"
+        );
+        assert!(
+            hook_output.get("permissionDecisionReason").is_none(),
+            "rewrite_response must not auto-allow — permissionDecisionReason should be absent"
+        );
+        assert_eq!(
+            hook_output
+                .get("updatedInput")
+                .and_then(|value| value.get("command"))
+                .and_then(serde_json::Value::as_str),
+            Some("cargo check"),
+            "updatedInput.command must still carry the rewritten command"
         );
     }
 
